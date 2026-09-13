@@ -135,6 +135,61 @@ def facts_device(req: DeviceFactsRequest) -> DeviceFactsResponse:
     return DeviceFactsResponse(written=written, skipped_duplicate=skipped)
 
 
+class InterventionSyncRequest(BaseModel):
+    name: str
+    source_ref: str  # стабильный внешний id (напр. recurringEventId календаря) — дедуп-ключ
+    kind: Literal["drug", "supplement", "protocol", "behavior"] = "supplement"
+    dose: Optional[str] = None
+    regimen: Optional[str] = None
+    started_ts: Optional[datetime] = None
+    origin: str = "calendar"
+
+
+class InterventionSyncResponse(BaseModel):
+    id: str
+    created: bool
+
+
+@app.post("/interventions/sync", response_model=InterventionSyncResponse)
+def interventions_sync(req: InterventionSyncRequest) -> InterventionSyncResponse:
+    """Идемпотентная синхронизация intervention по внешнему source_ref (calendar
+    recurringEventId и т.п.) — источник сказал о себе сам (user_direct-эквивалент:
+    Влад сам завёл событие в своём календаре), поэтому verification='confirmed' сразу,
+    без переспроса (W3-логика П2 §3.4, применённая к структурному источнику, не к тексту).
+    Повторный вызов с тем же source_ref не создаёт вторую запись — только начальный
+    синк создаёт объект; ведение статуса/дозы после создания — отдельная забота
+    (ручная правка или будущий Phase-3-стиль пересмотр), не эта ручка."""
+    table = sql.Identifier(schema(), "intervention")
+    provenance = json.dumps({
+        "origin": req.origin, "source_id": None, "extraction": None,
+        "model": None, "prompt_version": None, "source_ref": req.source_ref,
+    })
+    new_id = f"iv_{ULID()}"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql.SQL(
+                    "INSERT INTO {table} (id, ts_event, provenance, verification, kind, name, dose, regimen, started_ts, status, prescriber) "
+                    "VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s, %s, 'active', 'self') "
+                    "ON CONFLICT ((provenance->>'source_ref')) DO NOTHING RETURNING id"
+                ).format(table=table),
+                (new_id, req.started_ts or datetime.now(timezone.utc), provenance,
+                 req.kind, req.name, req.dose, req.regimen, req.started_ts),
+            )
+            row = cur.fetchone()
+            if row is not None:
+                conn.commit()
+                return InterventionSyncResponse(id=row[0], created=True)
+
+            cur.execute(
+                sql.SQL("SELECT id FROM {table} WHERE provenance->>'source_ref' = %s").format(table=table),
+                (req.source_ref,),
+            )
+            existing = cur.fetchone()
+            conn.commit()
+            return InterventionSyncResponse(id=existing[0], created=False)
+
+
 class ProcessResponse(BaseModel):
     written: list[dict]
     questions: list[str]
