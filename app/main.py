@@ -88,37 +88,36 @@ def ingest(req: IngestRequest) -> IngestResponse:
             return IngestResponse(id=existing[0], status=existing[1], duplicate=True)
 
 
-class DeviceFact(BaseModel):
+class StructuredFact(BaseModel):
     metric_key: str
     value_num: float
     ts_event: datetime
 
 
-class DeviceFactsRequest(BaseModel):
-    facts: list[DeviceFact]
+class StructuredFactsRequest(BaseModel):
+    facts: list[StructuredFact]
     person_id: str = "self"
 
 
-class DeviceFactsResponse(BaseModel):
+class StructuredFactsResponse(BaseModel):
     written: int
     skipped_duplicate: int
 
 
-@app.post("/facts/device", response_model=DeviceFactsResponse)
-def facts_device(req: DeviceFactsRequest) -> DeviceFactsResponse:
-    """Прямой путь без LLM (П2 §3.8): 'Устройства: fact с origin=device, confirmed
-    сразу — структурная ошибка невозможна'. Дедуп по (metric_key, ts_event, origin=device)
-    — частичный уникальный индекс fact_device_dedup, повторная отправка того же дня
-    идемпотентна (ON CONFLICT DO NOTHING), не плодит дублей при повторных прогонах
-    воркфлоу-источника."""
+def _write_structured_facts(facts: list[StructuredFact], origin: str) -> StructuredFactsResponse:
+    """Прямой путь без LLM (П2 §3.8): числа из структурного источника -> fact,
+    confirmed сразу — структурная ошибка невозможна, в отличие от текста. Дедуп по
+    (metric_key, ts_event) в пределах origin — частичный уникальный индекс
+    fact_<origin>_dedup, повторная отправка того же дня идемпотентна (ON CONFLICT
+    DO NOTHING), не плодит дублей при повторных прогонах воркфлоу-источника."""
     table = sql.Identifier(schema(), "fact")
     written = 0
     skipped = 0
     with get_conn() as conn:
         with conn.cursor() as cur:
-            for f in req.facts:
+            for f in facts:
                 fact_id = f"f_{ULID()}"
-                provenance = json.dumps({"origin": "device", "source_id": None, "extraction": None, "model": None, "prompt_version": None})
+                provenance = json.dumps({"origin": origin, "source_id": None, "extraction": None, "model": None, "prompt_version": None})
                 cur.execute(
                     sql.SQL(
                         "INSERT INTO {table} (id, ts_event, provenance, verification, metric_key, value_num) "
@@ -132,7 +131,22 @@ def facts_device(req: DeviceFactsRequest) -> DeviceFactsResponse:
                 else:
                     skipped += 1
         conn.commit()
-    return DeviceFactsResponse(written=written, skipped_duplicate=skipped)
+    return StructuredFactsResponse(written=written, skipped_duplicate=skipped)
+
+
+@app.post("/facts/device", response_model=StructuredFactsResponse)
+def facts_device(req: StructuredFactsRequest) -> StructuredFactsResponse:
+    """Устройства (Garmin и т.п.) — см. _write_structured_facts. Дедуп-индекс:
+    fact_device_dedup."""
+    return _write_structured_facts(req.facts, origin="device")
+
+
+@app.post("/facts/nutrition", response_model=StructuredFactsResponse)
+def facts_nutrition(req: StructuredFactsRequest) -> StructuredFactsResponse:
+    """Питание (day_sum — уже структурировано отдельным LLM-тегированием раньше в
+    конвейере, здесь просто числа) — см. _write_structured_facts. Дедуп-индекс:
+    fact_nutrition_dedup."""
+    return _write_structured_facts(req.facts, origin="nutrition")
 
 
 class InterventionSyncRequest(BaseModel):
