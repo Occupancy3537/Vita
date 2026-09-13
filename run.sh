@@ -18,6 +18,7 @@ sudo docker run -d \
   -e CARD_PG_USER=card_service \
   -e CARD_PG_PASSWORD="$CARD_PG_PASSWORD" \
   -e CARD_PG_DATABASE=health \
+  -e OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
   card-service:latest
 
 echo "card-service started. Проверка: curl http://127.0.0.1:8080/health"

@@ -12,11 +12,18 @@ import pytest  # noqa: E402
 from app.db import get_conn, schema  # noqa: E402
 
 
+TABLES_TO_CLEAN = [
+    "source_message", "extraction", "fact", "episode", "problem", "intervention",
+    "opinion", "disagreement", "recommendation", "expectation", "recommendation_verdict",
+    "visit", "lab_result", "memory_note", "journal", "entity_index", "metric_coverage",
+]
+
+
 @pytest.fixture(autouse=True)
-def clean_source_message():
-    """Пустая таблица перед каждым тестом — тесты не должны зависеть друг от друга."""
+def clean_all_tables():
+    """Пустые таблицы перед каждым тестом — тесты не должны зависеть друг от друга."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"TRUNCATE TABLE {schema()}.source_message")
+            cur.execute(f"TRUNCATE TABLE {', '.join(schema() + '.' + t for t in TABLES_TO_CLEAN)}")
         conn.commit()
     yield

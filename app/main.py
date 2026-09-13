@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from ulid import ULID
 
 from app.db import get_conn, schema
+from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
 
@@ -84,3 +85,21 @@ def ingest(req: IngestRequest) -> IngestResponse:
                 # а не тихо теряем сырьё.
                 raise HTTPException(status_code=500, detail="конфликт hash без найденной строки")
             return IngestResponse(id=existing[0], status=existing[1], duplicate=True)
+
+
+class ProcessResponse(BaseModel):
+    written: list[dict]
+    questions: list[str]
+    flags: dict
+
+
+@app.post("/process/{source_id}", response_model=ProcessResponse)
+def process_endpoint(source_id: str) -> ProcessResponse:
+    """process(src_id) -> {written, questions, flags} — контракт П1 §5. Отдельно
+    от /ingest: сырьё уже сохранено раньше и переживёт сбой на этом шаге (extraction
+    упал дважды -> ручная очередь, П2 §6, не теряем данные)."""
+    try:
+        result = process_source(source_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return ProcessResponse(**result)
