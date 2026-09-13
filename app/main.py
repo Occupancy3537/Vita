@@ -204,6 +204,139 @@ def interventions_sync(req: InterventionSyncRequest) -> InterventionSyncResponse
             return InterventionSyncResponse(id=existing[0], created=False)
 
 
+def _ensure_visit(cur, source_ref: str, title: Optional[str], raw_text: Optional[str], ts_event: datetime) -> str:
+    """Идемпотентно по source_ref (внешний Visit_ID) — возвращает internal card.visit.id,
+    создавая строку при первом обращении. Используется и напрямую (/visits/sync) и как
+    побочный эффект /labs/result — документ с результатами может прийти раньше отдельного
+    визит-синка, лаборатория не должна ждать порядка вызовов."""
+    table = sql.Identifier(schema(), "visit")
+    new_id = f"vs_{ULID()}"
+    provenance = json.dumps({
+        "origin": "lab_upload", "source_id": None, "extraction": None,
+        "model": None, "prompt_version": None, "source_ref": source_ref,
+    })
+    cur.execute(
+        sql.SQL(
+            "INSERT INTO {table} (id, ts_event, provenance, verification, title, raw_text, extraction_status) "
+            "VALUES (%s, %s, %s, 'confirmed', %s, %s, 'not_started') "
+            "ON CONFLICT ((provenance->>'source_ref')) DO NOTHING RETURNING id"
+        ).format(table=table),
+        (new_id, ts_event, provenance, title, raw_text),
+    )
+    row = cur.fetchone()
+    if row is not None:
+        return row[0]
+    cur.execute(
+        sql.SQL("SELECT id FROM {table} WHERE provenance->>'source_ref' = %s").format(table=table),
+        (source_ref,),
+    )
+    return cur.fetchone()[0]
+
+
+class VisitSyncRequest(BaseModel):
+    source_ref: str  # внешний Visit_ID
+    title: Optional[str] = None
+    raw_text: Optional[str] = None
+    ts_event: datetime
+
+
+class VisitSyncResponse(BaseModel):
+    id: str
+    created: bool
+
+
+@app.post("/visits/sync", response_model=VisitSyncResponse)
+def visits_sync(req: VisitSyncRequest) -> VisitSyncResponse:
+    """Гарантирует существование card.visit — вызывается даже когда в документе не
+    нашлось ни одного распознанного показателя (Marker_ID='_none' в источнике), иначе
+    сам факт визита теряется молча."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("SELECT id FROM {table} WHERE provenance->>'source_ref' = %s")
+                .format(table=sql.Identifier(schema(), "visit")),
+                (req.source_ref,),
+            )
+            existed = cur.fetchone() is not None
+            visit_id = _ensure_visit(cur, req.source_ref, req.title, req.raw_text, req.ts_event)
+        conn.commit()
+    return VisitSyncResponse(id=visit_id, created=not existed)
+
+
+class LabResultSyncRequest(BaseModel):
+    visit_source_ref: str
+    visit_ts_event: datetime
+    marker_key: str
+    marker_label: Optional[str] = None
+    value_num: Optional[float] = None
+    value_text: Optional[str] = None
+    unit: Optional[str] = None
+    ref_min: Optional[float] = None
+    ref_max: Optional[float] = None
+
+
+class LabResultSyncResponse(BaseModel):
+    id: str
+    created: bool
+    visit_id: str
+
+
+@app.post("/labs/result", response_model=LabResultSyncResponse)
+def labs_result_sync(req: LabResultSyncRequest) -> LabResultSyncResponse:
+    """Один показатель одного визита -> lab_result + fact. Идемпотентно по
+    (visit_source_ref, marker_key) — повторная загрузка того же документа не плодит
+    дубли (совпадает с ON CONFLICT (Visit_ID, Marker_ID) у health.results). Гарантирует
+    визит попутно (_ensure_visit) — лаборатория не ждёт отдельного вызова /visits/sync."""
+    source_ref = f"{req.visit_source_ref}:{req.marker_key}"
+    lab_table = sql.Identifier(schema(), "lab_result")
+    fact_table = sql.Identifier(schema(), "fact")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            visit_id = _ensure_visit(cur, req.visit_source_ref, None, None, req.visit_ts_event)
+
+            new_id = f"lb_{ULID()}"
+            provenance = json.dumps({
+                "origin": "lab_upload", "source_id": None, "extraction": None,
+                "model": None, "prompt_version": None, "source_ref": source_ref,
+            })
+            cur.execute(
+                sql.SQL(
+                    "INSERT INTO {table} (id, ts_event, provenance, verification, visit_id, marker_key, marker_label, value_num, value_text, unit, ref_min, ref_max) "
+                    "VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT ((provenance->>'source_ref')) DO NOTHING RETURNING id"
+                ).format(table=lab_table),
+                (new_id, req.visit_ts_event, provenance, visit_id, req.marker_key, req.marker_label,
+                 req.value_num, req.value_text, req.unit, req.ref_min, req.ref_max),
+            )
+            row = cur.fetchone()
+            created = row is not None
+
+            if created:
+                fact_provenance = json.dumps({
+                    "origin": "lab", "source_id": None, "extraction": None,
+                    "model": None, "prompt_version": None, "source_ref": source_ref,
+                })
+                cur.execute(
+                    sql.SQL(
+                        "INSERT INTO {table} (id, ts_event, provenance, verification, metric_key, value_num, value_text, unit) "
+                        "VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s) "
+                        "ON CONFLICT DO NOTHING"
+                    ).format(table=fact_table),
+                    (f"f_{ULID()}", req.visit_ts_event, fact_provenance, "lab:" + req.marker_key,
+                     req.value_num, req.value_text, req.unit),
+                )
+                result_id = row[0]
+            else:
+                cur.execute(
+                    sql.SQL("SELECT id FROM {table} WHERE provenance->>'source_ref' = %s").format(table=lab_table),
+                    (source_ref,),
+                )
+                result_id = cur.fetchone()[0]
+        conn.commit()
+    return LabResultSyncResponse(id=result_id, created=created, visit_id=visit_id)
+
+
 class ProcessResponse(BaseModel):
     written: list[dict]
     questions: list[str]
