@@ -20,6 +20,15 @@ from pydantic import BaseModel
 from ulid import ULID
 
 from app.db import get_conn, schema
+from app.recommendations import (
+    ActionLoop,
+    EvaluateResponse,
+    RecommendationSyncRequest,
+    RecommendationSyncResponse,
+    evaluate_recommendation,
+    get_loops,
+    sync_recommendation,
+)
 from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
@@ -335,6 +344,30 @@ def labs_result_sync(req: LabResultSyncRequest) -> LabResultSyncResponse:
                 result_id = cur.fetchone()[0]
         conn.commit()
     return LabResultSyncResponse(id=result_id, created=created, visit_id=visit_id)
+
+
+@app.post("/recommendations/sync", response_model=RecommendationSyncResponse)
+def recommendations_sync(req: RecommendationSyncRequest) -> RecommendationSyncResponse:
+    """Rec1 (закрытие находки №1): рекомендация — строка с id с момента создания, не
+    JSON-блок в прозе. Идемпотентно по source_ref. Используется и Advisor'ом (новые
+    рекомендации, дуальная запись рядом с Recommendations_Log) и миграцией
+    (action_loops legacy_import)."""
+    return sync_recommendation(req)
+
+
+@app.post("/recommendations/{rec_id}/evaluate", response_model=EvaluateResponse)
+def recommendations_evaluate(rec_id: str) -> EvaluateResponse:
+    """Запускает движок вердиктов (П3 §4) для одной рекомендации, пишет rv_.
+    Предыдущий current-вердикт того же цикла помечается superseded, не удаляется —
+    append-only история вердиктов."""
+    return evaluate_recommendation(rec_id)
+
+
+@app.get("/recommendations/loops", response_model=list[ActionLoop])
+def recommendations_loops(limit: int = 3) -> list[ActionLoop]:
+    """Замена прозе-парсеру в Build Health JSON — тот же shape, что дашборд ждал
+    раньше, посчитан один раз при evaluate(), не при каждом открытии дашборда."""
+    return get_loops(limit=limit)
 
 
 class ProcessResponse(BaseModel):
