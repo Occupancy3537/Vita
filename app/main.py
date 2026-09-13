@@ -9,6 +9,7 @@ source_message, до всякой обработки (П1 §1.1 "Сначала 
 за TLS, card-service публично не виден никогда.
 """
 import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
@@ -85,6 +86,53 @@ def ingest(req: IngestRequest) -> IngestResponse:
                 # а не тихо теряем сырьё.
                 raise HTTPException(status_code=500, detail="конфликт hash без найденной строки")
             return IngestResponse(id=existing[0], status=existing[1], duplicate=True)
+
+
+class DeviceFact(BaseModel):
+    metric_key: str
+    value_num: float
+    ts_event: datetime
+
+
+class DeviceFactsRequest(BaseModel):
+    facts: list[DeviceFact]
+    person_id: str = "self"
+
+
+class DeviceFactsResponse(BaseModel):
+    written: int
+    skipped_duplicate: int
+
+
+@app.post("/facts/device", response_model=DeviceFactsResponse)
+def facts_device(req: DeviceFactsRequest) -> DeviceFactsResponse:
+    """Прямой путь без LLM (П2 §3.8): 'Устройства: fact с origin=device, confirmed
+    сразу — структурная ошибка невозможна'. Дедуп по (metric_key, ts_event, origin=device)
+    — частичный уникальный индекс fact_device_dedup, повторная отправка того же дня
+    идемпотентна (ON CONFLICT DO NOTHING), не плодит дублей при повторных прогонах
+    воркфлоу-источника."""
+    table = sql.Identifier(schema(), "fact")
+    written = 0
+    skipped = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for f in req.facts:
+                fact_id = f"f_{ULID()}"
+                provenance = json.dumps({"origin": "device", "source_id": None, "extraction": None, "model": None, "prompt_version": None})
+                cur.execute(
+                    sql.SQL(
+                        "INSERT INTO {table} (id, ts_event, provenance, verification, metric_key, value_num) "
+                        "VALUES (%s, %s, %s, 'confirmed', %s, %s) "
+                        "ON CONFLICT DO NOTHING RETURNING id"
+                    ).format(table=table),
+                    (fact_id, f.ts_event, provenance, f.metric_key, f.value_num),
+                )
+                if cur.fetchone() is not None:
+                    written += 1
+                else:
+                    skipped += 1
+        conn.commit()
+    return DeviceFactsResponse(written=written, skipped_duplicate=skipped)
 
 
 class ProcessResponse(BaseModel):
