@@ -16,6 +16,15 @@ from pydantic import BaseModel
 from ulid import ULID
 
 from app.db import get_conn, schema
+from app.gates import (
+    GateFailure,
+    gate1_sanity,
+    gate2_measurability,
+    gate3_interaction,
+    gate4_gate_compat,
+    gate5_dedup,
+    gate6_priority,
+)
 from app.journal import write_journal
 from app.verdict_engine import Expectation, Fact, evaluate as run_verdict_engine
 
@@ -44,7 +53,7 @@ class RecommendationSyncResponse(BaseModel):
     measurable: bool
 
 
-def sync_recommendation(req: RecommendationSyncRequest) -> RecommendationSyncResponse:
+def sync_recommendation(req: RecommendationSyncRequest, priority: Optional[str] = None) -> RecommendationSyncResponse:
     table = sql.Identifier(schema(), "recommendation")
     ex_table = sql.Identifier(schema(), "expectation")
     new_id = f"rc_{ULID()}"
@@ -57,11 +66,11 @@ def sync_recommendation(req: RecommendationSyncRequest) -> RecommendationSyncRes
         with conn.cursor() as cur:
             cur.execute(
                 sql.SQL(
-                    "INSERT INTO {table} (id, ts_event, provenance, verification, title, action, rationale, kind, status, started_ts, cycle) "
-                    "VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s, 'active', %s, 1) "
+                    "INSERT INTO {table} (id, ts_event, provenance, verification, title, action, rationale, kind, status, started_ts, cycle, priority) "
+                    "VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s, 'active', %s, 1, %s) "
                     "ON CONFLICT ((provenance->>'source_ref')) DO NOTHING RETURNING id"
                 ).format(table=table),
-                (new_id, req.started_ts, provenance, req.title, req.action, req.rationale, req.kind, req.started_ts),
+                (new_id, req.started_ts, provenance, req.title, req.action, req.rationale, req.kind, req.started_ts, priority),
             )
             row = cur.fetchone()
             created = row is not None
@@ -99,6 +108,64 @@ def sync_recommendation(req: RecommendationSyncRequest) -> RecommendationSyncRes
                                     "lag_days": req.lag_days, "baseline_days": req.baseline_days})
         conn.commit()
     return RecommendationSyncResponse(id=rc_id, created=created, measurable=measurable)
+
+
+class ProposeRequest(RecommendationSyncRequest):
+    """У советника нет привилегированного пути записи (П3 §2.1) — этот же черновик,
+    только теперь проходит G1-G6 ДО того как стать rc_. is_bioage_driver/metric_overdue
+    считает вызывающий (Weekly Advisor) — card-service физически не имеет доступа к
+    схеме health, где живут PhenoAge-драйверы и график лабораторных пересдач."""
+    is_bioage_driver: bool = False
+    metric_overdue: bool = False
+
+
+class ProposeResponse(BaseModel):
+    accepted: bool
+    id: Optional[str] = None
+    measurable: Optional[bool] = None
+    priority: Optional[str] = None
+    duplicate_of: Optional[str] = None
+    rejected_gate: Optional[str] = None
+    rejected_reason: Optional[str] = None
+
+
+def propose_recommendation(req: ProposeRequest) -> ProposeResponse:
+    """Ворота G1-G6, ДЕТЕРМИНИРОВАННО, ДО записи rc_ (П3 §2.1-2.2). Ни один провал
+    G1/G3/G4 не создаёт объект — советник получает структурированный отказ, не пишет
+    прозу напрямую в чат в обход этого пути (Gap 2, CARD_ARCHITECTURE_PLAN §5)."""
+    text = " ".join(filter(None, [req.title, req.action, req.rationale]))
+
+    g1 = gate1_sanity(req.metric_key, req.direction, req.magnitude, req.window_days, req.lag_days)
+    if g1:
+        return ProposeResponse(accepted=False, rejected_gate=g1.gate, rejected_reason=g1.reason)
+
+    g3 = gate3_interaction(text)
+    if g3:
+        return ProposeResponse(accepted=False, rejected_gate=g3.gate, rejected_reason=g3.reason)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            g4 = gate4_gate_compat(cur, text)
+            if g4:
+                return ProposeResponse(accepted=False, rejected_gate=g4.gate, rejected_reason=g4.reason)
+
+            g5 = gate5_dedup(cur, req.kind, req.action, req.metric_key, req.direction)
+            if g5:
+                return ProposeResponse(accepted=False, rejected_gate=g5.gate, rejected_reason=g5.reason,
+                                        duplicate_of=g5.ref_id)
+
+            measure_mode = gate2_measurability(cur, req.metric_key)  # никогда не блокирует
+
+    priority = gate6_priority(req.is_bioage_driver, req.metric_overdue)
+
+    sync_req = RecommendationSyncRequest(**req.model_dump(exclude={"is_bioage_driver", "metric_overdue"}))
+    if measure_mode == "unmeasurable":
+        # G2 деградация (б): пишем без ex_, даже если направление/величина были даны —
+        # витрина честно покажет "не измеримо", а не притворится измеренной.
+        sync_req = sync_req.model_copy(update={"metric_key": None, "direction": None, "magnitude": None})
+    result = sync_recommendation(sync_req, priority=priority)
+
+    return ProposeResponse(accepted=True, id=result.id, measurable=result.measurable, priority=priority)
 
 
 class EvaluateResponse(BaseModel):

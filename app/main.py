@@ -24,10 +24,13 @@ from app.journal import write_journal
 from app.recommendations import (
     ActionLoop,
     EvaluateResponse,
+    ProposeRequest,
+    ProposeResponse,
     RecommendationSyncRequest,
     RecommendationSyncResponse,
     evaluate_recommendation,
     get_loops,
+    propose_recommendation,
     sync_recommendation,
 )
 from app.write_path import process as process_source
@@ -378,6 +381,15 @@ def recommendations_sync(req: RecommendationSyncRequest) -> RecommendationSyncRe
     рекомендации, дуальная запись рядом с Recommendations_Log) и миграцией
     (action_loops legacy_import)."""
     return sync_recommendation(req)
+
+
+@app.post("/recommendations/propose", response_model=ProposeResponse)
+def recommendations_propose(req: ProposeRequest) -> ProposeResponse:
+    """Gap 2 (CARD_ARCHITECTURE_PLAN §5, П3 §2.1): единственный путь рождения НОВОЙ
+    рекомендации советника — G1-G6 детерминированно ДО записи rc_. /recommendations/sync
+    остаётся для миграции/структурных источников, которым ворота не нужны (их данные
+    уже прошли собственную валидацию до card-service)."""
+    return propose_recommendation(req)
 
 
 @app.post("/recommendations/{rec_id}/evaluate", response_model=EvaluateResponse)
