@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from ulid import ULID
 
 from app.db import get_conn, schema
+from app.memory import create_clinical_note
 from app.gates import (
     GateFailure,
     gate1_sanity,
@@ -178,14 +179,14 @@ def evaluate_recommendation(rec_id: str) -> EvaluateResponse:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                sql.SQL("SELECT started_ts FROM {table} WHERE id = %s")
+                sql.SQL("SELECT started_ts, title FROM {table} WHERE id = %s")
                 .format(table=sql.Identifier(schema(), "recommendation")),
                 (rec_id,),
             )
             rc_row = cur.fetchone()
             if rc_row is None:
                 return EvaluateResponse(evaluated=False, reason="recommendation не найдена")
-            started_ts = rc_row[0]
+            started_ts, rec_title = rc_row
 
             cur.execute(
                 sql.SQL(
@@ -239,6 +240,10 @@ def evaluate_recommendation(rec_id: str) -> EvaluateResponse:
                           diff={"rec_id": rec_id, "cycle": cycle, "verdict": result.verdict,
                                 "engine_version": result.engine_version, "baseline_value": result.baseline_value,
                                 "eval_value": result.eval_value})
+
+            # П4 §2.1: clinical mn_ создаётся автоматически при no_effect/adverse —
+            # "то, что живой врач помнит о пациенте, не перечитывая карту".
+            create_clinical_note(cur, rec_id, rec_title, result.verdict, metric_key)
         conn.commit()
     return EvaluateResponse(evaluated=True, verdict=result.verdict)
 

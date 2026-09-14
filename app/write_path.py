@@ -16,6 +16,7 @@ from app import redflag
 from app.db import get_conn, schema
 from app.extraction import Draft, extract, PROMPT_VERSION
 from app.journal import write_journal
+from app.memory import index_entity
 
 # Простые ключевые слова для браслетного пересечения — MVP пока нет entity_index (П4).
 # Ключ metric_key браслетного факта -> русские слова, по которым его можно узнать в тексте.
@@ -105,6 +106,7 @@ def apply_draft(cur, draft: Draft, source_id: str) -> dict:
                   diff={"symptom_key": draft.symptom_key, "status": "open", "intensity": draft.intensity,
                         "triggers": draft.triggers, "context": draft.onset_expr},
                   reason=f"source={source_id}", link_back=True)
+    index_entity(cur, "symptom", draft.symptom_key, ep_id, "episode")
     fact_id = new_id("f")
     attrs = {"intensity": draft.intensity, "triggers": draft.triggers}
     cur.execute(

@@ -21,6 +21,7 @@ from ulid import ULID
 
 from app.db import get_conn, schema
 from app.journal import write_journal
+from app.memory import get_context, get_object, index_entity, run_pre_archive_check
 from app.recommendations import (
     ActionLoop,
     EvaluateResponse,
@@ -214,6 +215,7 @@ def interventions_sync(req: InterventionSyncRequest) -> InterventionSyncResponse
                                     "regimen": req.regimen, "started_ts": str(req.started_ts),
                                     "source_ref": req.source_ref, "origin": req.origin},
                               link_back=True)
+                index_entity(cur, "substance", req.name.lower(), row[0], "intervention")
                 conn.commit()
                 return InterventionSyncResponse(id=row[0], created=True)
 
@@ -344,6 +346,7 @@ def labs_result_sync(req: LabResultSyncRequest) -> LabResultSyncResponse:
                                     "value_num": req.value_num, "value_text": req.value_text,
                                     "unit": req.unit, "source_ref": source_ref},
                               link_back=True)
+                index_entity(cur, "lab_marker", req.marker_key, result_id, "lab_result")
 
                 fact_provenance = json.dumps({
                     "origin": "lab", "source_id": None, "extraction": None,
@@ -405,6 +408,53 @@ def recommendations_loops(limit: int = 3) -> list[ActionLoop]:
     """Замена прозе-парсеру в Build Health JSON — тот же shape, что дашборд ждал
     раньше, посчитан один раз при evaluate(), не при каждом открытии дашборда."""
     return get_loops(limit=limit)
+
+
+class ContextRequest(BaseModel):
+    mode: Literal["question", "watchdog", "health_check", "vitrine"] = "question"
+    text: Optional[str] = None
+    budget: int = 2000
+
+
+@app.post("/context")
+def context_endpoint(req: ContextRequest) -> dict:
+    """П4 §5: get_context(). Единственный путь сборки контекста для советника —
+    браслет + горячее ВСЕГДА (M4), холодное — только если в text нашлись сущности.
+    missing[] обязателен в ответе (C1) — вызывающий обязан его учитывать, не
+    додумывать за модель, что не искалось."""
+    with get_conn() as conn, conn.cursor() as cur:
+        result = get_context(cur, req.mode, {"text": req.text} if req.text else {}, req.budget)
+        conn.commit()  # touch_access внутри get_context пишет last_accessed/access_count
+    return result
+
+
+@app.get("/memory/summary")
+def memory_summary() -> dict:
+    """П4 §10: 'что ты помнишь' — детерминированный рендер карты, НЕ пересказ LLM.
+    Браслет + горячий дайджест, без holodного (holodное — по конкретному вопросу,
+    не для общего 'что ты обо мне помнишь')."""
+    with get_conn() as conn, conn.cursor() as cur:
+        result = get_context(cur, "vitrine", {})
+    return {"bracelet": result["bracelet"], "hot": result["hot"], "meta": result["meta"]}
+
+
+@app.get("/objects/{object_type}/{object_id}")
+def get_object_endpoint(object_type: str, object_id: str) -> dict:
+    """П4 §4.4: rehydration — полная запись по требованию, отдельным вызовом."""
+    with get_conn() as conn, conn.cursor() as cur:
+        obj = get_object(cur, object_type, object_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="объект не найден")
+    return obj
+
+
+@app.get("/health-check/pre-archive")
+def pre_archive_check() -> list[dict]:
+    """П4 §6.2: кандидаты на уход из умолчаний видимости. Пока не подключено к
+    расписанию (health-check/П8 не реализован как процесс) — вызывать вручную или
+    подключить простым n8n Schedule, когда понадобится регулярность."""
+    with get_conn() as conn, conn.cursor() as cur:
+        return run_pre_archive_check(cur)
 
 
 class ProcessResponse(BaseModel):
