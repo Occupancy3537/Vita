@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from ulid import ULID
 
 from app.db import get_conn, schema
+from app.journal import write_journal
 from app.verdict_engine import Expectation, Fact, evaluate as run_verdict_engine
 
 
@@ -72,17 +73,30 @@ def sync_recommendation(req: RecommendationSyncRequest) -> RecommendationSyncRes
                     (req.source_ref,),
                 )
                 rc_id = cur.fetchone()[0]
+            else:
+                write_journal(cur, "recommendation", rc_id, "create",
+                              diff={"title": req.title, "action": req.action, "rationale": req.rationale,
+                                    "kind": req.kind, "started_ts": str(req.started_ts), "source_ref": req.source_ref,
+                                    "origin": req.origin},
+                              link_back=True)
 
             measurable = bool(req.metric_key and req.direction and req.magnitude is not None)
             if created and measurable:
+                ex_id = f"ex_{ULID()}"
                 cur.execute(
                     sql.SQL(
                         "INSERT INTO {table} (id, rec_id, cycle, metric_key, metric_label, unit, type, direction, magnitude, window_days, lag_days, baseline_days, role) "
                         "VALUES (%s, %s, 1, %s, %s, %s, 'delta_abs', %s, %s, %s, %s, %s, 'primary')"
                     ).format(table=ex_table),
-                    (f"ex_{ULID()}", rc_id, req.metric_key, req.metric_label, req.unit,
+                    (ex_id, rc_id, req.metric_key, req.metric_label, req.unit,
                      req.direction, req.magnitude, req.window_days, req.lag_days, req.baseline_days),
                 )
+                # expectation не имеет колонки journal_ref (не входит в _HAS_JOURNAL_REF) —
+                # пишем запись журнала без обратной ссылки, сама запись всё равно находима.
+                write_journal(cur, "expectation", ex_id, "create",
+                              diff={"rec_id": rc_id, "metric_key": req.metric_key, "direction": req.direction,
+                                    "magnitude": req.magnitude, "window_days": req.window_days,
+                                    "lag_days": req.lag_days, "baseline_days": req.baseline_days})
         conn.commit()
     return RecommendationSyncResponse(id=rc_id, created=created, measurable=measurable)
 
@@ -134,19 +148,30 @@ def evaluate_recommendation(rec_id: str) -> EvaluateResponse:
 
             rv_table = sql.Identifier(schema(), "recommendation_verdict")
             cur.execute(
-                sql.SQL("UPDATE {table} SET status = 'superseded' WHERE rec_id = %s AND cycle = %s AND status = 'current'")
+                sql.SQL("UPDATE {table} SET status = 'superseded' WHERE rec_id = %s AND cycle = %s AND status = 'current' RETURNING id")
                 .format(table=rv_table),
                 (rec_id, cycle),
             )
+            # recommendation_verdict тоже без journal_ref (не в _HAS_JOURNAL_REF) —
+            # обратная ссылка не проставляется, запись в журнале всё равно есть.
+            for (superseded_id,) in cur.fetchall():
+                write_journal(cur, "recommendation_verdict", superseded_id, "update",
+                              diff={"status": "superseded"}, reason=f"cycle={cycle} recompute")
+
+            new_rv_id = f"rv_{ULID()}"
             cur.execute(
                 sql.SQL(
                     "INSERT INTO {table} (id, rec_id, cycle, engine_version, verdict, metric_key, baseline_value, eval_value, personal_sigma, coverage, rule_trace, status) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'current')"
                 ).format(table=rv_table),
-                (f"rv_{ULID()}", rec_id, cycle, result.engine_version, result.verdict, metric_key,
+                (new_rv_id, rec_id, cycle, result.engine_version, result.verdict, metric_key,
                  result.baseline_value, result.eval_value, result.personal_sigma,
                  json.dumps(result.coverage), json.dumps(result.rule_trace)),
             )
+            write_journal(cur, "recommendation_verdict", new_rv_id, "create",
+                          diff={"rec_id": rec_id, "cycle": cycle, "verdict": result.verdict,
+                                "engine_version": result.engine_version, "baseline_value": result.baseline_value,
+                                "eval_value": result.eval_value})
         conn.commit()
     return EvaluateResponse(evaluated=True, verdict=result.verdict)
 

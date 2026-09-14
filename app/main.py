@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from ulid import ULID
 
 from app.db import get_conn, schema
+from app.journal import write_journal
 from app.recommendations import (
     ActionLoop,
     EvaluateResponse,
@@ -137,6 +138,10 @@ def _write_structured_facts(facts: list[StructuredFact], origin: str) -> Structu
                 )
                 if cur.fetchone() is not None:
                     written += 1
+                    write_journal(cur, "fact", fact_id, "create",
+                                  diff={"metric_key": f.metric_key, "value_num": f.value_num,
+                                        "ts_event": f.ts_event.isoformat(), "origin": origin},
+                                  link_back=True)
                 else:
                     skipped += 1
         conn.commit()
@@ -201,6 +206,11 @@ def interventions_sync(req: InterventionSyncRequest) -> InterventionSyncResponse
             )
             row = cur.fetchone()
             if row is not None:
+                write_journal(cur, "intervention", row[0], "create",
+                              diff={"name": req.name, "kind": req.kind, "dose": req.dose,
+                                    "regimen": req.regimen, "started_ts": str(req.started_ts),
+                                    "source_ref": req.source_ref, "origin": req.origin},
+                              link_back=True)
                 conn.commit()
                 return InterventionSyncResponse(id=row[0], created=True)
 
@@ -234,6 +244,9 @@ def _ensure_visit(cur, source_ref: str, title: Optional[str], raw_text: Optional
     )
     row = cur.fetchone()
     if row is not None:
+        write_journal(cur, "visit", row[0], "create",
+                      diff={"title": title, "ts_event": str(ts_event), "source_ref": source_ref},
+                      link_back=True)
         return row[0]
     cur.execute(
         sql.SQL("SELECT id FROM {table} WHERE provenance->>'source_ref' = %s").format(table=table),
@@ -322,20 +335,32 @@ def labs_result_sync(req: LabResultSyncRequest) -> LabResultSyncResponse:
             created = row is not None
 
             if created:
+                result_id = row[0]
+                write_journal(cur, "lab_result", result_id, "create",
+                              diff={"marker_key": req.marker_key, "marker_label": req.marker_label,
+                                    "value_num": req.value_num, "value_text": req.value_text,
+                                    "unit": req.unit, "source_ref": source_ref},
+                              link_back=True)
+
                 fact_provenance = json.dumps({
                     "origin": "lab", "source_id": None, "extraction": None,
                     "model": None, "prompt_version": None, "source_ref": source_ref,
                 })
+                fact_id = f"f_{ULID()}"
                 cur.execute(
                     sql.SQL(
                         "INSERT INTO {table} (id, ts_event, provenance, verification, metric_key, value_num, value_text, unit) "
                         "VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s) "
-                        "ON CONFLICT DO NOTHING"
+                        "ON CONFLICT DO NOTHING RETURNING id"
                     ).format(table=fact_table),
-                    (f"f_{ULID()}", req.visit_ts_event, fact_provenance, "lab:" + req.marker_key,
+                    (fact_id, req.visit_ts_event, fact_provenance, "lab:" + req.marker_key,
                      req.value_num, req.value_text, req.unit),
                 )
-                result_id = row[0]
+                if cur.fetchone() is not None:
+                    write_journal(cur, "fact", fact_id, "create",
+                                  diff={"metric_key": "lab:" + req.marker_key, "value_num": req.value_num,
+                                        "value_text": req.value_text, "unit": req.unit, "source_ref": source_ref},
+                                  link_back=True)
             else:
                 cur.execute(
                     sql.SQL("SELECT id FROM {table} WHERE provenance->>'source_ref' = %s").format(table=lab_table),

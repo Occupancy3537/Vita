@@ -16,6 +16,10 @@ from pydantic import BaseModel
 
 MODEL = "google/gemini-3.8-flash"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# Версия промпта (тот же принцип версионирования, что у rv-engine/1, memory-render/1
+# из спеки) — смена SYSTEM_PROMPT ниже требует бампа, чтобы card.extraction хранило,
+# КАКИМ промптом извлечено, не только каким временем.
+PROMPT_VERSION = "symptom-extract/1"
 
 SYSTEM_PROMPT = """Ты извлекаешь структуру из жалобы пациента на здоровье, для медицинской карты.
 НЕ ставь диагнозы, НЕ давай советы — только извлеки то, что сказано.
