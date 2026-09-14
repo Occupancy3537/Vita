@@ -92,5 +92,45 @@ def detect(text: str) -> dict:
     return {"hit": hit, "matched": matched, "category": category}
 
 
+# --- П5 §2.1: категории общего enum для союза A/B/C ------------------------
+# "A получает роль ловца узких формулировок... A-паттерны категоризируются по
+# enum §2.1 (сейчас паттерны несут уровни — теперь несут категории)". Часть
+# существующих меток (ТЭЛА/ТГВ, конский хвост) не имеет точного слота в данном
+# спекой перечне из 9 категорий — размещены в ближайшей по клинической логике
+# (сосудистая катастрофа -> cardiac_acute, острая неврологическая -> neuro_acute),
+# честно, не выдумывая новый enum-член без необходимости.
+TAXONOMY_CATEGORY: dict[str, str] = {
+    "боль в груди с иррадиацией / одышка": "cardiac_acute",
+    "атипичный / немой ОКС (дискомфорт в груди или эпигастрии + вегетатика)": "cardiac_acute",
+    "признаки инсульта": "neuro_acute",
+    "конский хвост (седловидная анестезия / тазовые органы + спина-нога)": "neuro_acute",
+    "ТЭЛА / ТГВ (внезапная одышка + плевральная боль / отёк одной ноги / кровохарканье)": "cardiac_acute",
+    "суицидальные мысли": "psych_crisis",
+    "громоподобная / worst-ever головная боль": "neuro_acute",
+    "ЖКТ-кровотечение": "bleeding_gi",
+    "отёк гортани / удушье / ранняя анафилаксия": "anaphylaxis",
+    "потеря сознания / судороги": "neuro_acute",
+    "внезапная нестерпимая боль в животе/боку/спине": "severe_pain",
+    "задержка мочи": "severe_pain",
+    "острая закрытоугольная глаукома / внезапная потеря зрения на один глаз": "severe_pain",
+    "лихорадка + спутанность / ригидность шеи": "sepsis_suspect",
+}
+
+CRITICAL_CATEGORIES = {"cardiac_acute", "neuro_acute", "anaphylaxis", "psych_crisis"}
+HIGH_CATEGORIES = {"bleeding_gi", "sepsis_suspect", "severe_pain", "metabolic_acute"}
+
+
+def detect_categorized(text: str) -> list[dict]:
+    """Как detect(), но по каждому сработавшему паттерну — с категорией enum §2.1.
+    Используется союзом (app/redflag_union.py); detect() остаётся как есть — его
+    контракт {hit, matched, category:'emergency'|'crisis'} используется в других
+    местах (write_path.process), менять не стал."""
+    out = []
+    for label, pattern in RED_FLAGS:
+        if pattern.search(text):
+            out.append({"label": label, "category": TAXONOMY_CATEGORY.get(label, "systemic_warning")})
+    return out
+
+
 def soft_detect(text: str) -> list[str]:
     return [ask for pattern, ask in SOFT_FLAGS if pattern.search(text)]

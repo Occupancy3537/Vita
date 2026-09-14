@@ -22,6 +22,9 @@ from ulid import ULID
 from app.db import get_conn, schema
 from app.journal import write_journal
 from app.memory import get_context, get_object, index_entity, run_pre_archive_check
+from app.redflag_b import LayerBResult, classify as redflag_classify_b
+from app.redflag_c import run_layer_c
+from app.redflag_union import evaluate_and_record, record_rf_event
 from app.recommendations import (
     ActionLoop,
     EvaluateResponse,
@@ -455,6 +458,52 @@ def pre_archive_check() -> list[dict]:
     подключить простым n8n Schedule, когда понадобится регулярность."""
     with get_conn() as conn, conn.cursor() as cur:
         return run_pre_archive_check(cur)
+
+
+class RedFlagClassifyRequest(BaseModel):
+    text: str
+    prior_replies: list[str] = []
+
+
+@app.post("/redflag/classify")
+def redflag_classify(req: RedFlagClassifyRequest) -> dict:
+    """П5 §4 — слой B изолированно (контекстно-свободно, без карты — §1.3).
+    Только распознаёт, не пишет rf_ — это решает вызывающий через /redflag/evaluate."""
+    return redflag_classify_b(req.text, req.prior_replies).model_dump()
+
+
+class RedFlagEvaluateRequest(BaseModel):
+    text: str
+    source_id: Optional[str] = None
+    layer_b: Optional[dict] = None  # результат /redflag/classify, если уже посчитан
+
+
+@app.post("/redflag/evaluate")
+def redflag_evaluate(req: RedFlagEvaluateRequest) -> dict:
+    """П5 §1-§6 — полный союз A + bracelet-cross (детерминированно, здесь) + B
+    (если передан). Пишет rf_event/rf_session при срабатывании (F8 — сессии, не
+    дублирующиеся эскалации)."""
+    layer_b_obj = LayerBResult(**req.layer_b) if req.layer_b else None
+    with get_conn() as conn, conn.cursor() as cur:
+        out = evaluate_and_record(cur, req.text, req.source_id, layer_b_obj)
+        conn.commit()
+    return out
+
+
+@app.get("/redflag/layer-c")
+def redflag_layer_c_check() -> list[dict]:
+    """П5 §5 — слой C, фактовый (не текстовый), периодический вызов (не в
+    конвейере диалога). Пишет rf_event/session при срабатывании."""
+    with get_conn() as conn, conn.cursor() as cur:
+        hits = run_layer_c(cur)
+        recorded = []
+        for h in hits:
+            result = {"level": h["level"], "category": h["category"], "source": "C",
+                      "rule_ref": h["rule"], "confidence": None, "context_note": h["message"]}
+            rec = record_rf_event(cur, result)
+            recorded.append({**h, "recorded": rec})
+        conn.commit()
+    return recorded
 
 
 class ProcessResponse(BaseModel):
