@@ -91,8 +91,17 @@ def _call_model(messages: list[dict], model: str, timeout: float) -> dict:
             "tools": openai_tool_schemas(),
             "tool_choice": "auto",
             # план §3.8: "проверить живым вызовом, а не поверить памяти" — уже
-            # дважды ловили уход на провайдера мимо явных параметров.
-            "provider": {"require_parameters": True},
+            # дважды ловили уход на провайдера мимо явных параметров. Порядок
+            # провайдеров — тот же белый список (Crusoe/Fireworks/BaseTen), что
+            # уже используют остальные воркфлоу проекта на GLM 5.3 Flash;
+            # allow_fallbacks — если ни один недоступен, обычная маршрутизация,
+            # не отказ хода целиком.
+            "provider": {"require_parameters": True, "order": config.DOCTOR_PROVIDER_ORDER,
+                         "allow_fallbacks": True},
+            # GLM 5.3 Flash: рассуждение обязательно (нельзя отключить), но
+            # ограничение effort — иначе счёт токенов и задержка растут без
+            # выгоды для дисциплины вызовов инструментов.
+            "reasoning": {"effort": "low"},
         },
         timeout=timeout,
     )

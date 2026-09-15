@@ -9,10 +9,15 @@ import os
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
-# Модель решается замером на золотом корпусе (план §3.8, шаг 6) — дефолт временный,
-# тот же, что уже используется в этом сервисе (app/extraction.py), не новый выбор
-# без причины. Замена — через переменную окружения, без правки кода.
-DOCTOR_MODEL = os.environ.get("DOCTOR_MODEL", "google/gemini-3.8-flash")
+# Модель решается замером на золотом корпусе (план §3.8, шаг 6) — полноценный
+# замер (Phase 6) прерван инцидентом с бюджетом OpenRouter 2026-09-15 (workspace
+# daily budget), не завершён. 2026-09-16: Влад поднял бюджет до $1.5/день и
+# прямо попросил перейти на GLM 5.3 Flash — тот же провайдер-белый список
+# (Crusoe/Fireworks/BaseTen), что уже используют остальные воркфлоу n8n этого
+# проекта, самый дешёвый вариант. Замена модели — через переменную окружения,
+# без правки кода.
+DOCTOR_MODEL = os.environ.get("DOCTOR_MODEL", "z-ai/glm-5.3-flash")
+DOCTOR_PROVIDER_ORDER = os.environ.get("DOCTOR_PROVIDER_ORDER", "Crusoe,Fireworks,BaseTen").split(",")
 
 # §3.4 — бюджет агентного цикла.
 TURN_DEADLINE_SECONDS = float(os.environ.get("DOCTOR_TURN_DEADLINE_SECONDS", "60"))
