@@ -1,0 +1,186 @@
+"""
+Транзакционная запись StagedWrite (план §3.6, Phase 5): health.* + card.* в
+ОДНОЙ транзакции — либо всё, либо ничего. Заменяет 21-узловой дуальный
+write-путь старого доктора (§0: "падение на любом из 21 узла оставляет ход
+записанным наполовину") одной функцией с одним COMMIT/ROLLBACK.
+
+Инварианты, перенесённые из промпта в код:
+- одновременно только ОДНО открытое расследование (health.investigations,
+  status='open') — Open_Investigation отклоняется, если уже есть открытое,
+  а не полагается на то, догадалась ли модель вызвать Read_Investigations;
+- kind вне контракта — отказ (сюда попадают только валидные StagedWrite,
+  tools.py уже проверил форму аргументов pydantic-схемой — детерминированные
+  ворота ДО исполнения инструмента, план §3.4);
+- идемпотентность по turn_id: card.journal уже несёт "кто/когда" каждой
+  card.*-записи (reason=f"source={turn_id}") — перед записью проверяем, не
+  закоммичен ли уже этот turn_id, повтор коммита — no-op, не дубль.
+
+health.symptom_log/doctor_notes — append-only лог (как и было у старого
+доктора: каждое упоминание — новая строка с своим ts, не мутация текущего
+состояния) — Read_Symptoms/Analyze_Symptom_Food строят историю по этим
+строкам. card.episode/fact — через уже готовые write_path.apply_draft() +
+extraction.Draft, чтобы П4-память видела ту же картину, не отдельную копию.
+"""
+from typing import Optional
+
+from psycopg import sql
+from ulid import ULID
+
+from app.db import get_conn, schema
+from app.doctor.contract import (
+    CloseInvestigationArgs, OpenInvestigationArgs, PlanLabArgs,
+    RecordNoteArgs, RecordSymptomArgs, StagedWrite, UpdateInvestigationArgs,
+)
+from app.extraction import Draft
+from app.journal import write_journal
+from app.write_path import apply_draft
+
+
+class CommitError(Exception):
+    """Инвариант нарушен (второе открытое расследование, неизвестный kind) —
+    отказ, не тихая потеря (план §3.6: "не тихая потеря, а отказ")."""
+
+
+def already_committed(cur, turn_id: str) -> bool:
+    """Проверяет маркер, а не косвенные следствия (симптом мог отсутствовать
+    в батче — note/lab_plan-only коммит не создаёт journal-запись через
+    apply_draft) — маркер пишется явно и безусловно в apply_staged_writes()."""
+    cur.execute(
+        f"SELECT 1 FROM {schema()}.journal WHERE object_type = 'dialog_turn' "
+        f"AND object_id = %s AND op = 'commit' LIMIT 1",
+        (turn_id,),
+    )
+    return cur.fetchone() is not None
+
+
+def _write_symptom(cur, args: RecordSymptomArgs, turn_id: str) -> None:
+    cur.execute(
+        "INSERT INTO health.symptom_log "
+        "(symptom_id, ts, symptom, system, severity, status, change, domain, context, hypothesis, notes) "
+        "VALUES (%s, now(), %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (args.symptom_id, args.symptom, args.system, args.severity, args.status,
+         args.change, args.domain, args.context, args.hypothesis, args.notes),
+    )
+    draft = Draft(
+        symptom_key=args.symptom_id, onset_expr=args.context, intensity=args.severity,
+        triggers=[], negation=(args.status == "resolved"), closure=(args.status == "resolved"),
+        confidence=0.9,
+    )
+    apply_draft(cur, draft, turn_id)
+
+
+def _write_note(cur, args: RecordNoteArgs) -> None:
+    cur.execute(
+        "INSERT INTO health.doctor_notes (note_date, category, note, trigger, plan) "
+        "VALUES (CURRENT_DATE, %s, %s, %s, %s)",
+        (args.category, args.note, args.trigger, args.plan),
+    )
+
+
+def _has_open_investigation(cur, exclude_inv_id: Optional[str] = None) -> bool:
+    if exclude_inv_id:
+        cur.execute(
+            "SELECT 1 FROM health.investigations WHERE lower(status) = 'open' AND inv_id != %s LIMIT 1",
+            (exclude_inv_id,),
+        )
+    else:
+        cur.execute("SELECT 1 FROM health.investigations WHERE lower(status) = 'open' LIMIT 1")
+    return cur.fetchone() is not None
+
+
+def _open_investigation(cur, args: OpenInvestigationArgs) -> None:
+    if _has_open_investigation(cur):
+        raise CommitError(
+            f"уже есть открытое расследование — Open_Investigation({args.inv_id}) отклонён "
+            "(план §3.6: одновременно только одно)"
+        )
+    cur.execute(
+        "INSERT INTO health.investigations "
+        "(inv_id, opened, updated, status, trigger, trigger_detail, hypothesis) "
+        "VALUES (%s, CURRENT_DATE, CURRENT_DATE, 'open', %s, %s, %s) "
+        "ON CONFLICT (inv_id) DO NOTHING",
+        (args.inv_id, args.trigger, args.trigger_detail, args.hypothesis),
+    )
+
+
+def _update_investigation(cur, args: UpdateInvestigationArgs) -> None:
+    cur.execute(
+        "UPDATE health.investigations SET updated = CURRENT_DATE, "
+        "hypothesis = COALESCE(%s, hypothesis), findings = COALESCE(%s, findings), "
+        "questions_pending = COALESCE(%s, questions_pending), "
+        "labs_suggested = COALESCE(%s, labs_suggested) "
+        "WHERE inv_id = %s AND lower(status) = 'open'",
+        (args.hypothesis, args.findings, args.questions_pending, args.labs_suggested, args.inv_id),
+    )
+    if cur.rowcount == 0:
+        raise CommitError(f"Update_Investigation({args.inv_id}): нет открытого расследования с этим inv_id")
+
+
+def _close_investigation(cur, args: CloseInvestigationArgs) -> None:
+    cur.execute(
+        "UPDATE health.investigations SET status = 'report_ready', updated = CURRENT_DATE, "
+        "closed = CURRENT_DATE, findings = COALESCE(%s, findings), "
+        "doctor_brief = COALESCE(%s, doctor_brief), referral = COALESCE(%s, referral) "
+        "WHERE inv_id = %s AND lower(status) = 'open'",
+        (args.findings, args.doctor_brief, args.referral, args.inv_id),
+    )
+    if cur.rowcount == 0:
+        raise CommitError(f"Close_Investigation({args.inv_id}): нет открытого расследования с этим inv_id")
+
+
+def _plan_lab(cur, args: PlanLabArgs) -> None:
+    plan_id = f"LP-{ULID()}"
+    next_due = None
+    if args.interval_months:
+        cur.execute("SELECT to_char(CURRENT_DATE + (%s || ' months')::interval, 'YYYY-MM-DD')",
+                    (args.interval_months,))
+        next_due = cur.fetchone()[0]
+    cur.execute(
+        'INSERT INTO health.lab_plan '
+        '("Plan_ID", "Test", "Category", "Interval_Months", "Next_Due", "Reason", "Status", "Source") '
+        "VALUES (%s, %s, %s, %s, %s, %s, 'active', 'AI-доктор')",
+        (plan_id, args.test, args.category,
+         str(args.interval_months) if args.interval_months else None, next_due, args.reason),
+    )
+
+
+_HANDLERS = {
+    "symptom": (RecordSymptomArgs, _write_symptom),
+    "note": (RecordNoteArgs, _write_note),
+    "investigation_open": (OpenInvestigationArgs, _open_investigation),
+    "investigation_update": (UpdateInvestigationArgs, _update_investigation),
+    "investigation_close": (CloseInvestigationArgs, _close_investigation),
+    "lab_plan": (PlanLabArgs, _plan_lab),
+}
+
+
+def apply_staged_writes(staged_writes: list[StagedWrite], turn_id: str) -> dict:
+    """Одна транзакция для всего списка — план §3.6 "всё либо ничего". Пустой
+    список — no-op (не открывает транзакцию впустую)."""
+    if not staged_writes:
+        return {"committed": False, "reason": "nothing_to_write"}
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if already_committed(cur, turn_id):
+                return {"committed": False, "reason": "already_committed"}
+
+            applied = []
+            for w in staged_writes:
+                entry = _HANDLERS.get(w.kind)
+                if entry is None:
+                    raise CommitError(f"неизвестный kind в StagedWrite: {w.kind}")
+                model_cls, handler = entry
+                if w.kind == "symptom":
+                    handler(cur, model_cls(**w.payload), turn_id)
+                else:
+                    handler(cur, model_cls(**w.payload))
+                applied.append(w.kind)
+
+            # Маркер идемпотентности — безусловно, независимо от того, что
+            # именно было в батче (note/lab_plan-only коммит иначе не оставил
+            # бы никакого проверяемого следа, см. already_committed()).
+            write_journal(cur, "dialog_turn", turn_id, "commit",
+                          diff={"applied": applied}, reason=f"source={turn_id}")
+        conn.commit()
+    return {"committed": True, "applied": applied}

@@ -15,7 +15,8 @@ from typing import Optional
 from psycopg.errors import UniqueViolation
 
 from app.db import get_conn
-from app.doctor import gate, loop, render, telegram
+from app.doctor import commit, gate, loop, render, telegram
+from app.doctor.commit import CommitError
 from app.doctor.contract import IncomingMessage
 from app.doctor.dialog import already_processed, write_turn
 
@@ -134,16 +135,29 @@ def handle_update(update: dict) -> None:
     result = loop.run_turn(chat_id=msg.chat_id, person_id=msg.person_id, text=text, turn_id=user_turn_id)
     reply_text = render.sanitize_for_telegram(result.reply_text)
 
+    # Коммит — ДО ответа пациенту (быстрый, только локальные транзакции, без
+    # сети): если инвариант нарушен (план §3.6: второе открытое расследование
+    # и т.п.), это отказ, а не тихая потеря — узнаём до, а не после того, как
+    # уже сказали пациенту "записал".
+    commit_error: Optional[str] = None
+    commit_result = {"committed": False, "reason": "nothing_to_write"}
+    if result.staged_writes:
+        try:
+            commit_result = commit.apply_staged_writes(result.staged_writes, turn_id=user_turn_id)
+        except CommitError as e:
+            commit_error = str(e)
+
     telegram.edit_message(msg.chat_id, placeholder_id, reply_text, parse_mode="HTML")
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # staged_writes сохраняются в meta, а не теряются молча — commit.py
-            # (Phase 5) их пока не применяет к health.*/card.*, но они не пропадают
-            # (тихая потеря данных — риск №1 проекта, план CLAUDE.md).
+            # Отложенные записи — в meta целиком, вместе с исходом коммита: даже
+            # если инвариант отклонил запись, сам факт попытки и содержимое не
+            # теряются молча (тихая потеря данных — риск №1 проекта, CLAUDE.md).
             write_turn(cur, chat_id=msg.chat_id, update_id=None, role="assistant",
-                       text=reply_text, wrote_anything=result.wrote_anything,
-                       meta={"staged_writes": [w.model_dump() for w in result.staged_writes]}
+                       text=reply_text, wrote_anything=commit_result.get("committed", False),
+                       meta={"staged_writes": [w.model_dump() for w in result.staged_writes],
+                             "commit_result": commit_result, "commit_error": commit_error}
                        if result.staged_writes else None)
         conn.commit()
 
