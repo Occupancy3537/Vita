@@ -16,7 +16,7 @@ TABLES_TO_CLEAN = [
     "source_message", "extraction", "fact", "episode", "problem", "intervention",
     "opinion", "disagreement", "recommendation", "expectation", "recommendation_verdict",
     "visit", "lab_result", "memory_note", "journal", "entity_index", "metric_coverage",
-    "rf_event", "rf_session",
+    "rf_event", "rf_session", "dialog_turn", "agent_step",
 ]
 
 

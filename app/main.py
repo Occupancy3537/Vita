@@ -14,12 +14,13 @@ from datetime import datetime, timezone
 from typing import Literal, Optional
 
 import psycopg
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, BackgroundTasks, FastAPI, HTTPException
 from psycopg import sql
 from pydantic import BaseModel
 from ulid import ULID
 
 from app.db import get_conn, schema
+from app.doctor.intake import handle_update
 from app.journal import write_journal
 from app.memory import get_context, get_object, index_entity, run_pre_archive_check
 from app.redflag_b import LayerBResult, classify as redflag_classify_b
@@ -522,3 +523,18 @@ def process_endpoint(source_id: str) -> ProcessResponse:
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return ProcessResponse(**result)
+
+
+@app.get("/doctor/health")
+def doctor_health() -> dict:
+    return {"status": "ok", "component": "doctor", "phase": 1}
+
+
+@app.post("/doctor/turn", status_code=202)
+def doctor_turn(background_tasks: BackgroundTasks, update: dict = Body(...)) -> dict:
+    """Сырой Telegram update (план §3.2, шаг 1 — временный HTTP-хоп из n8n вместо
+    прямого приёма; шаг 2 переносит приём в card-service, этот эндпоинт не меняется).
+    Отвечает 202 сразу — Телеграм/n8n не должны ждать агентный цикл (сейчас, Phase 1,
+    ждать особо нечего, но контракт станет важен с Phase 4)."""
+    background_tasks.add_task(handle_update, update)
+    return {"accepted": True}
