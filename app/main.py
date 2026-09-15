@@ -527,7 +527,7 @@ def process_endpoint(source_id: str) -> ProcessResponse:
 
 @app.get("/doctor/health")
 def doctor_health() -> dict:
-    return {"status": "ok", "component": "doctor", "phase": 2}
+    return {"status": "ok", "component": "doctor", "phase": 3}
 
 
 @app.post("/doctor/turn", status_code=202)

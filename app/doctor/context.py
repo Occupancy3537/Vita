@@ -1,0 +1,225 @@
+"""
+Досье пациента для одного хода (план §3.3, §3.9): `get_context()` (П4 — браслет,
+горячий слой, retrieval по вопросу) + срезы схемы `health` напрямую через
+Postgres — Garmin, сегодняшнее питание, активные препараты, открытые
+расследования, последние заметки врача, лабы вне референса. Комнатный климат —
+единственный мост в n8n, который план оставляет (§2.3: там реально нужны
+Google-креды).
+
+Раньше (старый доктор) это собиралось из 9+ Sheets-инструментов, вызываемых
+моделью ПО ЖЕЛАНИЮ — не гарантия, что она вообще спросит. Здесь всё это —
+СТАТИЧЕСКАЯ часть промпта, всегда собранная заранее (то же решение, что уже
+принято для сегодняшних приёмов пищи и климата в докторе на n8n, см. память
+`ai-agent-tool-call-doubles-latency`: любой инструмент-вызов добавляет целый
+лишний проход модели, а эти данные релевантны почти всегда).
+"""
+import os
+import time
+from typing import Optional
+
+import httpx
+from psycopg import sql
+
+from app.db import schema
+from app.memory import get_context
+
+ROOM_CLIMATE_URL = os.environ.get(
+    "DOCTOR_ROOM_CLIMATE_URL", "http://n8n:443/webhook/room-climate-now"
+)  # порт 443 — реальный внутренний порт n8n для вебхуков в этом сетапе (проверено
+# живым запросом из контейнера card-service, не 5678 — угадать не получилось бы)
+
+# План §2.3 оценивал этот мост в 83мс — живой замер дал ~1.6с (n8n-вебхук читает
+# датчик из Google Sheets синхронно на каждый запрос). Датчик и так обновляется
+# раз в час (см. toolDescription ниже) — кэш на 10 минут убирает почти все живые
+# походы в Sheets, не жертвуя актуальностью показания заметнее, чем оно и так
+# устаревает между обновлениями сенсора.
+_ROOM_CLIMATE_CACHE_TTL_S = 600
+_room_climate_cache: dict = {"value": None, "fetched_at": 0.0}
+
+
+def _num(v) -> Optional[float]:
+    if v is None or v == "":
+        return None
+    try:
+        return float(str(v).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _garmin_yesterday(cur) -> Optional[dict]:
+    """Последняя строка health.daily_trends — куратированный набор полей, не все
+    37+ колонок (что реально влияет на разговор о самочувствии, не весь Garmin-дамп)."""
+    cur.execute(
+        'SELECT "Дата", "Чистый_сон_мин", "Эффективность_сна_", "Пульс_ночной_средний", '
+        '"Оценка_сна_балл", "SpO2_ночь_среднее", "Шаги_за_вчера", "Тренировка_Ккал", '
+        '"Окно_голода_до_сна_ч", "Лекарства_принимаемые" '
+        "FROM health.daily_trends ORDER BY \"Дата\" DESC LIMIT 1"
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    (date, sleep_min, sleep_eff, rhr, sleep_score, spo2, steps, training_kcal,
+     fasting_h, meds_seen) = row
+    return {
+        "date": str(date),
+        "sleep_min": _num(sleep_min),
+        "sleep_efficiency_pct": _num(sleep_eff),
+        "resting_hr": _num(rhr),
+        "sleep_score": _num(sleep_score),
+        "spo2_avg": _num(spo2),
+        "steps": _num(steps),
+        "training_kcal": _num(training_kcal),
+        "fasting_before_sleep_h": _num(fasting_h),
+        "meds_seen_in_garmin_note": meds_seen or None,
+    }
+
+
+def _garmin_week_trend(cur, days: int = 7) -> dict:
+    """Средние за последние N дней — не для диагностики, для "стало хуже/лучше,
+    чем обычно" в разговоре, тот же принцип, что и Health Watchdog (2b, сдвиг к
+    границе референса)."""
+    cur.execute(
+        'SELECT "Чистый_сон_мин", "Пульс_ночной_средний", "Шаги_за_вчера", "Оценка_сна_балл" '
+        'FROM health.daily_trends ORDER BY "Дата" DESC LIMIT %s',
+        (days,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return {"days": 0}
+
+    def avg(idx):
+        vals = [_num(r[idx]) for r in rows]
+        vals = [v for v in vals if v is not None]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    return {
+        "days": len(rows),
+        "avg_sleep_min": avg(0),
+        "avg_resting_hr": avg(1),
+        "avg_steps": avg(2),
+        "avg_sleep_score": avg(3),
+    }
+
+
+def _nutrition_today(cur) -> Optional[dict]:
+    cur.execute(
+        'SELECT "Calories", "Proteins", "Carbs", "Fats", "Кофеин", "Алкоголь, гр", '
+        '"Добавленный сахар" FROM health.day_sum '
+        "WHERE \"Date\" = (now() AT TIME ZONE 'Asia/Vladivostok')::date"
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    kcal, protein, carbs, fats, caffeine, alcohol, sugar = row
+    return {
+        "kcal": _num(kcal), "protein_g": _num(protein), "carbs_g": _num(carbs),
+        "fats_g": _num(fats), "caffeine_mg": _num(caffeine),
+        "alcohol_g": _num(alcohol), "added_sugar_g": _num(sugar),
+    }
+
+
+def _meals_today(cur) -> list[dict]:
+    cur.execute(
+        "SELECT to_char(\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'HH24:MI') AS t, "
+        '"Meal_description", "Calories", "Proteins", "Fats", "Carbs" '
+        'FROM health.meals '
+        "WHERE (\"Date\" AT TIME ZONE 'Asia/Vladivostok')::date = (now() AT TIME ZONE 'Asia/Vladivostok')::date "
+        'ORDER BY "Date"'
+    )
+    return [
+        {"time": t, "description": desc, "kcal": _num(k), "protein_g": _num(p),
+         "fats_g": _num(f), "carbs_g": _num(c)}
+        for t, desc, k, p, f, c in cur.fetchall()
+    ]
+
+
+def _active_meds(cur) -> list[dict]:
+    cur.execute(
+        sql.SQL(
+            "SELECT name, dose, regimen, kind FROM {t} WHERE status = 'active' ORDER BY started_ts"
+        ).format(t=sql.Identifier(schema(), "intervention"))
+    )
+    return [{"name": n, "dose": d, "regimen": r, "kind": k} for n, d, r, k in cur.fetchall()]
+
+
+def _open_investigations(cur) -> list[dict]:
+    cur.execute(
+        "SELECT inv_id, trigger, hypothesis, status, opened FROM health.investigations "
+        "WHERE lower(status) = 'open' ORDER BY opened DESC"
+    )
+    return [
+        {"inv_id": i, "trigger": t, "hypothesis": h, "status": s, "opened": str(o)}
+        for i, t, h, s, o in cur.fetchall()
+    ]
+
+
+def _recent_doctor_notes(cur, limit: int = 5) -> list[dict]:
+    cur.execute(
+        "SELECT to_char(note_date, 'YYYY-MM-DD') AS d, category, note "
+        "FROM health.doctor_notes ORDER BY note_date DESC LIMIT %s",
+        (limit,),
+    )
+    return [{"date": d, "category": c, "note": n} for d, c, n in cur.fetchall()]
+
+
+def _labs_out_of_range(cur, limit: int = 10) -> list[dict]:
+    """Самая свежая запись по каждому marker_key, только если вне референса —
+    "лабы вне референса" из инвентаря старого доктора (§1 п.5), не полный дамп
+    257 строк в промпт каждый ход."""
+    cur.execute(
+        sql.SQL(
+            "SELECT DISTINCT ON (marker_key) marker_key, marker_label, value_num, unit, "
+            "ref_min, ref_max, ts_event FROM {t} "
+            "WHERE value_num IS NOT NULL AND (ref_min IS NOT NULL OR ref_max IS NOT NULL) "
+            "ORDER BY marker_key, ts_event DESC"
+        ).format(t=sql.Identifier(schema(), "lab_result"))
+    )
+    out = []
+    for key, label, value, unit, lo, hi, ts in cur.fetchall():
+        lo_f, hi_f, val_f = (float(lo) if lo is not None else None,
+                              float(hi) if hi is not None else None, float(value))
+        out_of_range = (lo_f is not None and val_f < lo_f) or (hi_f is not None and val_f > hi_f)
+        if out_of_range:
+            out.append({"marker": label or key, "value": val_f, "unit": unit,
+                        "ref_min": lo_f, "ref_max": hi_f, "date": str(ts)[:10]})
+    return out[:limit]
+
+
+def _room_climate(timeout: float = 3.0) -> Optional[dict]:
+    """Единственный мост в n8n (план §2.3), с кэшем на _ROOM_CLIMATE_CACHE_TTL_S
+    (см. комментарий у константы — живой замер разошёлся с оценкой плана на
+    порядок). Деградирует молча в последнее известное значение (не в None, если
+    оно есть) при сбое живого похода — комнатный климат никогда не был
+    критичным путём ни в одном сценарии доктора, устаревшее показание лучше
+    отсутствующего."""
+    now = time.monotonic()
+    if _room_climate_cache["value"] is not None and \
+            now - _room_climate_cache["fetched_at"] < _ROOM_CLIMATE_CACHE_TTL_S:
+        return _room_climate_cache["value"]
+    try:
+        resp = httpx.get(ROOM_CLIMATE_URL, timeout=timeout)
+        resp.raise_for_status()
+        value = resp.json()
+        _room_climate_cache["value"] = value
+        _room_climate_cache["fetched_at"] = now
+        return value
+    except Exception:
+        return _room_climate_cache["value"]  # None, если ещё ни разу не получалось
+
+
+def build_dossier(cur, text: str = "") -> dict:
+    """Собирает всё досье одним проходом. Приёмка Phase 3: <300мс (план §4,
+    шаг 3) — все запросы дешёвые (индексы/LIMIT), климат — единственный сетевой
+    вызов, с коротким таймаутом и молчаливой деградацией."""
+    return {
+        "memory": get_context(cur, mode="question", payload={"text": text}),
+        "garmin_yesterday": _garmin_yesterday(cur),
+        "garmin_week_trend": _garmin_week_trend(cur),
+        "nutrition_today": _nutrition_today(cur),
+        "meals_today": _meals_today(cur),
+        "active_meds": _active_meds(cur),
+        "open_investigations": _open_investigations(cur),
+        "recent_doctor_notes": _recent_doctor_notes(cur),
+        "labs_out_of_range": _labs_out_of_range(cur),
+        "room_climate": _room_climate(),
+    }
