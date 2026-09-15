@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from ulid import ULID
 
 from app.db import get_conn, schema
+from app.doctor import gate as doctor_gate
 from app.doctor.intake import handle_update
 from app.journal import write_journal
 from app.memory import get_context, get_object, index_entity, run_pre_archive_check
@@ -538,3 +539,30 @@ def doctor_turn(background_tasks: BackgroundTasks, update: dict = Body(...)) -> 
     ждать особо нечего, но контракт станет важен с Phase 4)."""
     background_tasks.add_task(handle_update, update)
     return {"accepted": True}
+
+
+class RedFlagGateOnlyRequest(BaseModel):
+    text: str
+
+
+class RedFlagGateOnlyResponse(BaseModel):
+    level: Optional[str] = None
+    emergency: bool
+    reply: Optional[str] = None
+
+
+@app.post("/doctor/redflag-gate", response_model=RedFlagGateOnlyResponse)
+def doctor_redflag_gate_only(req: RedFlagGateOnlyRequest) -> RedFlagGateOnlyResponse:
+    """Только детерминированный гейт (план §3.9) — A+bracelet, без модели,
+    без диалоговой памяти/досье. ~50-200мс. Изначально задуман для будущего
+    диспетчера (§2.1 AGENT_CONSOLIDATION_PLAN); используется раньше срока —
+    2026-09-15, как временная замена красных флагов на время, пока старый
+    доктор отключён (OpenRouter workspace daily budget) и новый ещё не прошёл
+    Phase 6/7."""
+    with get_conn() as conn, conn.cursor() as cur:
+        gate_result = doctor_gate.fast_gate(cur, req.text)
+        conn.commit()
+    level = gate_result["result"].get("level")
+    if level == "L3":
+        return RedFlagGateOnlyResponse(level="L3", emergency=True, reply=doctor_gate.EMERGENCY_REPLY)
+    return RedFlagGateOnlyResponse(level=level, emergency=False)

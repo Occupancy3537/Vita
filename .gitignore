@@ -7,3 +7,4 @@ venv/
 .env*
 !.env.test.example
 .DS_Store
+eval_results.json
