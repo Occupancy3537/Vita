@@ -10,7 +10,15 @@ source_message, до всякой обработки (П1 §1.1 "Сначала 
 """
 import hashlib
 import json
+import logging
+import os
+import threading
 from datetime import datetime, timezone
+
+# Без этого logger.info() из app.doctor.poller/dispatch нигде не виден (Python
+# по умолчанию показывает только WARNING+) — а это единственный канал видеть,
+# что long-polling живой, раз в контейнере нет отдельного дашборда для этого.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 from typing import Literal, Optional
 
 import psycopg
@@ -21,6 +29,7 @@ from ulid import ULID
 
 from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
+from app.doctor import poller as doctor_poller
 from app.doctor.intake import handle_update
 from app.journal import write_journal
 from app.memory import get_context, get_object, index_entity, run_pre_archive_check
@@ -42,6 +51,18 @@ from app.recommendations import (
 from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
+
+
+@app.on_event("startup")
+def _start_telegram_polling() -> None:
+    """Step 2 плана (§3.2, 2026-09-16) — включается явным env-флагом, не по
+    умолчанию: запуск снимает вебхук Telegram (deleteWebhook) необратимо для
+    n8n-стороны, пока флаг не выставлен обратно и polling не остановлен —
+    не должно включаться случайно вместе с обычным деплоем."""
+    if os.environ.get("TELEGRAM_POLLING_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return
+    thread = threading.Thread(target=doctor_poller.run_polling_loop, daemon=True, name="telegram-poller")
+    thread.start()
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 
