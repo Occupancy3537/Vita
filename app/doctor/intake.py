@@ -5,10 +5,9 @@ Telegram update -> IncomingMessage (план §3.2, §3.9). `parse_update` — �
 не меняется.
 
 `handle_update` — транспорт-агностичный обработчик одного хода целиком (§3.2:
-"handle_update(update) -> None"). Гейт красных флагов (gate.py, Phase 2) уже
-подключён: L3 — короткое замыкание, ответ без модели. Всё остальное (не-L3)
-пока отвечает Phase-1 заглушкой — настоящий разбор появится с loop.py (Phase 4),
-подключится сюда же, не рядом отдельным путём.
+"handle_update(update) -> None"). Гейт красных флагов (gate.py, Phase 2) —
+L3 короткое замыкание, ответ без модели. Всё остальное идёт в агентный цикл
+(loop.py, Phase 4) — реальный разбор, не заглушка.
 """
 import re
 from typing import Optional
@@ -16,7 +15,7 @@ from typing import Optional
 from psycopg.errors import UniqueViolation
 
 from app.db import get_conn
-from app.doctor import gate, telegram
+from app.doctor import gate, loop, telegram
 from app.doctor.contract import IncomingMessage
 from app.doctor.dialog import already_processed, write_turn
 
@@ -98,15 +97,18 @@ def handle_update(update: dict) -> None:
 
     text = _fallback_text(msg)
     emergency_reply: Optional[str] = None
+    user_turn_id: Optional[str] = None
 
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 if already_processed(cur, msg.chat_id, msg.update_id):
                     return
-                write_turn(cur, chat_id=msg.chat_id, update_id=msg.update_id,
-                           role="user", text=text,
-                           meta={"kind": msg.kind, "reply_symptom_id": msg.reply_symptom_id})
+                user_turn_id = write_turn(
+                    cur, chat_id=msg.chat_id, update_id=msg.update_id,
+                    role="user", text=text,
+                    meta={"kind": msg.kind, "reply_symptom_id": msg.reply_symptom_id},
+                )
 
                 # Гейт красных флагов — ДО модели, в той же транзакции, что и
                 # user-ход (план §3.1). fast_gate — только A+bracelet, без сети,
@@ -129,23 +131,24 @@ def handle_update(update: dict) -> None:
     telegram.send_chat_action(msg.chat_id, "typing")
     placeholder_id = telegram.send_message(msg.chat_id, "…", reply_to_message_id=msg.message_id)
 
-    # Phase 1 заглушка — намеренно помечена как таковая, чтобы не читалась как
-    # настоящий разбор жалобы. loop.py заменит этот блок в Phase 4.
-    reply_text = (
-        "[новый доктор — проверка приёма] Сообщение получено и сохранено "
-        f"(«{text[:200]}»). Агентный цикл ещё не подключён — "
-        "это только проверка приёма сообщений, диалоговой памяти и ответа в Telegram."
-    )
+    result = loop.run_turn(chat_id=msg.chat_id, person_id=msg.person_id, text=text, turn_id=user_turn_id)
 
-    telegram.edit_message(msg.chat_id, placeholder_id, reply_text)
+    telegram.edit_message(msg.chat_id, placeholder_id, result.reply_text)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            write_turn(cur, chat_id=msg.chat_id, update_id=None, role="assistant", text=reply_text)
+            # staged_writes сохраняются в meta, а не теряются молча — commit.py
+            # (Phase 5) их пока не применяет к health.*/card.*, но они не пропадают
+            # (тихая потеря данных — риск №1 проекта, план CLAUDE.md).
+            write_turn(cur, chat_id=msg.chat_id, update_id=None, role="assistant",
+                       text=result.reply_text, wrote_anything=result.wrote_anything,
+                       meta={"staged_writes": [w.model_dump() for w in result.staged_writes]}
+                       if result.staged_writes else None)
         conn.commit()
 
     # L1/L2 (только слой B их порождает — см. gate.py) детектируются здесь же,
     # уже после ответа: пишут rf_event, но пока не меняют сам ответ — вставка
-    # строки "показаться врачу сегодня" для L2 подключится в Phase 4 (loop.py),
-    # когда появится сам генерируемый моделью текст, куда её вставлять.
+    # строки "показаться врачу сегодня" для L2 требует знать уровень ДО ответа
+    # модели, а B считается параллельно ей же — честный нерешённый разрыв,
+    # не забытый: пока L2 виден только в rf_event, не в тексте пациенту.
     gate.slow_gate_followup(text)

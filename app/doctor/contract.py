@@ -55,3 +55,60 @@ class TurnResult(BaseModel):
     rf_level: Optional[Literal["L1", "L2", "L3"]] = None
     wrote_anything: bool = False
     staged_writes: list[StagedWrite] = Field(default_factory=list)
+
+
+# --- аргументы write-инструментов (план §3.5) --------------------------------
+# Валидируются здесь, ДО того как попасть в StagedWrite.payload — невалидный
+# вызов возвращается модели как ошибка инструмента, не исполняется (план §3.4:
+# "детерминированные ворота ДО исполнения инструмента... невалидный вызов не
+# исполняется"). Бизнес-инварианты (одно открытое расследование и т.п.) — не
+# здесь, это commit.py (Phase 5, §3.6: "инварианты переезжают из промпта в код",
+# явно отнесены к записи, не к форме аргументов).
+
+class RecordSymptomArgs(BaseModel):
+    symptom_id: str = Field(description="Слаг латиницей, тот же при продолжении темы")
+    symptom: str
+    system: Optional[str] = None
+    severity: Optional[int] = Field(None, ge=1, le=10)
+    status: Literal["active", "monitoring", "resolved"] = "active"
+    change: Optional[str] = None
+    domain: Optional[str] = None
+    context: Optional[str] = None
+    hypothesis: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class RecordNoteArgs(BaseModel):
+    category: str
+    note: str
+    trigger: Optional[str] = None
+    plan: Optional[str] = None
+
+
+class OpenInvestigationArgs(BaseModel):
+    inv_id: str = Field(description="Слаг латиницей")
+    trigger: str
+    trigger_detail: Optional[str] = None
+    hypothesis: Optional[str] = None
+
+
+class UpdateInvestigationArgs(BaseModel):
+    inv_id: str
+    findings: Optional[str] = None
+    hypothesis: Optional[str] = None
+    questions_pending: Optional[str] = None
+    labs_suggested: Optional[str] = None
+
+
+class CloseInvestigationArgs(BaseModel):
+    inv_id: str
+    findings: Optional[str] = None
+    doctor_brief: Optional[str] = None
+    referral: Optional[str] = None
+
+
+class PlanLabArgs(BaseModel):
+    test: str
+    category: Optional[str] = None
+    interval_months: Optional[int] = None
+    reason: Optional[str] = None

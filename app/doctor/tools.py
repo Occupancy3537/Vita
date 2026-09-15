@@ -17,12 +17,25 @@ loop.py (Phase 4), которому нужно вызывать любой ин�
 Новое сверх старого набора (план §7, "Чего у него нет, хотя данные есть"):
 Read_Labs (257 строк card.lab_result, раньше видны только как "вне референса"
 текстом) и Read_Garmin_History (раньше — только "вчера", в статичном досье).
-"""
+
+Write-инструменты (план §3.5, ключевое отличие от старого доктора — записи это
+инструменты, а не поля JSON-конверта): их исполнители в Phase 4 НЕ пишут в БД —
+только валидируют аргументы через pydantic (contract.py) и возвращают
+StagedWrite-совместимый payload. Настоящая запись (транзакция + инварианты —
+одно открытое расследование и т.п.) — commit.py, Phase 5. До тех пор loop.py
+собирает staged_writes и ничего не коммитит — безопасно, т.к. новый доктор ещё
+не подключён к живому трафику (план §3.9, cutover — Phase 7)."""
 from datetime import datetime
 from typing import Optional
 
 import httpx
 from psycopg import sql
+from pydantic import ValidationError
+
+from app.doctor.contract import (
+    CloseInvestigationArgs, OpenInvestigationArgs, PlanLabArgs,
+    RecordNoteArgs, RecordSymptomArgs, UpdateInvestigationArgs,
+)
 
 from app.db import schema
 from app.doctor.context import ROOM_CLIMATE_URL, _num
@@ -369,6 +382,40 @@ def analyze_symptom_food(cur, args: dict) -> dict:
     }
 
 
+# --- write-инструменты: только валидация + staging, commit.py пишет (Phase 5) -
+
+def _stage(kind: str, model_cls, args: dict) -> dict:
+    try:
+        validated = model_cls(**args)
+    except ValidationError as e:
+        return {"error": "invalid_arguments", "detail": str(e)}
+    return {"staged": True, "kind": kind, "payload": validated.model_dump()}
+
+
+def record_symptom(cur, args: dict) -> dict:
+    return _stage("symptom", RecordSymptomArgs, args)
+
+
+def record_note(cur, args: dict) -> dict:
+    return _stage("note", RecordNoteArgs, args)
+
+
+def open_investigation(cur, args: dict) -> dict:
+    return _stage("investigation_open", OpenInvestigationArgs, args)
+
+
+def update_investigation(cur, args: dict) -> dict:
+    return _stage("investigation_update", UpdateInvestigationArgs, args)
+
+
+def close_investigation(cur, args: dict) -> dict:
+    return _stage("investigation_close", CloseInvestigationArgs, args)
+
+
+def plan_lab(cur, args: dict) -> dict:
+    return _stage("lab_plan", PlanLabArgs, args)
+
+
 # --- реестр ------------------------------------------------------------------
 
 TOOL_REGISTRY = [
@@ -457,6 +504,75 @@ TOOL_REGISTRY = [
             "days": {"type": "integer", "description": "Сколько дней истории вернуть (по умолчанию 30, максимум 180)"},
         }},
         "executor": read_garmin_history, "timeout": 4.0, "read_only": True,
+    },
+    {
+        "name": "Record_Symptom",
+        "description": "Запиши симптом в карту — новый или продолжение (тот же symptom_id, "
+                        "если это та же тема). Вызывай ТОЛЬКО когда даёшь разбор, не на ходе "
+                        "с уточняющими вопросами.",
+        "parameters": {"type": "object", "properties": {
+            "symptom_id": {"type": "string", "description": "Слаг латиницей, тот же при продолжении темы"},
+            "symptom": {"type": "string"},
+            "system": {"type": "string", "description": "ЖКТ|нервная|ССС|ОДА|кожа|эндокринная|общее"},
+            "severity": {"type": "integer", "description": "1-10"},
+            "status": {"type": "string", "enum": ["active", "monitoring", "resolved"]},
+            "change": {"type": "string", "description": "появился|усилился|ослаб|без изменений|прошёл"},
+            "domain": {"type": "string", "description": "gastro|neuro|cardio|endo|musculo|derm|psych|general"},
+            "context": {"type": "string", "description": "что менялось в питании/активности/лекарствах"},
+            "hypothesis": {"type": "string", "description": "гипотезы для врача, НЕ диагноз"},
+            "notes": {"type": "string"},
+        }, "required": ["symptom_id", "symptom"]},
+        "executor": record_symptom, "timeout": 1.0, "read_only": False,
+    },
+    {
+        "name": "Record_Note",
+        "description": "Короткая клиническая заметка в карту.",
+        "parameters": {"type": "object", "properties": {
+            "category": {"type": "string"}, "note": {"type": "string"},
+            "trigger": {"type": "string"}, "plan": {"type": "string"},
+        }, "required": ["category", "note"]},
+        "executor": record_note, "timeout": 1.0, "read_only": False,
+    },
+    {
+        "name": "Open_Investigation",
+        "description": "Открой расследование — только если через Read_Investigations "
+                        "подтверждено, что открытых нет (лимит: одно одновременно).",
+        "parameters": {"type": "object", "properties": {
+            "inv_id": {"type": "string", "description": "Слаг латиницей"},
+            "trigger": {"type": "string"}, "trigger_detail": {"type": "string"},
+            "hypothesis": {"type": "string"},
+        }, "required": ["inv_id", "trigger"]},
+        "executor": open_investigation, "timeout": 1.0, "read_only": False,
+    },
+    {
+        "name": "Update_Investigation",
+        "description": "Обнови открытое расследование — findings ПОЛНОСТЬЮ (накопленная "
+                        "сводка, не дельта), не только новую часть.",
+        "parameters": {"type": "object", "properties": {
+            "inv_id": {"type": "string"}, "findings": {"type": "string"},
+            "hypothesis": {"type": "string"}, "questions_pending": {"type": "string"},
+            "labs_suggested": {"type": "string"},
+        }, "required": ["inv_id"]},
+        "executor": update_investigation, "timeout": 1.0, "read_only": False,
+    },
+    {
+        "name": "Close_Investigation",
+        "description": "Закрой расследование с итоговым doctor_brief (7 пунктов, см. "
+                        "системный промпт) — освобождает лимит на новое.",
+        "parameters": {"type": "object", "properties": {
+            "inv_id": {"type": "string"}, "findings": {"type": "string"},
+            "doctor_brief": {"type": "string"}, "referral": {"type": "string"},
+        }, "required": ["inv_id"]},
+        "executor": close_investigation, "timeout": 1.0, "read_only": False,
+    },
+    {
+        "name": "Plan_Lab",
+        "description": "Запланируй пересдачу/новый анализ.",
+        "parameters": {"type": "object", "properties": {
+            "test": {"type": "string"}, "category": {"type": "string"},
+            "interval_months": {"type": "integer"}, "reason": {"type": "string"},
+        }, "required": ["test"]},
+        "executor": plan_lab, "timeout": 1.0, "read_only": False,
     },
 ]
 

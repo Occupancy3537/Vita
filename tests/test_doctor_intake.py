@@ -1,11 +1,13 @@
 """Phase 1 плана нового доктора — intake.py: разбор Telegram update (чистая
 функция) и handle_update целиком (приём + идемпотентность + диалоговая память +
-Telegram round-trip). Telegram API и слой B (redflag_b.classify, вызывается
-gate.slow_gate_followup после ответа) мокаются — юнит-тесты не должны бить по
-сети ни к Telegram, ни к OpenRouter (единственный тест с настоящим вызовом
-LLM в проекте — test_extraction_live.py, остальные мокают, см. её докстринг)."""
+Telegram round-trip). Telegram API, слой B (redflag_b.classify, вызывается
+gate.slow_gate_followup после ответа) и агентный цикл (loop.run_turn, Phase 4 —
+настоящий вызов OpenRouter) мокаются — юнит-тесты не должны бить по сети ни к
+Telegram, ни к OpenRouter (единственный тест с настоящим вызовом LLM в проекте —
+test_extraction_live.py, остальные мокают, см. её докстринг)."""
 from app.db import get_conn
-from app.doctor import gate, telegram as telegram_module
+from app.doctor import gate, loop, telegram as telegram_module
+from app.doctor.contract import TurnResult
 from app.doctor.dialog import recent_turns
 from app.doctor.intake import handle_update, parse_update
 from app.redflag_b import LayerBResult
@@ -98,6 +100,8 @@ def test_handle_update_writes_both_turns_and_replies_via_telegram(monkeypatch):
     monkeypatch.setattr(telegram_module, "send_message", fake_send_message)
     monkeypatch.setattr(telegram_module, "edit_message", fake_edit_message)
     monkeypatch.setattr(gate, "classify_layer_b", lambda text, prior_replies=None: LayerBResult(hit=False))
+    monkeypatch.setattr(loop, "run_turn", lambda **kw: TurnResult(
+        turn_id=kw["turn_id"], reply_text="ответ про колет в боку (замокан цикл)"))
 
     handle_update(_text_update(update_id=100, chat_id=456, text="колет в боку", message_id=5))
 
@@ -133,6 +137,7 @@ def test_handle_update_duplicate_update_id_processed_once(monkeypatch):
     monkeypatch.setattr(telegram_module, "send_message", fake_send_message)
     monkeypatch.setattr(telegram_module, "edit_message", fake_edit_message)
     monkeypatch.setattr(gate, "classify_layer_b", lambda text, prior_replies=None: LayerBResult(hit=False))
+    monkeypatch.setattr(loop, "run_turn", lambda **kw: TurnResult(turn_id=kw["turn_id"], reply_text="ок"))
 
     update = _text_update(update_id=200, chat_id=789, text="повтор")
     handle_update(update)

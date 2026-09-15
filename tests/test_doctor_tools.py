@@ -222,7 +222,46 @@ def test_tool_registry_all_have_executor_and_timeout():
     for t in tools.TOOL_REGISTRY:
         assert callable(t["executor"])
         assert t["timeout"] > 0
-        assert t["read_only"] is True
+        assert isinstance(t["read_only"], bool)
+
+
+def test_tool_registry_read_and_write_split():
+    read_names = {t["name"] for t in tools.TOOL_REGISTRY if t["read_only"]}
+    write_names = {t["name"] for t in tools.TOOL_REGISTRY if not t["read_only"]}
+    assert write_names == {"Record_Symptom", "Record_Note", "Open_Investigation",
+                            "Update_Investigation", "Close_Investigation", "Plan_Lab"}
+    assert len(read_names) == 10
+
+
+def test_write_tool_stages_valid_args_without_touching_db():
+    r = tools.record_symptom(None, {"symptom_id": "sid1", "symptom": "боль в спине"})
+    assert r == {"staged": True, "kind": "symptom",
+                 "payload": {"symptom_id": "sid1", "symptom": "боль в спине", "system": None,
+                             "severity": None, "status": "active", "change": None, "domain": None,
+                             "context": None, "hypothesis": None, "notes": None}}
+
+
+def test_write_tool_rejects_invalid_args():
+    r = tools.record_symptom(None, {"symptom_id": "sid1"})  # symptom обязателен
+    assert r.get("error") == "invalid_arguments"
+
+
+def test_write_tool_severity_out_of_range_rejected():
+    r = tools.record_symptom(None, {"symptom_id": "sid1", "symptom": "боль", "severity": 99})
+    assert r.get("error") == "invalid_arguments"
+
+
+def test_open_investigation_stages():
+    r = tools.open_investigation(None, {"inv_id": "inv1", "trigger": "жалоба"})
+    assert r["staged"] is True
+    assert r["kind"] == "investigation_open"
+    assert r["payload"]["inv_id"] == "inv1"
+
+
+def test_plan_lab_stages():
+    r = tools.plan_lab(None, {"test": "Глюкоза"})
+    assert r["staged"] is True
+    assert r["kind"] == "lab_plan"
 
 
 def test_openai_tool_schemas_shape():
