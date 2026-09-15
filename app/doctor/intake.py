@@ -15,7 +15,7 @@ from typing import Optional
 from psycopg.errors import UniqueViolation
 
 from app.db import get_conn
-from app.doctor import gate, loop, telegram
+from app.doctor import gate, loop, render, telegram
 from app.doctor.contract import IncomingMessage
 from app.doctor.dialog import already_processed, write_turn
 
@@ -132,8 +132,9 @@ def handle_update(update: dict) -> None:
     placeholder_id = telegram.send_message(msg.chat_id, "…", reply_to_message_id=msg.message_id)
 
     result = loop.run_turn(chat_id=msg.chat_id, person_id=msg.person_id, text=text, turn_id=user_turn_id)
+    reply_text = render.sanitize_for_telegram(result.reply_text)
 
-    telegram.edit_message(msg.chat_id, placeholder_id, result.reply_text)
+    telegram.edit_message(msg.chat_id, placeholder_id, reply_text, parse_mode="HTML")
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -141,7 +142,7 @@ def handle_update(update: dict) -> None:
             # (Phase 5) их пока не применяет к health.*/card.*, но они не пропадают
             # (тихая потеря данных — риск №1 проекта, план CLAUDE.md).
             write_turn(cur, chat_id=msg.chat_id, update_id=None, role="assistant",
-                       text=result.reply_text, wrote_anything=result.wrote_anything,
+                       text=reply_text, wrote_anything=result.wrote_anything,
                        meta={"staged_writes": [w.model_dump() for w in result.staged_writes]}
                        if result.staged_writes else None)
         conn.commit()
