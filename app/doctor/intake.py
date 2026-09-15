@@ -5,10 +5,10 @@ Telegram update -> IncomingMessage (план §3.2, §3.9). `parse_update` — �
 не меняется.
 
 `handle_update` — транспорт-агностичный обработчик одного хода целиком (§3.2:
-"handle_update(update) -> None"). Сейчас (Phase 1 плана) это временная заглушка:
-приём, идемпотентность, диалоговая память и настоящий Telegram round-trip уже
-на месте, а разбор жалобы — фиксированный текст. gate.py (Phase 2) и loop.py
-(Phase 4) подключаются СЮДА, в этот же handle_update, не рядом отдельным путём.
+"handle_update(update) -> None"). Гейт красных флагов (gate.py, Phase 2) уже
+подключён: L3 — короткое замыкание, ответ без модели. Всё остальное (не-L3)
+пока отвечает Phase-1 заглушкой — настоящий разбор появится с loop.py (Phase 4),
+подключится сюда же, не рядом отдельным путём.
 """
 import re
 from typing import Optional
@@ -16,7 +16,7 @@ from typing import Optional
 from psycopg.errors import UniqueViolation
 
 from app.db import get_conn
-from app.doctor import telegram
+from app.doctor import gate, telegram
 from app.doctor.contract import IncomingMessage
 from app.doctor.dialog import already_processed, write_turn
 
@@ -96,26 +96,44 @@ def handle_update(update: dict) -> None:
     if msg is None:
         return
 
+    text = _fallback_text(msg)
+    emergency_reply: Optional[str] = None
+
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 if already_processed(cur, msg.chat_id, msg.update_id):
                     return
                 write_turn(cur, chat_id=msg.chat_id, update_id=msg.update_id,
-                           role="user", text=_fallback_text(msg),
+                           role="user", text=text,
                            meta={"kind": msg.kind, "reply_symptom_id": msg.reply_symptom_id})
+
+                # Гейт красных флагов — ДО модели, в той же транзакции, что и
+                # user-ход (план §3.1). fast_gate — только A+bracelet, без сети,
+                # <200мс; единственное решение, которое отсюда может выйти — L3.
+                gate_result = gate.fast_gate(cur, text)
+                if gate_result["result"].get("level") == "L3":
+                    emergency_reply = gate.handle_emergency(cur, msg.chat_id, gate_result, text, None)
             conn.commit()
     except UniqueViolation:
         return  # тот же update_id уже вставлен параллельным вызовом — гонка, не баг
+
+    if emergency_reply is not None:
+        # Короткое замыкание: модель не вызывается вообще. Слой B всё равно
+        # считается — ПОСЛЕ ответа, дописывает ту же сессию, если у него
+        # найдётся что добавить (никогда не задерживает эмердженси, §3.7).
+        telegram.send_message(msg.chat_id, emergency_reply, reply_to_message_id=msg.message_id)
+        gate.slow_gate_followup(text)
+        return
 
     telegram.send_chat_action(msg.chat_id, "typing")
     placeholder_id = telegram.send_message(msg.chat_id, "…", reply_to_message_id=msg.message_id)
 
     # Phase 1 заглушка — намеренно помечена как таковая, чтобы не читалась как
-    # настоящий разбор жалобы. gate.py/loop.py заменят этот блок в Phase 2/4.
+    # настоящий разбор жалобы. loop.py заменит этот блок в Phase 4.
     reply_text = (
         "[новый доктор — проверка приёма] Сообщение получено и сохранено "
-        f"(«{_fallback_text(msg)[:200]}»). Агентный цикл ещё не подключён — "
+        f"(«{text[:200]}»). Агентный цикл ещё не подключён — "
         "это только проверка приёма сообщений, диалоговой памяти и ответа в Telegram."
     )
 
@@ -125,3 +143,9 @@ def handle_update(update: dict) -> None:
         with conn.cursor() as cur:
             write_turn(cur, chat_id=msg.chat_id, update_id=None, role="assistant", text=reply_text)
         conn.commit()
+
+    # L1/L2 (только слой B их порождает — см. gate.py) детектируются здесь же,
+    # уже после ответа: пишут rf_event, но пока не меняют сам ответ — вставка
+    # строки "показаться врачу сегодня" для L2 подключится в Phase 4 (loop.py),
+    # когда появится сам генерируемый моделью текст, куда её вставлять.
+    gate.slow_gate_followup(text)

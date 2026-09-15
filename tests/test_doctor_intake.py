@@ -1,10 +1,14 @@
 """Phase 1 плана нового доктора — intake.py: разбор Telegram update (чистая
 функция) и handle_update целиком (приём + идемпотентность + диалоговая память +
-Telegram round-trip). Telegram API мокается — юнит-тесты не должны бить по сети."""
+Telegram round-trip). Telegram API и слой B (redflag_b.classify, вызывается
+gate.slow_gate_followup после ответа) мокаются — юнит-тесты не должны бить по
+сети ни к Telegram, ни к OpenRouter (единственный тест с настоящим вызовом
+LLM в проекте — test_extraction_live.py, остальные мокают, см. её докстринг)."""
 from app.db import get_conn
-from app.doctor import telegram as telegram_module
+from app.doctor import gate, telegram as telegram_module
 from app.doctor.dialog import recent_turns
 from app.doctor.intake import handle_update, parse_update
+from app.redflag_b import LayerBResult
 
 
 def _text_update(update_id=1, chat_id=123, text="болит голова", message_id=10, reply_to=None):
@@ -93,6 +97,7 @@ def test_handle_update_writes_both_turns_and_replies_via_telegram(monkeypatch):
     monkeypatch.setattr(telegram_module, "send_chat_action", fake_send_chat_action)
     monkeypatch.setattr(telegram_module, "send_message", fake_send_message)
     monkeypatch.setattr(telegram_module, "edit_message", fake_edit_message)
+    monkeypatch.setattr(gate, "classify_layer_b", lambda text, prior_replies=None: LayerBResult(hit=False))
 
     handle_update(_text_update(update_id=100, chat_id=456, text="колет в боку", message_id=5))
 
@@ -127,6 +132,7 @@ def test_handle_update_duplicate_update_id_processed_once(monkeypatch):
     monkeypatch.setattr(telegram_module, "send_chat_action", fake_send_chat_action)
     monkeypatch.setattr(telegram_module, "send_message", fake_send_message)
     monkeypatch.setattr(telegram_module, "edit_message", fake_edit_message)
+    monkeypatch.setattr(gate, "classify_layer_b", lambda text, prior_replies=None: LayerBResult(hit=False))
 
     update = _text_update(update_id=200, chat_id=789, text="повтор")
     handle_update(update)
@@ -137,3 +143,35 @@ def test_handle_update_duplicate_update_id_processed_once(monkeypatch):
     with get_conn() as conn, conn.cursor() as cur:
         turns = recent_turns(cur, "789")
     assert len(turns) == 2  # user + assistant, не 4
+
+
+def test_handle_update_l3_short_circuits_before_placeholder(monkeypatch):
+    """Гейт (Phase 2) встроен в handle_update: L3 — короткое замыкание, плейсхолдер
+    и заглушка Phase 1 не должны появляться вообще, эмердженси-ответ уходит одним
+    sendMessage (без edit — цикл send-placeholder/edit не запускается)."""
+    sent = []
+
+    def fake_send_message(chat_id, text, reply_to_message_id=None, parse_mode=None):
+        sent.append(text)
+        return 1
+
+    def fail_on_call(*args, **kwargs):
+        raise AssertionError("не должно было вызываться на L3-пути")
+
+    monkeypatch.setattr(telegram_module, "send_message", fake_send_message)
+    monkeypatch.setattr(telegram_module, "send_chat_action", fail_on_call)
+    monkeypatch.setattr(telegram_module, "edit_message", fail_on_call)
+    monkeypatch.setattr(gate, "classify_layer_b", lambda text, prior_replies=None: LayerBResult(hit=False))
+
+    handle_update(_text_update(update_id=300, chat_id=321,
+                                text="грудь давит, отдаёт в левую руку, одышка", message_id=1))
+
+    assert len(sent) == 1
+    assert "скорую" in sent[0].lower()
+
+    with get_conn() as conn, conn.cursor() as cur:
+        turns = recent_turns(cur, "321")
+    assert len(turns) == 2
+    assert turns[1]["role"] == "assistant"
+    assert turns[1]["rf_level"] == "L3"
+    assert turns[1]["wrote_anything"] is True
