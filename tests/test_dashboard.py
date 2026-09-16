@@ -145,18 +145,22 @@ def test_baseline_for_insufficient_points_returns_none():
 
 def test_dashboard_health_endpoint_shape():
     """Бьёт по реальной health.daily_trends — проверяет форму, не цифры (эти
-    меняются каждый день). Недоступность n8n-моста (аномалии/корреляции) не
-    должна ронять остальной экран — честная деградация, см. get_health_dashboard."""
+    меняются каждый день, а health.anomaly_log вообще пока пуст — заполнится
+    первым ночным прогоном Anomaly_Detector после переноса, см. STATE.md)."""
     r = client.get("/dashboard/health", params={"token": "test-dashboard-token-not-prod"})
     assert r.status_code == 200
     body = r.json()
     for key in ("updated_at", "today", "metrics", "days_14", "trends",
-                "investigations", "medical_notes_recent"):
+                "investigations", "medical_notes_recent", "anomalies",
+                "correlations", "experiments", "experiments_note"):
         assert key in body
     assert isinstance(body["metrics"], list) and len(body["metrics"]) > 0
     assert isinstance(body["days_14"], list)
     keys = {m["key"] for m in body["metrics"]}
     assert "hrv" in keys and "steps_today_live" in keys
+    assert body["anomalies"]["status"] in ("flagged", "clean", "not_run")
+    assert body["correlations"] == {"computed": None, "disabled": True, "priority": [], "discovery": []}
+    assert body["experiments"] == []
 
 
 def test_dashboard_health_wrong_token_forbidden():

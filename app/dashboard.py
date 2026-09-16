@@ -23,8 +23,6 @@ health.live_steps_today (её пишет напрямую push_live_steps.py с 
 """
 from datetime import date, datetime, timedelta, timezone
 
-import httpx
-
 # --- «Здоровье»-экран: порт n8n Code-ноды "Build Health JSON" (2026-09-16) ---
 #
 # Причина порта та же, что у get_today_live_metrics выше: health-dashboard (cache)
@@ -78,15 +76,24 @@ TARGET_ZONES = {
     for m in METRIC_CONFIG if m.get("target_min") is not None and m.get("target_max") is not None
 }
 
-# health-dashboard оставлен как ЕДИНСТВЕННЫЙ временный источник для четырёх полей,
-# которые физически нельзя перенести без прямого доступа к Google Sheets из
-# Python (аномалии/корреляции/рекомендации пишет ночной Anomaly_Detector прямо
-# в Sheets). Точно по условию Влада «если за одну итерацию невозможно — временно
-# оставить n8n и потом удалить»: это не релей для браузера (браузер сюда не
-# ходит вообще, только card-service изнутри), и не расписание/кэш с нашей
-# стороны — читаем по одному живому запросу на каждый вызов /dashboard/health.
-_N8N_HEALTH_CACHE_URL = "http://n8n:443/webhook/health-dashboard?token=JI45FVfyUJgD7gfkAJJN"
-_SHEETS_BACKED_KEYS = ("anomalies", "correlations", "recommendation", "experiments", "experiments_note")
+# Обновление 2026-09-16: временный мост на n8n убран. Anomaly_Detector/
+# Correlations (n8n, 4DE8Hg832E2nn8MM) теперь дополнительно к Google Sheets
+# пишет health.anomaly_log (backups/infra/migrate_anomaly_log.sql) — сама
+# детекция осталась в n8n (не рерайт математики, только новый сток данных),
+# но ЧТЕНИЕ для дашборда — целиком отсюда, без единого обращения к n8n.
+#
+# correlations/experiments — не забытые поля: в исходном n8n-коде они были
+# буквально захардкожены отключёнными («движок корреляций отключён — слепой
+# перебор пар на малых данных = шум», коллективное ревью, решение уже принято
+# раньше), реального источника данных для них никогда не было. `recommendation`
+# (совет от Weekly AI Advisor, Google Sheets) в JSON был, но фронтенд его нигде
+# не рендерит — проверено (`grep` по v4.html/index.html), поэтому не переносил.
+_DISABLED_CORRELATIONS = {"computed": None, "disabled": True, "priority": [], "discovery": []}
+_EXPERIMENTS_NOTE = (
+    "Движок корреляций отключён (слепой перебор пар на малых данных = шум). "
+    "Гипотезы о причинах теперь ведёт доктор-бот: связь симптомов с едой + "
+    "элиминационные тесты."
+)
 
 
 def _r1(x):
@@ -260,6 +267,51 @@ def get_health_dashboard(cur) -> dict:
     )
     medical_notes_recent = [{"date": _dkey(r[0]), "category": r[1], "note": r[2]} for r in cur.fetchall()]
 
+    # --- аномалии: последняя запись health.anomaly_log + история метрики за 14 дней ---
+    cur.execute(
+        "SELECT date, anomaly_count, strong_count, raw_anomalies FROM health.anomaly_log "
+        "ORDER BY date DESC LIMIT 1"
+    )
+    latest_anom = cur.fetchone()
+    anomalies = {"report_date": None, "count": 0, "strong_count": 0, "items": []}
+    if latest_anom:
+        anom_date, anomaly_count, strong_count, raw = latest_anom
+        raw = raw or []  # jsonb — уже питоновский list/dict, ручной json.loads не нужен
+        hist14 = rows[-14:]
+        items = []
+        for a in raw:
+            metric = a.get("metric")
+            history = []
+            for _, parsed in hist14:
+                v = parsed.get(metric)
+                # «Эффективность_сна_»: 100% иногда приходит как доля 1, не «100»
+                # (тот же нюанс, что был в n8n-версии — не потерять при переносе).
+                if v is not None and metric == "Эффективность_сна_" and v <= 1.5:
+                    v = v * 100
+                if v is not None:
+                    history.append(v)
+            items.append({
+                "metric": metric, "label": a.get("label") or metric,
+                "direction": a.get("direction"), "severity": a.get("severity"),
+                "interpretation": a.get("interpretation"), "baseline_mean": _num(a.get("baseline_mean")),
+                "history": history,
+            })
+        anomalies = {
+            "report_date": _dkey(anom_date), "count": anomaly_count or len(raw),
+            "strong_count": strong_count or 0, "items": items,
+        }
+
+    # Три явных состояния (запрос Влада, было и в n8n-версии): flagged —
+    # сегодняшняя проверка что-то нашла; clean — прошла и чисто; not_run —
+    # сегодняшних данных ещё нет, проверке не из чего было считать.
+    today_vl = _dkey((datetime.now(timezone.utc) + timedelta(hours=10)))
+    if anomalies["report_date"] == today_vl:
+        anomalies["status"] = "flagged"
+    elif _dkey(last_date) == today_vl:
+        anomalies = {"report_date": today_vl, "count": 0, "strong_count": 0, "items": [], "status": "clean"}
+    else:
+        anomalies = {"report_date": None, "count": 0, "strong_count": 0, "items": [], "status": "not_run"}
+
     result = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "window": {"from": days_14[0]["date"] if days_14 else None, "to": _dkey(last_date)},
@@ -269,19 +321,11 @@ def get_health_dashboard(cur) -> dict:
         "trends": trends,
         "investigations": investigations,
         "medical_notes_recent": medical_notes_recent,
+        "anomalies": anomalies,
+        "correlations": _DISABLED_CORRELATIONS,
+        "experiments": [],
+        "experiments_note": _EXPERIMENTS_NOTE,
     }
-
-    # Временный мост на аномалии/корреляции/рекомендации, см. докстринг выше.
-    try:
-        r = httpx.get(_N8N_HEALTH_CACHE_URL, timeout=5.0)
-        r.raise_for_status()
-        cached = r.json()
-        for key in _SHEETS_BACKED_KEYS:
-            if key in cached:
-                result[key] = cached[key]
-    except Exception:
-        pass  # честная деградация: экран остаётся живым без этих 4 полей, не падает
-
     return result
 
 
