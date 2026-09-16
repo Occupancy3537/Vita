@@ -27,6 +27,7 @@ from psycopg import sql
 from pydantic import BaseModel
 from ulid import ULID
 
+from app.dashboard import get_today_live_metrics
 from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
 from app.doctor import poller as doctor_poller
@@ -83,6 +84,17 @@ class IngestResponse(BaseModel):
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/dashboard/today-live")
+def dashboard_today_live() -> dict:
+    """steps/kcal/protein «сегодня (пока)» — считается заново на каждый вызов,
+    без расписания и без кэша (см. app/dashboard.py). n8n здесь — только
+    HTTPS-релей до этого эндпоинта (card-service публично не виден, см. шапку
+    файла), сам расчёт данных больше нигде в n8n не участвует."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return get_today_live_metrics(cur)
 
 
 @app.post("/ingest", response_model=IngestResponse)
