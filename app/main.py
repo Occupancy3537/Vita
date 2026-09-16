@@ -38,7 +38,7 @@ from psycopg import sql
 from pydantic import BaseModel
 from ulid import ULID
 
-from app.dashboard import get_today_live_metrics
+from app.dashboard import get_health_dashboard, get_today_live_metrics
 from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
 from app.doctor import poller as doctor_poller
@@ -118,6 +118,19 @@ def dashboard_today_live(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return get_today_live_metrics(cur)
+
+
+@app.get("/dashboard/health")
+def dashboard_health(token: str = Query(default="")) -> dict:
+    """Экран «Здоровье» — порт n8n `health-dashboard (cache)` / Build Health
+    JSON, целиком на живых данных (см. app/dashboard.py). Единственный
+    оставшийся мост в n8n — временный, только для 4 полей, которые физически
+    нельзя посчитать без прямого доступа к Google Sheets (аномалии/корреляции/
+    рекомендации), браузер до него не достаёт вообще."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return get_health_dashboard(cur)
 
 
 @app.post("/ingest", response_model=IngestResponse)

@@ -6,11 +6,12 @@ commit.py). Здесь это не проблема: функция только
 тесты мокают курсор (детерминированно, без прод-данных), а тест эндпоинта бьёт по
 реальной БД и проверяет только форму ответа, не конкретные цифры (они меняются
 каждый день по определению фичи)."""
+from datetime import date, timedelta
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from app.dashboard import get_today_live_metrics
+from app.dashboard import _baseline_for, _judge, _r_smart, get_today_live_metrics
 from app.main import app
 
 client = TestClient(app)
@@ -95,4 +96,69 @@ def test_dashboard_today_live_wrong_token_forbidden():
 
 def test_dashboard_today_live_missing_token_forbidden():
     r = client.get("/dashboard/today-live")
+    assert r.status_code == 403
+
+
+# --- /dashboard/health — порт Build Health JSON (математика, не форма ответа) ---
+
+def test_judge_neutral_direction_always_neutral():
+    assert _judge("neutral", 999, 1) == "neutral"
+
+
+def test_judge_below_noise_threshold_is_neutral():
+    assert _judge("higher_better", 2, 6) == "neutral"
+
+
+def test_judge_higher_better():
+    assert _judge("higher_better", 10, 6) == "good"
+    assert _judge("higher_better", -10, 6) == "bad"
+
+
+def test_judge_lower_better():
+    assert _judge("lower_better", -10, 3) == "good"
+    assert _judge("lower_better", 10, 3) == "bad"
+
+
+def test_r_smart_rounds_small_values_to_one_decimal_large_to_int():
+    assert _r_smart(47.36) == 47.4  # ВСР — десятые важны
+    assert _r_smart(11427.2) == 11427  # шаги — десятые не нужны
+    assert _r_smart(None) is None
+
+
+def test_baseline_for_uses_only_days_strictly_before_current():
+    """30-дневное окно — [текущий_день - 30, текущий_день), сам текущий день
+    в базу не входит (иначе метрика сравнивала бы себя с собой)."""
+    today = date(2026, 9, 16)
+    rows = [(today - timedelta(days=i), {"x": 40.0}) for i in range(15, 0, -1)]
+    rows.append((today, {"x": 100.0}))  # текущий день — заведомо выброс
+    base = _baseline_for(rows, "x", len(rows) - 1, 30, 10)
+    assert base is not None
+    assert base["mean"] == 40.0  # если бы 100 попало в базу, среднее бы уехало
+    assert base["n"] == 15
+
+
+def test_baseline_for_insufficient_points_returns_none():
+    today = date(2026, 9, 16)
+    rows = [(today - timedelta(days=1), {"x": 40.0}), (today, {"x": 50.0})]
+    assert _baseline_for(rows, "x", 1, 30, 10) is None
+
+
+def test_dashboard_health_endpoint_shape():
+    """Бьёт по реальной health.daily_trends — проверяет форму, не цифры (эти
+    меняются каждый день). Недоступность n8n-моста (аномалии/корреляции) не
+    должна ронять остальной экран — честная деградация, см. get_health_dashboard."""
+    r = client.get("/dashboard/health", params={"token": "test-dashboard-token-not-prod"})
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("updated_at", "today", "metrics", "days_14", "trends",
+                "investigations", "medical_notes_recent"):
+        assert key in body
+    assert isinstance(body["metrics"], list) and len(body["metrics"]) > 0
+    assert isinstance(body["days_14"], list)
+    keys = {m["key"] for m in body["metrics"]}
+    assert "hrv" in keys and "steps_today_live" in keys
+
+
+def test_dashboard_health_wrong_token_forbidden():
+    r = client.get("/dashboard/health", params={"token": "wrong"})
     assert r.status_code == 403
