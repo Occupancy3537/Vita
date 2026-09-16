@@ -74,7 +74,9 @@ def test_get_today_live_metrics_skips_unparseable_values():
 
 
 def test_dashboard_today_live_endpoint_shape():
-    r = client.get("/dashboard/today-live")
+    # nginx проксирует /card/ без проверок (см. main.py) — токен теперь
+    # проверяет сам эндпоинт, .env.test задаёт DASHBOARD_TOKEN отдельно от прода.
+    r = client.get("/dashboard/today-live", params={"token": "test-dashboard-token-not-prod"})
     assert r.status_code == 200
     body = r.json()
     for key in (
@@ -84,3 +86,13 @@ def test_dashboard_today_live_endpoint_shape():
         assert key in body
     assert isinstance(body["meals_count_today"], int)
     assert body["computed_at"]  # непустая ISO-строка на каждый вызов
+
+
+def test_dashboard_today_live_wrong_token_forbidden():
+    r = client.get("/dashboard/today-live", params={"token": "wrong"})
+    assert r.status_code == 403
+
+
+def test_dashboard_today_live_missing_token_forbidden():
+    r = client.get("/dashboard/today-live")
+    assert r.status_code == 403

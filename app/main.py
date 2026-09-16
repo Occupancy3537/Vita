@@ -5,8 +5,19 @@ Phase 0: /health + /ingest. /ingest делает РОВНО одну вещь �
 source_message, до всякой обработки (П1 §1.1 "Сначала сырьё"). Никакого извлечения,
 никакой валидации содержимого, никакого LLM здесь пока нет — это Phase 2 (write-path).
 
-Сервис слушает только на 127.0.0.1 (см. README) — наружу торчит только n8n-webhook
-за TLS, card-service публично не виден никогда.
+Сервис слушает только на 127.0.0.1 (см. README) — сам процесс наружу не торчит.
+
+Публичный доступ есть, но не через n8n: nginx (хост, /etc/nginx/sites-available/n8n)
+проксирует `/card/` прямо на `127.0.0.1:8080`, тем же TLS-сертификатом, что и
+остальной домен. Прямое обращение до 2026-09-16 «отсутствовало по умолчанию»,
+но не потому, что было архитектурным принципом — просто ни один эндпоинт до
+`/dashboard/*` не нуждался в публичном чтении без прохождения через
+Telegram/доктора. Решение Влада 2026-09-16: «нафига через n8n, если можно
+напрямую» — n8n больше НЕ используется как релей ни для чего нового; каждый
+такой read-only эндпоинт сам проверяет токен в query (см. `_check_dashboard_token`
+ниже), т.к. nginx токены не знает и не должен. `/ingest`, `/doctor/turn` и
+остальные пишущие/чувствительные эндпоинты остаются недоступны наружу напрямую —
+им это не нужно (доктор сам ходит в Telegram long-polling'ом, не наоборот).
 """
 import hashlib
 import json
@@ -22,7 +33,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 from typing import Literal, Optional
 
 import psycopg
-from fastapi import Body, BackgroundTasks, FastAPI, HTTPException
+from fastapi import Body, BackgroundTasks, FastAPI, HTTPException, Query
 from psycopg import sql
 from pydantic import BaseModel
 from ulid import ULID
@@ -86,12 +97,24 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "")
+
+
+def _check_dashboard_token(token: str) -> None:
+    """nginx проксирует /card/ без разбора запроса (см. шапку файла) — токен
+    проверяет сам эндпоинт. Fail closed: пустой DASHBOARD_TOKEN в окружении —
+    тоже 403, а не «токен не нужен»."""
+    if not DASHBOARD_TOKEN or token != DASHBOARD_TOKEN:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
 @app.get("/dashboard/today-live")
-def dashboard_today_live() -> dict:
+def dashboard_today_live(token: str = Query(default="")) -> dict:
     """steps/kcal/protein «сегодня (пока)» — считается заново на каждый вызов,
-    без расписания и без кэша (см. app/dashboard.py). n8n здесь — только
-    HTTPS-релей до этого эндпоинта (card-service публично не виден, см. шапку
-    файла), сам расчёт данных больше нигде в n8n не участвует."""
+    без расписания и без кэша (см. app/dashboard.py). n8n здесь больше не
+    участвует ни в расчёте, ни в транспорте — nginx проксирует прямо сюда
+    (2026-09-16, «нафига через n8n, если можно напрямую»)."""
+    _check_dashboard_token(token)
     with get_conn() as conn:
         with conn.cursor() as cur:
             return get_today_live_metrics(cur)
