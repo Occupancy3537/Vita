@@ -34,6 +34,7 @@ import time
 
 import httpx
 
+from app import registrar
 from app.db import get_conn, schema
 from app.doctor import anamnesis, dispatch, intake, telegram
 
@@ -167,6 +168,10 @@ def process_one(update: dict) -> None:
         intake.handle_update(update)
     elif destination == "anamnesis":
         anamnesis.handle_reply(update)
+    elif destination == "registrar":
+        # Волна 3 (B2): фото/документ лабораторий — разбор в card-service,
+        # раньше уходили в выключенный Capitan (тихая потеря).
+        registrar.handle_update(update)
     else:
         forward_to_capitan(update)
 

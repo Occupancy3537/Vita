@@ -21,18 +21,19 @@ def _update(text=None, caption=None, photo=None, document=None, reply_text=None,
     return {"update_id": update_id, "message": msg}
 
 
-def test_photo_always_other_no_llm_call(monkeypatch):
+def test_photo_always_registrar_no_llm_call(monkeypatch):
+    # Волна 3 (B2, 2026-09-18): фото -> регистратор (детерминированно, без LLM).
     def boom(*a, **k):
         raise AssertionError("не должен звать классификатор для фото")
     monkeypatch.setattr(dispatch, "classify_category", boom)
-    assert dispatch.route(_update(caption="что это на фото", photo=[{"file_id": "x"}])) == "other"
+    assert dispatch.route(_update(caption="что это на фото", photo=[{"file_id": "x"}])) == "registrar"
 
 
-def test_document_always_other_no_llm_call(monkeypatch):
+def test_document_always_registrar_no_llm_call(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("не должен звать классификатор для документа")
     monkeypatch.setattr(dispatch, "classify_category", boom)
-    assert dispatch.route(_update(document={"file_id": "d1"})) == "other"
+    assert dispatch.route(_update(document={"file_id": "d1"})) == "registrar"
 
 
 def test_anamnesis_reply_deterministic_no_llm_call(monkeypatch):

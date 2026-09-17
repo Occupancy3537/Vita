@@ -7,8 +7,13 @@
 Capitan своим классификатором поймает SYMPTOM и вызовет /doctor/turn обратно
 (узел "Call New Doctor" уже настроен). Обратного пути нет для противоположной
 ошибки (TEST ошибочно уходит доктору) — поэтому детерминированные случаи
-ниже (фото/документ, реплай на анамнез) ВСЕГДА уходят в "other", без вызова
-модели, ошибиться там не на чем.
+ниже (фото/документ, реплай на анамнез) ВСЕГДА уходят мимо LLM-классификатора,
+ошибиться там не на чем.
+
+Волна 3 (B2, 2026-09-18): фото/документ -> "registrar" (app/registrar.py —
+полный разбор лаб-документов в card-service, замена пересылки в выключенный
+Capitan, где они терялись). По-прежнему детерминированно, без LLM на этом
+шаге — LLM классифицирует СОДЕРЖИМИЕ уже внутри регистратора (шаг 1).
 """
 import os
 import re
@@ -87,10 +92,12 @@ def route(update: dict) -> str:
     """"doctor" -> intake.handle_update() в этом же процессе.
     "anamnesis" -> anamnesis.handle_reply() (детерминированно, без LLM; Волна 2/B1 —
     раньше такие реплаи пересылались в Capitan и терялись при его выключении).
+    "registrar" -> registrar.handle_update() (детерминированно, без LLM здесь;
+    Волна 3/B2 — раньше фото/документы пересылались в Capitan и терялись).
     "other" -> переслать сырой update на внутренний вебхук Capitan без изменений."""
     msg = update.get("message") or {}
     if msg.get("photo") or msg.get("document"):
-        return "other"
+        return "registrar"
     if is_anamnesis_reply(update):
         return "anamnesis"
     text = msg.get("text") or msg.get("caption") or ""

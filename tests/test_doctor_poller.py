@@ -71,6 +71,23 @@ def test_process_one_other_forwards_not_handle_update(monkeypatch):
     assert "update" not in calls
 
 
+def test_process_one_registrar_calls_handle_update_directly(monkeypatch):
+    # Волна 3 (B2): фото/документ -> registrar.handle_update в этом же процессе,
+    # не через пересылку в Capitan.
+    from app import registrar
+
+    calls = {}
+    monkeypatch.setattr(dispatch, "route", lambda update: "registrar")
+    monkeypatch.setattr(registrar, "handle_update", lambda update: calls.setdefault("registrar", update))
+    monkeypatch.setattr(poller, "forward_to_capitan", lambda update: calls.setdefault("forwarded", update))
+
+    update = {"update_id": 4, "message": {"photo": [{"file_id": "p"}]}}
+    poller.process_one(update)
+
+    assert calls.get("registrar") == update
+    assert "forwarded" not in calls
+
+
 def test_process_one_dispatch_error_falls_back_to_forward(monkeypatch):
     calls = {}
 
