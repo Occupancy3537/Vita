@@ -57,9 +57,14 @@ SLEEP — вопросы про качество/длительность сна
 DOCTOR_CATEGORIES = {"SYMPTOM", "CALENDAR", "SLEEP"}
 
 
-def classify_category(text: str, has_image: bool, timeout: float = 8.0) -> str:
+def classify_category(text: str, has_image: bool, timeout: float = 8.0,
+                      context_hint: str = "") -> str:
     api_key = os.environ["OPENROUTER_API_KEY"]
     prompt = CLASSIFY_PROMPT_TEMPLATE.format(text=text, has_image=has_image)
+    if context_hint:
+        prompt += ("\n\nКОНТЕКСТ: бот задал пациенту вопрос менее 12 часов назад (фрагмент): "
+                   f"«{context_hint[:300]}»\n"
+                   "Если текст похож на ответ на этот вопрос — это SYMPTOM.")
     resp = httpx.post(
         OPENROUTER_URL,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -88,6 +93,37 @@ def is_anamnesis_reply(update: dict) -> bool:
     return bool(_ANAM_REPLY_RE.search(reply_text))
 
 
+def is_reply_to_bot(update: dict) -> bool:
+    """Реплай именно на сообщение БОТА (не человека). Инцидент 18.09 09:05 VL:
+    короткий ответ «нет, красных флагов никогда не было» классификатор без
+    контекста отправил в "other" и сообщение потерялось (Capitan-страховка мертва).
+    Порт Capitan Sticky Route: реплай на сообщение бота = продолжение разговора
+    с доктором, детерминированно, без LLM."""
+    msg = update.get("message") or {}
+    reply = msg.get("reply_to_message") or {}
+    sender = reply.get("from") or {}
+    return bool(reply) and bool(sender.get("is_bot"))
+
+
+def recent_bot_question(chat_id) -> str:
+    """Последний вопрос бота (<12 ч) — контекст для классификатора, чтобы ГОЛОСНЫЕ
+    (не-реплай) короткие ответы на вопросы доктора не улетали в "other".
+    Ошибки чтения глушим: подсказка — улучшение, не гарантия."""
+    try:
+        from app.db import get_conn, schema
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT left(text, 300) FROM {schema()}.dialog_turn "
+                "WHERE chat_id = %s AND role = 'assistant' AND ts > now() - interval '12 hours' "
+                "AND text LIKE '%%?%%' ORDER BY ts DESC LIMIT 1",
+                (str(chat_id),),
+            )
+            row = cur.fetchone()
+            return (row[0] or "") if row else ""
+    except Exception:
+        return ""
+
+
 def route(update: dict) -> str:
     """"doctor" -> intake.handle_update() в этом же процессе.
     "anamnesis" -> anamnesis.handle_reply() (детерминированно, без LLM; Волна 2/B1 —
@@ -107,5 +143,12 @@ def route(update: dict) -> str:
         # продублировать текстом (план §1 п.8) — тот же случай, доктору есть
         # что ответить, регистратору просто нечего разбирать без текста/файла.
         return "doctor"
-    category = classify_category(text, has_image=False)
+    # Sticky (порт Capitan Sticky Route, инцидент 18.09): реплай на сообщение
+    # бота — это продолжение разговора с доктором. Слэш-команды не перехватываем.
+    if is_reply_to_bot(update) and not text.startswith("/"):
+        return "doctor"
+    category = classify_category(
+        text, has_image=False,
+        context_hint=recent_bot_question((msg.get("chat") or {}).get("id")),
+    )
     return "doctor" if category in DOCTOR_CATEGORIES else "other"
