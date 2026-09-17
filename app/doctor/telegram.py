@@ -46,14 +46,17 @@ def send_chat_action(chat_id: str, action: str = "typing") -> None:
 
 
 def send_message(chat_id: str, text: str, reply_to_message_id: Optional[int] = None,
-                  parse_mode: Optional[str] = None) -> int:
+                  parse_mode: Optional[str] = None, force_reply: bool = False) -> int:
     """Возвращает message_id — нужен для editMessageText (плейсхолдер -> финальный
-    ответ, план §3.2: edit вместо send+delete)."""
+    ответ, план §3.2: edit вместо send+delete). force_reply — анамнез-вопросы
+    (Волна 2/B1): Telegram сам открывает поле ответа."""
     payload: dict = {"chat_id": chat_id, "text": text}
     if parse_mode:
         payload["parse_mode"] = parse_mode
     if reply_to_message_id:
         payload["reply_to_message_id"] = reply_to_message_id
+    if force_reply:
+        payload["reply_markup"] = {"force_reply": True, "selective": False}
     result = _call("sendMessage", payload)
     return result["message_id"]
 

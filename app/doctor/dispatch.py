@@ -85,12 +85,14 @@ def is_anamnesis_reply(update: dict) -> bool:
 
 def route(update: dict) -> str:
     """"doctor" -> intake.handle_update() в этом же процессе.
+    "anamnesis" -> anamnesis.handle_reply() (детерминированно, без LLM; Волна 2/B1 —
+    раньше такие реплаи пересылались в Capitan и терялись при его выключении).
     "other" -> переслать сырой update на внутренний вебхук Capitan без изменений."""
     msg = update.get("message") or {}
     if msg.get("photo") or msg.get("document"):
         return "other"
     if is_anamnesis_reply(update):
-        return "other"
+        return "anamnesis"
     text = msg.get("text") or msg.get("caption") or ""
     if not text:
         # Голосовое, стикер и т.п. — не фото/документ (иначе уже отфильтровано

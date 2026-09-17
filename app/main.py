@@ -41,6 +41,7 @@ from ulid import ULID
 from app.dashboard import get_health_dashboard, get_today_live_metrics
 from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
+from app.doctor import anamnesis as doctor_anamnesis
 from app.doctor import poller as doctor_poller
 from app.doctor.intake import handle_update
 from app.journal import write_journal
@@ -75,6 +76,12 @@ def _start_telegram_polling() -> None:
         return
     thread = threading.Thread(target=doctor_poller.run_polling_loop, daemon=True, name="telegram-poller")
     thread.start()
+    # Волна 2 (B1, 2026-09-17): анамнез-планировщик — тем же явным флагом (урок
+    # run.sh: без флага деплой молча оставляет фичу выключенной).
+    if os.environ.get("ANAMNESIS_SCHEDULER_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return
+    scheduler = threading.Thread(target=doctor_anamnesis.run_scheduler, daemon=True, name="anamnesis-scheduler")
+    scheduler.start()
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 

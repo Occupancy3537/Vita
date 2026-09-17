@@ -35,12 +35,14 @@ def test_document_always_other_no_llm_call(monkeypatch):
     assert dispatch.route(_update(document={"file_id": "d1"})) == "other"
 
 
-def test_anamnesis_reply_always_other_no_llm_call(monkeypatch):
+def test_anamnesis_reply_deterministic_no_llm_call(monkeypatch):
+    # Волна 2 (B1, 2026-09-17): реплай на анамнез идёт в "anamnesis" (обрабатывает
+    # card-service сам), по-прежнему ДЕТЕРМИНИРОВАННО — классификатор не зовётся.
     def boom(*a, **k):
         raise AssertionError("не должен звать классификатор для ответа на анамнез")
     monkeypatch.setattr(dispatch, "classify_category", boom)
     r = dispatch.route(_update(text="да, было", reply_text="Как дела со сном? #A03"))
-    assert r == "other"
+    assert r == "anamnesis"
 
 
 def test_is_anamnesis_reply_detects_tag():
