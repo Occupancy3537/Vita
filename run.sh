@@ -2,6 +2,7 @@
 # card-service — Phase 0. Публично не торчит: порт только на 127.0.0.1, сеть pgnet
 # (та же, что у pg и n8n — см. backups/infra/pg_run.sh в основном репозитории).
 # Волна 1 (A3, 2026-09-17): TELEGRAM_POLLING_ENABLED и CAPITAN_RELAY_URL закреплены
+# Хотфикс 17.09 (ZCode): + DASHBOARD_TOKEN — без него /dashboard/* отдаёт 403 fail-closed
 # здесь — без флага run.sh молча запускал контейнер С ВЫКЛЮЧЕННЫМ telegram-poller
 # (main.py включает поток только по явному env; прод-режим = polling ON).
 set -e
@@ -24,6 +25,7 @@ sudo docker run -d \
   -e OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
   -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
   -e TELEGRAM_POLLING_ENABLED=1 \
+  -e DASHBOARD_TOKEN="$DASHBOARD_TOKEN" \
   -e CAPITAN_RELAY_URL="${CAPITAN_RELAY_URL:-http://n8n:443/webhook/doctor-relay-c8f3a9}" \
   card-service:latest
 
