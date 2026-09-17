@@ -21,6 +21,12 @@ multipart/form-data нативно (json.body.* — текстовые поля,
 ВАЖНО: пока polling запущен, у бота НЕ должно быть зарегистрированного
 Telegram-webhook (иначе getUpdates отвечает 409) — disable_telegram_webhook()
 вызывается один раз при старте цикла.
+
+Волна 1 (A3, 2026-09-17): (1) guard _safe_process вокруг обработки одного
+апдейта — одно непредвиденное исключение больше не убивает поток приёма до
+рестарта контейнера; (2) при ошибке пересылки в Capitan (включая 404 —
+роутер выключен по решению Влада) Владу уходит видимое «НЕ сохранено» вместо
+тихой потери, не чаще 1 сообщения в 6 ч (анти-спам).
 """
 import logging
 import os
@@ -36,6 +42,11 @@ logger = logging.getLogger(__name__)
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}"
 CAPITAN_RELAY_URL = os.environ.get("CAPITAN_RELAY_URL", "")
 POLL_TIMEOUT = 30
+
+# A3: видимая потеря вместо тихой. Влад (тот же доктор-бот), анти-спам 6 ч.
+OWNER_CHAT_ID = "8956401"
+LOSS_NOTIFY_COOLDOWN = 6 * 3600
+_last_loss_notify_ts = 0.0  # модульное состояние; рестарт контейнера сбрасывает — допустимо
 
 
 def disable_telegram_webhook() -> None:
@@ -91,9 +102,43 @@ def _extract_file_id(update: dict) -> tuple[str, str] | tuple[None, None]:
     return None, None
 
 
+def _loss_summary(update: dict) -> str:
+    """Первые 60 символов текста (включая caption фото), либо тип вложения."""
+    msg = update.get("message") or {}
+    text = msg.get("text") or msg.get("caption")
+    if text:
+        return str(text)[:60]
+    if msg.get("photo"):
+        return "фото"
+    if msg.get("document"):
+        return "документ"
+    return "(без текста)"
+
+
+def _notify_owner_lost(update: dict) -> None:
+    """Видимая потеря: короткое сообщение Владу, что апдейт НЕ сохранён.
+    Анти-спам — не чаще 1 сообщения в 6 ч. Сама отправка обёрнута в try/except:
+    никогда не должна ронять вызывающий цикл."""
+    global _last_loss_notify_ts
+    now = time.time()
+    if now - _last_loss_notify_ts < LOSS_NOTIFY_COOLDOWN:
+        return
+    _last_loss_notify_ts = now  # фиксируем ДО отправки: даже упавшая попытка не должна спамить ретраями
+    try:
+        telegram.send_message(
+            OWNER_CHAT_ID,
+            f"⚠️ Доставка сообщения отключена (Capitan выключен) — НЕ сохранено: {_loss_summary(update)}",
+        )
+        logger.error("owner notified about LOST update %s (relay unavailable)", update.get("update_id"))
+    except Exception:
+        logger.exception(
+            "failed to notify owner about lost update %s (cooldown still consumed)", update.get("update_id"))
+
+
 def forward_to_capitan(update: dict) -> None:
     if not CAPITAN_RELAY_URL:
         logger.error("CAPITAN_RELAY_URL не задан — апдейт %s потерян", update.get("update_id"))
+        _notify_owner_lost(update)
         return
     import json
     file_id, filename = _extract_file_id(update)
@@ -108,6 +153,7 @@ def forward_to_capitan(update: dict) -> None:
         resp.raise_for_status()
     except Exception:
         logger.exception("failed to forward update %s to Capitan", update.get("update_id"))
+        _notify_owner_lost(update)
 
 
 def process_one(update: dict) -> None:
@@ -121,6 +167,18 @@ def process_one(update: dict) -> None:
         intake.handle_update(update)
     else:
         forward_to_capitan(update)
+
+
+def _safe_process(update: dict) -> None:
+    """Guard (A3): одно непредвиденное исключение в обработке апдейта не должно
+    убивать поток приёма сообщений до рестарта контейнера. Логируем и идём дальше;
+    offset ниже по циклу всё равно сдвинется — т.е. апдейт потерян ВИДИМО (в логах),
+    но приём продолжается."""
+    try:
+        process_one(update)
+    except Exception:
+        logger.exception("unhandled error while processing update %s — update lost, polling continues",
+                          update.get("update_id"))
 
 
 def run_polling_loop() -> None:
@@ -138,7 +196,7 @@ def run_polling_loop() -> None:
             continue
 
         for update in updates:
-            process_one(update)
+            _safe_process(update)
             offset = update["update_id"] + 1
             try:
                 with get_conn() as conn, conn.cursor() as cur:
