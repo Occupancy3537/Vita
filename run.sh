@@ -32,6 +32,7 @@ sudo docker run -d \
   -e ANAMNESIS_SCHEDULER_ENABLED=1 \
   -e REGISTRAR_MODEL="${REGISTRAR_MODEL:-z-ai/glm-5.3-flash}" \
   -e REGISTRAR_PDF_MODEL="${REGISTRAR_PDF_MODEL:-google/gemini-3.1-flash-lite}" \
+  -e REGISTRAR_HEALTH_SCHEMA="${REGISTRAR_HEALTH_SCHEMA:-health}" \
   -e DASHBOARD_TOKEN="$DASHBOARD_TOKEN" \
   -e CAPITAN_RELAY_URL="${CAPITAN_RELAY_URL:-http://n8n:443/webhook/doctor-relay-c8f3a9}" \
   card-service:latest

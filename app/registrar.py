@@ -20,6 +20,12 @@
           visit_source_ref = "V<ГГГГММДД>" из даты документа (тот же ключ,
           что строил Build Visit в n8n) — повторная отправка того же фото
           дублей не плодит.
+  Шаг 3b — дуал-райт (санкция ZCode 18.09): те же визит+результаты в
+          health.visits/health.results (паритет со старым n8n-путём, phase C)
+          — потребители health.results (PhenoAge Calc, Advisor, Watchdog,
+          bioage-dashboard) продолжают видеть новые лаб-данные до перевода на
+          card.lab_result в Волнах 4+. Сбой дуал-райта не рвёт ответ Владу
+          (card.* уже зафиксирован), но помечается в ответе «не доехало».
   Шаг 4 — ответ Владу в тот же чат: «✅ Загрузил: визит <дата>, <N>
           показателей» + нераспознанные имена списком + при 0 распознанных —
           честное «не нашёл знакомых показателей, ничего не записал».
@@ -357,6 +363,23 @@ def extract_document(content: bytes, mime: str, today_vl: str) -> dict:
 
 # ───────────────────────────── запись (шаг 3) ─────────────────────────────
 
+_HEALTH_SCHEMA = os.environ.get("REGISTRAR_HEALTH_SCHEMA", "health")
+BIRTH_YEAR = 1982  # порт Build Visit: Age_at_Visit = год документа - 1982
+
+
+def _to_comma(v) -> str:
+    """Порт toComma() из ноды Map: число -> строка с запятой (формат старого
+    пути Results; PhenoAge num() парсит и запятую, и точку — но не меняем
+    формат витрины). 145.0 -> '145', 5.222 -> '5,222', None -> ''."""
+    if v is None or v == "":
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        s = str(int(v))
+    else:
+        s = str(v).strip().replace(" ", "")
+    return s.replace(".", ",")
+
+
 def _fetch_marker_rows() -> list[dict]:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute('SELECT "Marker_ID", "Name" FROM health.markers')
@@ -379,6 +402,44 @@ def persist_document(doc: dict, mapped: dict, date_iso: str) -> str:
             marker_label=r["label"], value_num=r["value_num"], unit=r["unit"] or None,
             ref_min=r["ref_min"], ref_max=r["ref_max"]))
     return visit_ref
+
+
+def persist_health(doc: dict, mapped: dict, date_iso: str) -> str:
+    """Шаг 3b — дуал-райт (санкция ZCode 18.09): те же визит+результаты в
+    health.visits / health.results, паритет со старым n8n-путём (Write Visit PG /
+    Write Results PG, phase C: upsert по PK "Visit_ID" и ("Visit_ID","Marker_ID"),
+    колонки/форматы один-в-один — Value с запятой, Date DD.MM.YYYY). Порт
+    семантики Build Visit: существующий визит с той же датой переиспользуется,
+    его поля НЕ перезаписываются; нового — Visit_ID = V<ГГГГММДД>,
+    Age_at_Visit = год - 1982. Сбой здесь не должен рвать ответ Владу —
+    вызывающий оборачивает в try/except и помечает ответ."""
+    ru_date = f"{date_iso[8:10]}.{date_iso[5:7]}.{date_iso[0:4]}"
+    age = str(int(date_iso[:4]) - BIRTH_YEAR)
+    lab_name = (doc.get("lab_name") or "").strip()
+    notes = (doc.get("notes") or "").strip()
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f'SELECT "Visit_ID" FROM {_HEALTH_SCHEMA}.visits WHERE "Date" = %s LIMIT 1',
+                    (ru_date,))
+        row = cur.fetchone()
+        if row:
+            visit_id = row[0]  # визит с этой датой уже есть — реюз, старые поля сохраняем
+        else:
+            visit_id = "V" + date_iso.replace("-", "")
+            cur.execute(
+                f'INSERT INTO {_HEALTH_SCHEMA}.visits ("Visit_ID","Date","Age_at_Visit","Lab_Name","Notes") '
+                f'VALUES (%s,%s,%s,%s,%s) ON CONFLICT ("Visit_ID") DO NOTHING',
+                (visit_id, ru_date, age, lab_name, notes))
+        for r in mapped["rows"]:
+            cur.execute(
+                f'INSERT INTO {_HEALTH_SCHEMA}.results ("Visit_ID","Marker_ID","Value","Original_Unit","Lab_Min","Lab_Max") '
+                f'VALUES (%s,%s,%s,%s,%s,%s) '
+                f'ON CONFLICT ("Visit_ID","Marker_ID") DO UPDATE SET '
+                f'"Value"=EXCLUDED."Value","Original_Unit"=EXCLUDED."Original_Unit",'
+                f'"Lab_Min"=EXCLUDED."Lab_Min","Lab_Max"=EXCLUDED."Lab_Max",_synced_at=now()',
+                (visit_id, r["marker_id"], _to_comma(r["value_num"]), r["unit"] or "",
+                 _to_comma(r["ref_min"]), _to_comma(r["ref_max"])))
+        conn.commit()
+    return visit_id
 
 
 # ───────────────────────────── точка входа ─────────────────────────────
@@ -464,11 +525,19 @@ def handle_update(update: dict) -> None:
             _reply(chat_id, build_reply(date_iso, mapped, cls["kind"]))
             return
 
-        visit_ref = persist_document(doc, mapped, date_iso)  # шаг 3
-        logger.info("registrar: update %s -> %s, %d показателей, нераспознано: %s",
-                    update_id, visit_ref, len(mapped["rows"]),
-                    "; ".join(mapped["unmatched"]) or "нет")
-        _reply(chat_id, build_reply(date_iso, mapped, cls["kind"]))  # шаг 4
+        visit_ref = persist_document(doc, mapped, date_iso)  # шаг 3: card.* (канон)
+        health_note = ""
+        try:
+            health_visit_id = persist_health(doc, mapped, date_iso)  # шаг 3b: дуал-райт
+            logger.info("registrar: update %s -> card:%s / health:%s, %d показателей, нераспознано: %s",
+                        update_id, visit_ref, health_visit_id, len(mapped["rows"]),
+                        "; ".join(mapped["unmatched"]) or "нет")
+        except Exception:
+            # card.* уже зафиксирован — сбой старой витрины не рвёт ответ, но и не молчит
+            logger.exception("registrar: дуал-райт в health.* не удался (card.%s записан), update %s",
+                             visit_ref, update_id)
+            health_note = "\n⚠️ Записал в карту, но данные не доехали до старой базы (панель PhenoAge их не увидит)."
+        _reply(chat_id, build_reply(date_iso, mapped, cls["kind"]) + health_note)  # шаг 4
     except Exception:
         logger.exception("registrar: сбой обработки update %s", update_id)
         _reply(chat_id, FAILURE_REPLY)

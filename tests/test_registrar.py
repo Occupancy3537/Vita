@@ -248,3 +248,87 @@ def test_reply_send_failure_does_not_raise(monkeypatch, sent):
     monkeypatch.setattr(registrar.telegram, "download_file", lambda file_id, timeout=20.0: b"b")
     monkeypatch.setattr(registrar, "classify_document", lambda content, mime: {"kind": "not_document", "reason": "мем"})
     registrar.handle_update(_photo_update())  # не бросает
+
+
+# ─────────────── дуал-райт в health.visits/results (санкция ZCode 18.09) ───────────────
+# conftest перенаправляет цель дуал-райта в card_test.visits/results (двойники
+# health.* той же формы) — тесты реально гоняют SQL upsert'ы, прод не трогая.
+
+def _health_visits(**vals):
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f'INSERT INTO {schema()}.visits ("Visit_ID","Date","Age_at_Visit","Lab_Name","Notes") '
+            'VALUES (%s,%s,%s,%s,%s) ON CONFLICT ("Visit_ID") DO NOTHING',
+            (vals.get("Visit_ID"), vals.get("Date"), vals.get("Age_at_Visit"),
+             vals.get("Lab_Name"), vals.get("Notes")))
+        conn.commit()
+
+
+def test_dual_write_creates_visit_and_results(lab_doc, sent):
+    registrar.handle_update(_photo_update())
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f'SELECT "Visit_ID","Date","Age_at_Visit","Lab_Name","Notes" FROM {schema()}.visits')
+        v = cur.fetchall()
+        assert v == [("V20260915", "15.09.2026", "44", "Инвитро", "биохимия")]
+        cur.execute(f'SELECT "Marker_ID","Value","Original_Unit","Lab_Min","Lab_Max" FROM {schema()}.results ORDER BY "Marker_ID"')
+        rows = cur.fetchall()
+        assert [r[0] for r in rows] == ["M003", "M041"]
+        assert rows[1] == ("M041", "145", "г/л", "130", "160")  # Value с запятой/без .0 — формат старого пути
+        assert rows[0][1] == "5,2"  # запятая, как в прод-витрине
+
+
+def test_dual_write_idempotent_both_targets(lab_doc, sent):
+    """Повторная отправка того же фото: 0 новых строк в ОБОИХ хранилищах."""
+    registrar.handle_update(_photo_update())
+    registrar.handle_update(_photo_update())
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {schema()}.visits")
+        assert cur.fetchone()[0] == 1
+        cur.execute(f"SELECT count(*) FROM {schema()}.results")
+        assert cur.fetchone()[0] == 2
+        cur.execute(f"SELECT count(*) FROM {schema()}.visit WHERE provenance->>'source_ref' = 'V20260915'")
+        assert cur.fetchone()[0] == 1
+        cur.execute(f"SELECT count(*) FROM {schema()}.lab_result")
+        assert cur.fetchone()[0] == 2
+
+
+def test_dual_write_reuses_existing_visit_by_date(lab_doc, sent):
+    """Визит с той же датой уже есть (старый формат Visit_ID) — реюз его
+    Visit_ID, поля не перезаписаны, дубль-визит не создаётся (порт Build Visit)."""
+    _health_visits(Visit_ID="V09", Date="15.09.2026", Age_at_Visit="44",
+                   Lab_Name="КДЦ", Notes="старая заметка")
+    registrar.handle_update(_photo_update())
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f'SELECT "Visit_ID","Lab_Name","Notes" FROM {schema()}.visits')
+        v = cur.fetchall()
+        assert v == [("V09", "КДЦ", "старая заметка")]  # старые поля сохранены
+        cur.execute(f'SELECT DISTINCT "Visit_ID" FROM {schema()}.results')
+        assert cur.fetchall() == [("V09",)]  # результаты под реюзнутым визитом
+
+
+def test_dual_write_failure_visible_card_still_written(lab_doc, sent, monkeypatch):
+    """Сбой дуал-райта: card.* записан, ответ Владу с ⚠️-пометкой — не тихий."""
+    def boom(*a, **k):
+        raise RuntimeError("health schema unreachable")
+    monkeypatch.setattr(registrar, "persist_health", boom)
+
+    registrar.handle_update(_photo_update())
+
+    assert "не доехали до старой базы" in sent[0][1]
+    assert "✅ Загрузил" in sent[0][1]  # основная запись состоялась
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {schema()}.visit WHERE provenance->>'source_ref' = 'V20260915'")
+        assert cur.fetchone()[0] == 1
+        cur.execute(f"SELECT count(*) FROM {schema()}.lab_result")
+        assert cur.fetchone()[0] == 2
+        cur.execute(f"SELECT count(*) FROM {schema()}.results")
+        assert cur.fetchone()[0] == 0  # health-цель не тронута упавшим вызовом
+
+
+def test_to_comma_formats():
+    assert registrar._to_comma(145.0) == "145"
+    assert registrar._to_comma(5.222) == "5,222"
+    assert registrar._to_comma(None) == ""
+    assert registrar._to_comma("4.1") == "4,1"
