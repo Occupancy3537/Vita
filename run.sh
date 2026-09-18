@@ -9,6 +9,10 @@
 # принимает file-модальность на OpenRouter, дефолт = модель фото-пути Food diary).
 # здесь — без флага run.sh молча запускал контейнер С ВЫКЛЮЧЕННЫМ telegram-poller
 # (main.py включает поток только по явному env; прод-режим = polling ON).
+# 2026-09-19: SYSTEM_CHECK_ENABLED — порт n8n _System Check (app/system_check.py,
+# ежедневно 08:43 VL). Причина переноса именно этого воркфлоу первым — он же был
+# самым прожорливым по памяти активным узлом (без-лимита SELECT * по двум таблицам
+# целиком каждое утро), см. докстринг модуля и STATE.md/AGENT_SYNC.md #20.
 set -e
 cd "$(dirname "$0")"
 
@@ -30,6 +34,7 @@ sudo docker run -d \
   -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
   -e TELEGRAM_POLLING_ENABLED=1 \
   -e ANAMNESIS_SCHEDULER_ENABLED=1 \
+  -e SYSTEM_CHECK_ENABLED=1 \
   -e REGISTRAR_MODEL="${REGISTRAR_MODEL:-z-ai/glm-5.3-flash}" \
   -e REGISTRAR_PDF_MODEL="${REGISTRAR_PDF_MODEL:-google/gemini-3.1-flash-lite}" \
   -e REGISTRAR_HEALTH_SCHEMA="${REGISTRAR_HEALTH_SCHEMA:-health}" \

@@ -61,6 +61,7 @@ from app.recommendations import (
     propose_recommendation,
     sync_recommendation,
 )
+import app.system_check as system_check
 from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
@@ -82,6 +83,12 @@ def _start_telegram_polling() -> None:
         return
     scheduler = threading.Thread(target=doctor_anamnesis.run_scheduler, daemon=True, name="anamnesis-scheduler")
     scheduler.start()
+    # 2026-09-19: порт _System Check из n8n (самый прожорливый по памяти активный
+    # воркфлоу — см. докстринг app/system_check.py), тот же принцип явного флага.
+    if os.environ.get("SYSTEM_CHECK_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return
+    check_scheduler = threading.Thread(target=system_check.run_scheduler, daemon=True, name="system-check-scheduler")
+    check_scheduler.start()
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 
