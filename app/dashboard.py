@@ -353,14 +353,15 @@ def get_today_live_metrics(cur) -> dict:
     meal_count = len(meal_rows)
 
     cur.execute(
-        "SELECT steps, date, updated_at FROM health.live_steps_today "
+        "SELECT steps, stress, date, updated_at FROM health.live_steps_today "
         "WHERE date = (now() AT TIME ZONE 'Asia/Vladivostok')::date"
     )
     row = cur.fetchone()
-    steps, steps_date, steps_updated_at = (row if row else (None, None, None))
+    steps, stress, steps_date, steps_updated_at = (row if row else (None, None, None, None))
 
     return {
         "steps_today_live": int(steps) if steps is not None else None,
+        "stress_today_live": int(stress) if stress is not None else None,
         "kcal_today_live": round(float(kcal_sum)) if kcal_sum is not None else None,
         "protein_today_live": round(float(protein_sum)) if protein_sum is not None else None,
         "meals_count_today": int(meal_count) if meal_count is not None else 0,

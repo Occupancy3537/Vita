@@ -37,17 +37,28 @@ def test_get_today_live_metrics_normal_day():
     # meals."Calories"/"Proteins" — TEXT-колонки, приходят строками, иногда с
     # запятой вместо точки (наступили на это в pg_sheets_diff_check).
     meal_rows = [("2247", "132,2"), ("100", "5")]
-    cur = _mock_cur(meal_rows, (11427, _FakeDate("2026-09-16"), "irrelevant"))
+    cur = _mock_cur(meal_rows, (11427, 42, _FakeDate("2026-09-16"), "irrelevant"))
     out = get_today_live_metrics(cur)
     assert out["kcal_today_live"] == 2347
     assert out["protein_today_live"] == 137
     assert out["steps_today_live"] == 11427
+    assert out["stress_today_live"] == 42
     assert out["meals_count_today"] == 2
     assert out["steps_source_date"] == "2026-09-16"
 
 
+def test_get_today_live_metrics_no_stress_yet():
+    # Стресс приходит из Garmin — свежее внутридневное значение; до синка его нет.
+    # Не должен ломать метрику: stress_today_live честно null, а не 0.
+    meal_rows = [("600", "30")]
+    cur = _mock_cur(meal_rows, (2000, None, _FakeDate("2026-09-18"), "irrelevant"))
+    out = get_today_live_metrics(cur)
+    assert out["steps_today_live"] == 2000
+    assert out["stress_today_live"] is None
+
+
 def test_get_today_live_metrics_no_meals_yet():
-    cur = _mock_cur([], (500, _FakeDate("2026-09-16"), "irrelevant"))
+    cur = _mock_cur([], (500, 30, _FakeDate("2026-09-16"), "irrelevant"))
     out = get_today_live_metrics(cur)
     assert out["kcal_today_live"] == 0
     assert out["protein_today_live"] == 0
@@ -60,6 +71,7 @@ def test_get_today_live_metrics_no_steps_row_yet():
     cur = _mock_cur([("695", "55")], None)
     out = get_today_live_metrics(cur)
     assert out["steps_today_live"] is None
+    assert out["stress_today_live"] is None
     assert out["steps_source_date"] is None
     assert out["kcal_today_live"] == 695
 
