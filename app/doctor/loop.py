@@ -17,6 +17,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -24,7 +25,7 @@ from typing import Optional
 import httpx
 
 from app.db import get_conn
-from app.doctor import config, trace
+from app.doctor import config, telegram, trace
 from app.doctor.contract import StagedWrite, TurnResult
 from app.doctor.context import build_dossier
 from app.doctor.dialog import recent_turns
@@ -98,10 +99,10 @@ def _call_model(messages: list[dict], model: str, timeout: float) -> dict:
             # не отказ хода целиком.
             "provider": {"require_parameters": True, "order": config.DOCTOR_PROVIDER_ORDER,
                          "allow_fallbacks": True},
-            # GLM 5.3 Flash: рассуждение обязательно (нельзя отключить), но
-            # ограничение effort — иначе счёт токенов и задержка растут без
-            # выгоды для дисциплины вызовов инструментов.
-            "reasoning": {"effort": "low"},
+            # 2026-09-18: effort настраиваемый (config.DOCTOR_REASONING_EFFORT,
+            # по умолчанию 'high' с переходом на полный GLM 5.3) — раньше был
+            # захардкожен в 'low' под Flash, см. комментарий у DOCTOR_MODEL.
+            "reasoning": {"effort": config.DOCTOR_REASONING_EFFORT},
         },
         timeout=timeout,
     )
@@ -117,8 +118,30 @@ def _collect_staged_writes(tool_results: dict[str, dict], call_by_id: dict[str, 
     return out
 
 
+def _typing_keepalive(chat_id: str, stop_event: threading.Event) -> None:
+    """2026-09-18: индикатор "печатает" гаснет в Telegram сам через ~5с —
+    intake.py раньше слал его РОВНО ОДИН раз перед плейсхолдером, а сам ход
+    теперь может идти до TURN_DEADLINE_SECONDS (подняли вместе с переходом на
+    полный GLM 5.3 + effort=high, см. config.py) — молчащий индикатор дольше
+    5с выглядит как "бот завис", а не "думает". Фоновый поток, не блокирует
+    основной цикл; сбой send_chat_action уже проглатывается внутри telegram.py."""
+    while not stop_event.wait(config.TYPING_REFRESH_SECONDS):
+        telegram.send_chat_action(chat_id, "typing")
+
+
 def run_turn(*, chat_id: str, person_id: str, text: str, turn_id: str,
              model: Optional[str] = None) -> TurnResult:
+    stop_event = threading.Event()
+    keepalive = threading.Thread(target=_typing_keepalive, args=(chat_id, stop_event), daemon=True)
+    keepalive.start()
+    try:
+        return _run_turn_body(chat_id=chat_id, person_id=person_id, text=text, turn_id=turn_id, model=model)
+    finally:
+        stop_event.set()
+
+
+def _run_turn_body(*, chat_id: str, person_id: str, text: str, turn_id: str,
+                    model: Optional[str] = None) -> TurnResult:
     model = model or config.DOCTOR_MODEL
     deadline = time.monotonic() + config.TURN_DEADLINE_SECONDS
 
@@ -162,7 +185,7 @@ def run_turn(*, chat_id: str, person_id: str, text: str, turn_id: str,
 
         t0 = time.monotonic()
         try:
-            data = _call_model(messages, model, timeout=min(remaining, 30.0))
+            data = _call_model(messages, model, timeout=min(remaining, config.MODEL_CALL_TIMEOUT_SECONDS))
         except Exception:
             try:
                 with get_conn() as conn, conn.cursor() as cur:

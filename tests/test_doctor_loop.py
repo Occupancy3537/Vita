@@ -44,6 +44,16 @@ def fast_deadline(monkeypatch):
     monkeypatch.setattr(config, "MAX_TOOL_ROUNDS", 3)
 
 
+@pytest.fixture(autouse=True)
+def no_real_telegram_calls(monkeypatch):
+    """2026-09-18: run_turn теперь держит фоновый keepalive-поток на
+    send_chat_action (индикатор "печатает" на весь ход, не один раз в начале) —
+    в быстрых тестах поток обычно не успевает ни разу сработать до stop_event
+    (см. _typing_keepalive), но полагаться на тайминг для "не бьёт по сети" —
+    хрупко. Мокаем явно, тот же принцип, что и у _call_model выше в файле."""
+    monkeypatch.setattr(loop.telegram, "send_chat_action", lambda *a, **k: None)
+
+
 def test_run_turn_no_tool_calls_returns_final_text(monkeypatch):
     monkeypatch.setattr(loop, "_call_model", lambda messages, model, timeout: _final_response("Обычный ответ"))
     r = loop.run_turn(chat_id="1", person_id="self", text="как дела", turn_id=_real_turn())

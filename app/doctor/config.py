@@ -16,11 +16,28 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 # (Crusoe/Fireworks/BaseTen), что уже используют остальные воркфлоу n8n этого
 # проекта, самый дешёвый вариант. Замена модели — через переменную окружения,
 # без правки кода.
-DOCTOR_MODEL = os.environ.get("DOCTOR_MODEL", "z-ai/glm-5.3-flash")
+#
+# 2026-09-18: Влад — «хочу, чтобы доктор был умным сам, без ручных правил под
+# каждый случай» (см. AGENT_SYNC.md-стиль разбор кейса про B12/Nutrition_Analyzer).
+# Первый шаг из предложенного меню — не патчить промпт под конкретные пропуски,
+# а поднять саму способность модели рассуждать: GLM 5.3 (не Flash) + эффорт
+# рассуждения не 'low', а полный. Дороже по токену (~10х completion-цена у
+# Z.AI на OpenRouter), но абсолютные суммы всё равно центы за консультацию —
+# цена другого порядка, не другого масштаба бюджета. Crusoe не обслуживает
+# полный GLM 5.3 (только Flash) — оставлен в списке безвредно: allow_fallbacks
+# просто пропустит его, обслужат Fireworks/BaseTen (проверено через
+# /models/z-ai/glm-5.3/endpoints перед переключением, не угадывалось).
+DOCTOR_MODEL = os.environ.get("DOCTOR_MODEL", "z-ai/glm-5.3")
 DOCTOR_PROVIDER_ORDER = os.environ.get("DOCTOR_PROVIDER_ORDER", "Crusoe,Fireworks,BaseTen").split(",")
+DOCTOR_REASONING_EFFORT = os.environ.get("DOCTOR_REASONING_EFFORT", "high")
 
-# §3.4 — бюджет агентного цикла.
-TURN_DEADLINE_SECONDS = float(os.environ.get("DOCTOR_TURN_DEADLINE_SECONDS", "60"))
+# §3.4 — бюджет агентного цикла. Подняты вместе с переходом на полный GLM 5.3 +
+# effort=high — прежние 60с/раунд-30с были откалиброваны под Flash с effort=low
+# (наблюдался обрыв ответа по finish_reason=length именно от нехватки лимита
+# на рассуждение, см. STATE.md 2026-09-16 инцидент с дневником питания — тот же
+# класс модели, тот же риск, если не поднять бюджет вместе с эффортом).
+TURN_DEADLINE_SECONDS = float(os.environ.get("DOCTOR_TURN_DEADLINE_SECONDS", "180"))
+MODEL_CALL_TIMEOUT_SECONDS = float(os.environ.get("DOCTOR_MODEL_CALL_TIMEOUT_SECONDS", "90"))
 TOOL_TIMEOUT_SECONDS = float(os.environ.get("DOCTOR_TOOL_TIMEOUT_SECONDS", "4"))
 MAX_TOOL_ROUNDS = int(os.environ.get("DOCTOR_MAX_TOOL_ROUNDS", "3"))
 
