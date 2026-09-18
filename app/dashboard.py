@@ -1,4 +1,5 @@
 """Живые «сегодня»-метрики для дашборда — прямая замена n8n-кэша (2026-09-16).
+См. также get_bioage_dashboard() ниже (2026-09-19, порт вкладки «Био-возраст»).
 
 Контекст: `health-dashboard (cache)` в n8n считал steps_today_live/kcal_today_live/
 protein_today_live через Schedule Trigger раз в 15/30 минут, писал в
@@ -21,6 +22,8 @@ kcal/protein — сумма health.meals за сегодняшний кален�
 health.live_steps_today (её пишет напрямую push_live_steps.py с гарминбота,
 см. STATE.md 2026-09-16 — тоже больше не через n8n).
 """
+import json
+import re
 from datetime import date, datetime, timedelta, timezone
 
 # --- «Здоровье»-экран: порт n8n Code-ноды "Build Health JSON" (2026-09-16) ---
@@ -193,7 +196,7 @@ def get_health_dashboard(cur) -> dict:
         metric_by_key[m["key"]] = entry
 
     live = get_today_live_metrics(cur)
-    for key, unit in (("steps_today_live", "шаг"), ("kcal_today_live", "ккал"), ("protein_today_live", "г")):
+    for key, unit in (("steps_today_live", "шаг"), ("stress_today_live", "ед"), ("kcal_today_live", "ккал"), ("protein_today_live", "г")):
         value = live.get(key)
         metrics.append({
             "key": key, "label": key, "unit": unit, "value": value,
@@ -367,4 +370,304 @@ def get_today_live_metrics(cur) -> dict:
         "meals_count_today": int(meal_count) if meal_count is not None else 0,
         "steps_source_date": steps_date.isoformat() if steps_date else None,
         "computed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# --- «Био-возраст»-экран: порт n8n Code-ноды "Build Bioage JSON" (2026-09-19) ---
+#
+# Выбран следующим для переноса не по алфавиту: единственный из активных
+# дашборд-кэшей с НУЛЕВОЙ зависимостью от Google Sheets — все 5 источников
+# (health.results/markers/visits/phenoage_log/lab_plan) уже в Postgres. Самый
+# низкорисковый перенос из оставшихся, формула PhenoAge (Levine) НЕ
+# дублируется — берётся готовой из phenoage_log, как и в оригинале (её
+# считает отдельный воркфлоу PhenoAge Calc, ещё не портирован).
+
+PHENO_MARKERS = {
+    "alb": {"id": "M008", "rx": re.compile(r"альбумин", re.I), "label": "Альбумин"},
+    "creat": {"id": "M004", "rx": re.compile(r"креатинин", re.I), "label": "Креатинин"},
+    "gluc": {"id": "M003", "rx": re.compile(r"глюкоза", re.I), "label": "Глюкоза"},
+    "crp": {"id": "M024", "rx": re.compile(r"с-реактивн|срб|crp", re.I), "label": "CRP (С-реактивный белок)"},
+    "lymph": {"id": "M062", "rx": re.compile(r"лимфоциты\s*%", re.I), "label": "Лимфоциты %"},
+    "mcv": {"id": "M043", "rx": re.compile(r"mcv|средний объ[её]м эритроцит", re.I), "label": "MCV"},
+    "rdw": {"id": "M049", "rx": re.compile(r"rdw|ширина распред.*эритроцит", re.I), "label": "RDW"},
+    "alp": {"id": "M017", "rx": re.compile(r"щелочн(ая)? фосфатаз|alp|щф", re.I), "label": "Щелочная фосфатаза"},
+    "wbc": {"id": "M039", "rx": re.compile(r"лейкоциты|wbc", re.I), "label": "Лейкоциты (WBC)"},
+}
+
+
+def _d10_text(v) -> str:
+    """Порт d10() из n8n: visits/phenoage_log — TEXT-колонки, дата может прийти
+    и как DD.MM.YYYY, и как YYYY-MM-DD (наследие Sheets) — в отличие от
+    daily_trends, тут не обычный ::date каст, нужен тот же regex, что в JS."""
+    s = str(v or "").strip()
+    m = re.match(r"^(\d{1,2})[./-](\d{1,2})[./-](\d{4})", s)
+    if m:
+        return f"{m.group(3)}-{m.group(2).zfill(2)}-{m.group(1).zfill(2)}"
+    m = re.match(r"^(\d{4})[./-](\d{1,2})[./-](\d{1,2})", s)
+    if m:
+        return f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}"
+    return s[:10]
+
+
+def _dec_year(iso: str):
+    if not iso or len(iso) < 10:
+        return None
+    y, mo, d = int(iso[0:4]), int(iso[5:7]), int(iso[8:10])
+    return round((y + ((mo - 1) * 30 + d) / 365) * 100) / 100
+
+
+def _key_for_marker_id(mid, mark_by_id: dict):
+    for key, definition in PHENO_MARKERS.items():
+        if definition["id"] == mid:
+            return key
+        if definition["rx"].search((mark_by_id.get(mid) or {}).get("Name") or ""):
+            return key
+    return None
+
+
+def _strip_pheno_prefix(s) -> str:
+    return re.sub(r"^PhenoAge\s*/\s*", "", str(s or "")).strip()
+
+
+def get_bioage_dashboard(cur) -> dict:
+    cur.execute('SELECT "Visit_ID", "Marker_ID", "Value", "Lab_Min", "Lab_Max" FROM health.results')
+    results = [{"Visit_ID": r[0], "Marker_ID": r[1], "Value": r[2], "Lab_Min": r[3], "Lab_Max": r[4]}
+               for r in cur.fetchall()]
+
+    cur.execute('SELECT "Marker_ID", "Name", "Category", "Standard_Unit", "Optimal_Min", "Optimal_Max" FROM health.markers')
+    markers = [{"Marker_ID": r[0], "Name": r[1], "Category": r[2], "Standard_Unit": r[3],
+                "Optimal_Min": r[4], "Optimal_Max": r[5]} for r in cur.fetchall()]
+    mark_by_id = {m["Marker_ID"]: m for m in markers if m["Marker_ID"]}
+
+    cur.execute('SELECT "Visit_ID", "Date", "Age_at_Visit" FROM health.visits')
+    visits = [{"Visit_ID": r[0], "Date": r[1], "Age_at_Visit": r[2]} for r in cur.fetchall()]
+
+    cur.execute(
+        "SELECT date, chrono_age, phenoage, delta, markers_used, formula_version, "
+        "contributions, marker_values, oldest_marker_date FROM health.phenoage_log"
+    )
+    pheno_log = [
+        {"date": r[0], "chrono_age": r[1], "phenoage": r[2], "delta": r[3], "markers_used": r[4],
+         "formula_version": r[5], "contributions": r[6], "marker_values": r[7], "oldest_marker_date": r[8]}
+        for r in cur.fetchall()
+    ]
+
+    cur.execute(
+        'SELECT "Plan_ID", "Test", "Category", "Interval_Months", "Last_Done", "Next_Due", '
+        '"Reason", "Status", "Source", "Notes" FROM health.lab_plan'
+    )
+    lab_plan_rows = [
+        {"Plan_ID": r[0], "Test": r[1], "Category": r[2], "Interval_Months": r[3], "Last_Done": r[4],
+         "Next_Due": r[5], "Reason": r[6], "Status": r[7], "Source": r[8], "Notes": r[9]}
+        for r in cur.fetchall()
+    ]
+
+    # visit -> {date, age, values:{key:val}}
+    visit_map: dict = {}
+    visit_date: dict = {}
+    for v in visits:
+        vid = v["Visit_ID"]
+        visit_map[vid] = {"vid": vid, "date": _d10_text(v["Date"]), "age": _num(v["Age_at_Visit"]), "values": {}}
+        visit_date[vid] = _d10_text(v["Date"])
+    for r in results:
+        key = _key_for_marker_id(r["Marker_ID"], mark_by_id)
+        val = _num(r["Value"])
+        if val is None:
+            continue
+        vid = r["Visit_ID"]
+        if vid not in visit_map:
+            visit_map[vid] = {"vid": vid, "date": visit_date.get(vid) or _d10_text(vid), "age": None, "values": {}}
+        if key:
+            visit_map[vid]["values"][key] = val
+
+    age_anchor = None
+    for v in sorted((v for v in visit_map.values() if v["date"] and v["age"] is not None), key=lambda v: v["date"]):
+        age_anchor = {"date": v["date"], "age": v["age"]}
+
+    def age_at_date(date_str):
+        if age_anchor and date_str:
+            dd = (datetime.fromisoformat(date_str) - datetime.fromisoformat(age_anchor["date"])).total_seconds() / (365.25 * 86400)
+            return round((age_anchor["age"] + dd) * 10) / 10
+        try:
+            y = int((date_str or "")[:4])
+        except ValueError:
+            return None
+        return y - 1982
+
+    sorted_visits = sorted((v for v in visit_map.values() if v["date"]), key=lambda v: v["date"])
+
+    today_vl = _dkey(datetime.now(timezone.utc) + timedelta(hours=10))
+    cur_age = age_at_date(today_vl)
+    key_label = {k: d["label"] for k, d in PHENO_MARKERS.items()}
+
+    pl_valid = sorted(
+        (r for r in pheno_log if _num(r["phenoage"]) is not None and r["formula_version"] and r["formula_version"] != "init"),
+        key=lambda r: str(r["date"]), reverse=True,
+    )
+    pl_latest = pl_valid[0] if pl_valid else None
+
+    drivers = []
+    if pl_latest:
+        pa = _num(pl_latest["phenoage"])
+        chrono = _num(pl_latest["chrono_age"])
+        if chrono is None:
+            chrono = round(cur_age * 10) / 10 if cur_age is not None else None
+        try:
+            contrib = json.loads(pl_latest["contributions"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            contrib = {}
+        try:
+            mvals = json.loads(pl_latest["marker_values"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            mvals = {}
+        delta = _num(pl_latest["delta"])
+        if delta is None and pa is not None and chrono is not None:
+            delta = round((pa - chrono) * 100) / 100
+        phenoage = {
+            "date": _d10_text(pl_latest["date"]), "value": pa, "chrono_age": chrono, "delta": delta,
+            "formula_version": pl_latest["formula_version"], "missing": [],
+            "oldest_marker_date": pl_latest["oldest_marker_date"] or None,
+        }
+        drivers.append({"label": "Хроно", "marker": None, "years": chrono, "type": "total"})
+        for k in key_label:
+            if contrib.get(k) is None:
+                continue
+            years = round(contrib[k] * 100) / 100
+            mv = mvals.get(k) or {}
+            drivers.append({
+                "label": key_label[k], "marker": k, "years": years,
+                "type": "pos" if years > 0 else ("neg" if years < 0 else "flat"),
+                "value": mv.get("value"), "measured_date": mv.get("measured"),
+            })
+        drivers.append({"label": "PhenoAge", "marker": None, "years": pa, "type": "total"})
+    else:
+        phenoage = {
+            "value": None, "chrono_age": round(cur_age * 10) / 10 if cur_age is not None else None,
+            "delta": None, "missing": list(key_label.keys()),
+            "note": "PhenoAge ещё не рассчитан — прогони PhenoAge Calc",
+        }
+
+    history = sorted(
+        (
+            {
+                "date": _d10_text(r["date"]), "x": _dec_year(_d10_text(r["date"])),
+                "chrono_age": _num(r["chrono_age"]), "phenoage": _num(r["phenoage"]), "delta": _num(r["delta"]),
+                "kind": ("visit" if re.search("визит", r["markers_used"] or "")
+                         else "estimated" if re.search("оценка", r["markers_used"] or "") else "current"),
+            }
+            for r in pheno_log if _num(r["phenoage"]) is not None and _d10_text(r["date"])
+        ),
+        key=lambda h: h["date"],
+    )
+
+    # таблица биомаркеров: PhenoAge-9 всегда + прочие с последним значением
+    latest_any: dict = {}
+    latest_any_date: dict = {}
+    latest_any_range: dict = {}
+    for v in sorted_visits:
+        for r in (r for r in results if r["Visit_ID"] == v["vid"]):
+            val = _num(r["Value"])
+            if val is None:
+                continue
+            mid = r["Marker_ID"]
+            latest_any[mid] = val
+            latest_any_date[mid] = v["date"]
+            latest_any_range[mid] = {"lab_min": _num(r["Lab_Min"]), "lab_max": _num(r["Lab_Max"])}
+
+    pheno_ids = {d["id"] for d in PHENO_MARKERS.values()}
+    biomarkers = []
+    for m in markers:
+        mid = m["Marker_ID"]
+        if not mid or mid not in latest_any:
+            continue
+        val = latest_any[mid]
+        opt_min, opt_max = _num(m["Optimal_Min"]), _num(m["Optimal_Max"])
+        is_pheno = mid in pheno_ids
+        if not is_pheno and opt_min is None and opt_max is None:
+            continue
+        rng = latest_any_range.get(mid) or {}
+        biomarkers.append({
+            "marker_id": mid, "label": m["Name"], "group": _strip_pheno_prefix(m["Category"]),
+            "pheno": is_pheno, "value": val, "unit": m["Standard_Unit"] or None,
+            "measured_date": latest_any_date.get(mid), "lab_min": rng.get("lab_min"), "lab_max": rng.get("lab_max"),
+            "opt_min": opt_min, "opt_max": opt_max,
+            "in_lab_range": (val >= rng["lab_min"] and val <= rng["lab_max"]) if (rng.get("lab_min") is not None and rng.get("lab_max") is not None) else None,
+            "in_opt_range": (val >= opt_min and val <= opt_max) if (opt_min is not None and opt_max is not None) else None,
+        })
+    biomarkers.sort(key=lambda b: (not b["pheno"], b["group"] or "", b["label"] or ""))
+
+    out_of_range = []
+    for mid, val in latest_any.items():
+        rng = latest_any_range.get(mid) or {}
+        if rng.get("lab_min") is None and rng.get("lab_max") is None:
+            continue
+        low = rng.get("lab_min") is not None and val < rng["lab_min"]
+        high = rng.get("lab_max") is not None and val > rng["lab_max"]
+        if not low and not high:
+            continue
+        m = mark_by_id.get(mid) or {}
+        out_of_range.append({
+            "label": m.get("Name") or mid, "value": val, "unit": m.get("Standard_Unit"),
+            "ref": f"{rng.get('lab_min', '')}–{rng.get('lab_max', '')}", "date": latest_any_date.get(mid),
+            "flag": "ниже нормы" if low else "выше нормы",
+        })
+    out_of_range.sort(key=lambda o: o["date"] or "", reverse=True)
+
+    def series(pattern):
+        rx = re.compile(pattern, re.I)
+        pts = sorted(
+            (
+                {"date": visit_date.get(r["Visit_ID"]) or _d10_text(r["Visit_ID"]), "value": _num(r["Value"])}
+                for r in results if rx.search((mark_by_id.get(r["Marker_ID"]) or {}).get("Name") or "")
+            ),
+            key=lambda p: p["date"],
+        )
+        pts = [p for p in pts if p["date"] and p["value"] is not None]
+        return pts[-12:]
+
+    trends = {
+        "wbc": series(r"лейкоциты|wbc"), "glucose": series(r"глюкоза"),
+        "crp": series(r"с-реактивн|срб|crp"), "rdw": series(r"rdw|ширина распред.*эритроцит"),
+    }
+
+    rare_once = [
+        PHENO_MARKERS[k]["label"] for k in PHENO_MARKERS
+        if sum(1 for v in sorted_visits if v["values"].get(k) is not None) <= 1
+    ]
+
+    lab_plan = sorted(
+        (
+            {
+                "plan_id": r["Plan_ID"], "test": r["Test"], "category": r["Category"] or "",
+                "reason": r["Reason"] or "",
+                "next_due": _d10_text(r["Next_Due"]) if len(_d10_text(r["Next_Due"])) == 10 else None,
+                "days_left": (
+                    round((datetime.fromisoformat(_d10_text(r["Next_Due"])) - datetime.fromisoformat(today_vl)).days)
+                    if len(_d10_text(r["Next_Due"])) == 10 else None
+                ),
+                "interval_months": _num(r["Interval_Months"]),
+                "last_done": _d10_text(r["Last_Done"]) if len(_d10_text(r["Last_Done"])) == 10 else None,
+                "source": r["Source"] or "", "notes": r["Notes"] or "",
+            }
+            for r in lab_plan_rows
+            if r["Test"] and str(r["Status"] or "active").lower() not in ("done", "paused", "archived")
+        ),
+        key=lambda p: p["next_due"] or "9999-99-99",
+    )
+    for p in lab_plan:
+        p["overdue"] = p["days_left"] is not None and p["days_left"] < 0
+
+    return {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "phenoage": phenoage,
+        "drivers": drivers,
+        "history": history,
+        "biomarkers": biomarkers,
+        "out_of_range": out_of_range,
+        "trends": trends,
+        "lab_plan": lab_plan,
+        "data_note": (
+            "Маркеры с единственным измерением за всю историю (нет динамики): " + ", ".join(rare_once)
+            + ". Для тренда нужна полная панель в одной сдаче."
+        ) if rare_once else None,
     }

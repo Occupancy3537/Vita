@@ -38,7 +38,7 @@ from psycopg import sql
 from pydantic import BaseModel
 from ulid import ULID
 
-from app.dashboard import get_health_dashboard, get_today_live_metrics
+from app.dashboard import get_bioage_dashboard, get_health_dashboard, get_today_live_metrics
 from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
 from app.doctor import anamnesis as doctor_anamnesis
@@ -145,6 +145,18 @@ def dashboard_health(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return get_health_dashboard(cur)
+
+
+@app.get("/dashboard/bioage")
+def dashboard_bioage(token: str = Query(default="")) -> dict:
+    """Экран «Био-возраст» — порт n8n `bioage-dashboard (cache)` / Build Bioage
+    JSON (2026-09-19). Формула PhenoAge не дублируется — берётся готовой из
+    health.phenoage_log (считает отдельный воркфлоу PhenoAge Calc, ещё не
+    портирован). Ни одной зависимости от n8n/Sheets — все источники в Postgres."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return get_bioage_dashboard(cur)
 
 
 @app.post("/ingest", response_model=IngestResponse)
