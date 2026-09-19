@@ -55,21 +55,20 @@ _N8N_API_KEY = (
 # экран «Здоровье» из card-service, у него отдельный вечноживой /dashboard/health
 # внутри самого card-service, тут отдельно не проверяем.)
 WEBHOOK_CHECKS = [
-    ("today-dashboard", "http://n8n:443/webhook/today-dashboard?token=blS1Chm38kO5wab2zPVC", 4),
+    ("today-dashboard", "http://127.0.0.1:8080/dashboard/today?token=QpcRi1JgTF75uzOf4WrV", 4),
     ("bioage-dashboard", "http://127.0.0.1:8080/dashboard/bioage?token=QpcRi1JgTF75uzOf4WrV", 27),
     ("weekly-nutrients", "http://n8n:443/webhook/weekly-nutrients?token=8j1bXp92BF5VabxNq2VN", 30),
     ("recipes", "http://n8n:443/webhook/recipes?token=Bz8nnNaltVyeUKfVLy71", 30),
 ]
 
-# Критичные воркфлоу — обновлено под текущую архитектуру (2026-09-19, #22): убраны
+# Критичные воркфлоу — обновлено под текущую архитектуру (2026-09-20, #24): убраны
 # сознательно неактивные (Capitan/relay, старые Sub-Agent'ы, Anamnesis Collector,
-# health-dashboard cache, bioage-dashboard cache — на card-service с #22) —
-# держать их в списке значило бы получать ложную тревогу каждое утро за то, что
-# уже и так правильно выключено.
+# health-dashboard cache, bioage-dashboard cache — на card-service с #22,
+# today-dashboard cache — на card-service с #24) — держать их в списке значило
+# бы получать ложную тревогу каждое утро за то, что уже и так правильно выключено.
 EXPECTED_ACTIVE_N8N = [
     "_Error Handler", "_System Check", "_Backup Alert",
     "Health Watchdog", "Weekly AI Advisor", "Reports",
-    "today-dashboard (cache)",
     "Dashboard Cached", "PhenoAge Calc", "Anomaly_Detector/Correlations",
 ]
 

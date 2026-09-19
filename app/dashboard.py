@@ -671,3 +671,537 @@ def get_bioage_dashboard(cur) -> dict:
             + ". Для тренда нужна полная панель в одной сдаче."
         ) if rare_once else None,
     }
+
+
+# --- «Сегодня»-экран: порт n8n Code-ноды "Build Today JSON" (2026-09-20) ---
+#
+# Последний из активных дашборд-кэшей ещё на Google Sheets. Doctor_Notes читается
+# оригинальным Code-node, но нигде не используется в его выводе (проверено —
+# ни одного обращения к переменной `notes` в 520 строках оригинала) — не
+# переносим, переносить нечего. Остальные 3 листа, которых не было в Postgres
+# (Patient_State — гейт нагрузки при грыже L5/S1, Action_Log — отметки "сделал"
+# у плана, User_Profile — из него реально читается только поле
+# "ОДА и неврология") перенесены тем же вечером (pg_schema_today_dashboard.sql +
+# sheets_to_pg_mirror.js, ночной cron 40 4 * * * их подхватывает автоматически) —
+# здесь читаем всё из Postgres, ни одного обращения к n8n/Sheets в рантайме.
+#
+# gate_transition_alert (алерт на снятие/возврат гейта нагрузки, A6, ревью Opus 5
+# 2026-09-09) в JSON-ответе фронтенд нигде не рендерит (проверено grep'ом) — сам
+# алерт как side-effect живёт отдельно, в app.gate_watch (эта функция здесь —
+# чистая, без побочных эффектов, как get_bioage_dashboard/get_health_dashboard).
+
+_HERNIA_RX = re.compile(r"грыж|радикулопат|протру[зи]|экструз|модик|modic|корешк", re.I)
+_LOAD_RX = re.compile(
+    r"интенсив|интервал|hiit|бег|пробеж|прыж|присед|становая|штанг|турник|подтяг|"
+    r"отжим|планк|скручиван|макгил|ротац|наклон|подним|тяж(?:есть|ести|[её]л|\b)|"
+    r"спринт|силов|кроссфит|бадминтон|берпи|выпад|растяж|мобилити|йог|лфк|упражнен|"
+    r"качат|тренаж|скакалк|степ[- ]?аэроб|ударн|отягощ|гантел|гир(?:я|ю|ей)|планер",
+    re.I,
+)
+_BUDGET_KEYS = ["Насыщенные жиры", "Добавленный сахар", "Натрий", "Кофеин", "Клетчатка", "Витамин D", "Кальций"]
+_SLEEP_MIN_OK, _SLEEP_MAX_OK = 420, 540
+_CRP_SENS, _MCV_SENS, _CRP_REF = 1.041, 0.292, 1.5
+_STEPS_TARGET_DAILY = 10000  # общепринятая суточная норма (Han 2023), не персональная база — см. TODO в JS-оригинале
+
+
+def _rows_as_dicts(cur) -> list[dict]:
+    cols = [c.name for c in cur.description]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def _parse_target_num(v):
+    if v is None:
+        return None
+    s = str(v).strip()
+    if re.match(r"^не\s", s, re.I):
+        return None
+    m = re.search(r"-?\d+(?:[.,]\d+)?", s)
+    return float(m.group(0).replace(",", ".")) if m else None
+
+
+def _parse_actions(txt):
+    m = re.search(r"<<<ACTIONS\s*([\s\S]*?)\s*ACTIONS>>>", str(txt or ""))
+    if not m:
+        return None
+    try:
+        o = json.loads(m.group(1).strip())
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return o if isinstance(o, dict) and isinstance(o.get("actions"), list) else None
+
+
+def _hhmm(minute) -> str:
+    m = ((minute % 1440) + 1440) % 1440
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _round4(x):
+    return round(x * 10000) / 10000
+
+
+def _action_id(issued, title) -> str:
+    # порядок операций как в JS actionId(): slice(0,60) ДО схлопывания пробелов,
+    # не после — иначе граница усечения может сместиться на длинных пробелах.
+    t = re.sub(r"\s+", " ", str(title or "")[:60]).strip()
+    return f"{issued or ''}|{t}"
+
+
+def _load_gate(pstate: list[dict], profile: dict) -> dict:
+    """Гейт безопасности (A1). Fail-safe: нет данных о снятии → ограничение
+    действует. Уровни: 0 отдых · 1 ходьба · 2 +плавание · 3 умеренная аэробика ·
+    4 интенсив. Порт 1:1 из loadGate() в оригинальном Code node."""
+    active = [x for x in pstate
+              if str(x.get("Status") or "").lower() == "active" and str(x.get("Contra_Load") or "").strip()]
+    if active:
+        x = max(active, key=lambda r: str(r.get("Confirmed_Date") or ""))
+        swim = bool(re.search(r"плаван", str(x.get("Allowed") or ""), re.I))
+        return {
+            "cap": 2 if swim else 1, "blocked": True, "condition": x.get("Condition"),
+            "contra": x.get("Contra_Load"), "allowed": x.get("Allowed") or "",
+            "provokers": x.get("Provokers") or "", "review_due": x.get("Review_Due"),
+            "source": (x.get("Source") or "карта пациента") + (f" от {x['Confirmed_Date']}" if x.get("Confirmed_Date") else ""),
+        }
+
+    oda = str(profile.get("ОДА и неврология") or "")
+    prof_hernia = bool(_HERNIA_RX.search(oda)) and not re.search(
+        r"ремисси|снят|полн(ое|ая) восстановлен|разрешена нагрузка", oda, re.I)
+    prof_swim = prof_hernia and bool(re.search(r"плаван|бассейн", oda, re.I))
+
+    # A6 fail-safe (ревью Opus 5, 2026-09-09): 0 строк в Patient_State = чтение
+    # НЕ ПРОШЛО (синк не отработал), а НЕ «ограничений нет».
+    if not pstate:
+        return {
+            "cap": 2 if prof_swim else 1, "blocked": True, "degraded": True,
+            "condition": ("Грыжа/радикулопатия — Patient_State не прочитан, профиль подтверждает"
+                          if prof_hernia else "Карта пациента не прочитана (Patient_State пуст)"),
+            "contra": "осевая нагрузка, подъём тяжестей, скручивания, бег, прыжки, интервалы",
+            "allowed": "ходьба" + (", плавание" if prof_swim else ""),
+            "provokers": "", "review_due": None,
+            "source": "⚠️ PATIENT_STATE НЕ ПРОЧИТАН" + (" (профиль подтверждает грыжу)" if prof_hernia else ""),
+        }
+
+    if prof_hernia:
+        return {
+            "cap": 2 if prof_swim else 1, "blocked": True,
+            "condition": "Грыжа/радикулопатия (из профиля; в Patient_State активных ограничений нет)",
+            "contra": "осевая нагрузка, подъём тяжестей, скручивания, бег/прыжки/интенсив",
+            "allowed": "ходьба" + (", плавание" if prof_swim else ""),
+            "provokers": "", "review_due": None,
+            "source": "User_Profile (Patient_State без активных ограничений)",
+        }
+
+    return {"cap": 4, "blocked": False, "condition": None, "contra": None,
+            "allowed": "", "provokers": "", "review_due": None, "source": None}
+
+
+def _baseline(rows: list[dict], col: str, last_date: str, days: int):
+    frm = (datetime.fromisoformat(last_date) - timedelta(days=days)).date().isoformat()
+    vals = [v for v in (_num(r.get(col)) for r in rows if frm <= (r.get("Дата") or "") < last_date) if v is not None]
+    return sum(vals) / len(vals) if vals else None
+
+
+def _load_mean(rows: list[dict], last_date: str, days: int):
+    frm = (datetime.fromisoformat(last_date) - timedelta(days=days)).date().isoformat()
+    vals = [(_num(r.get("Тренировка_Ккал")) or 0) for r in rows if (r.get("Дата") or "") > frm]
+    return sum(vals) / len(vals) if vals else None
+
+
+def get_today_dashboard(cur) -> dict:
+    cur.execute('SELECT d.*, to_char(d."Дата", \'YYYY-MM-DD\') AS "Дата" FROM health.daily_trends d ORDER BY d."Дата"')
+    daily = _rows_as_dicts(cur)
+
+    cur.execute(
+        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
+        'FROM health.meals m '
+        "WHERE (m.\"Date\" AT TIME ZONE 'Asia/Vladivostok')::date >= (now() AT TIME ZONE 'Asia/Vladivostok')::date - 3 "
+        'ORDER BY m."Date"'
+    )
+    meals = _rows_as_dicts(cur)
+
+    cur.execute('SELECT * FROM health.nutrient_targets')
+    targets = _rows_as_dicts(cur)
+
+    cur.execute('SELECT "Date", "Recommendation_Text" FROM health.recommendations_log')
+    recs = _rows_as_dicts(cur)
+
+    cur.execute('SELECT * FROM health.phenoage_log')
+    pheno = _rows_as_dicts(cur)
+
+    cur.execute('SELECT * FROM health.action_log')
+    acts = _rows_as_dicts(cur)
+
+    cur.execute('SELECT * FROM health.patient_state')
+    pstate = _rows_as_dicts(cur)
+
+    cur.execute('SELECT * FROM health.user_profile LIMIT 1')
+    prof_rows = _rows_as_dicts(cur)
+    profile = prof_rows[0] if prof_rows else {}
+
+    # ---------- время ----------
+    now_vl = datetime.now(timezone.utc) + timedelta(hours=10)
+    today_iso = _dkey(now_vl)
+    now_min = now_vl.hour * 60 + now_vl.minute
+
+    rows = sorted((r for r in daily if r.get("Дата")), key=lambda r: r["Дата"])
+    past_rows = [r for r in rows if r["Дата"] <= today_iso]
+    last = (past_rows[-1] if past_rows else (rows[-1] if rows else {}))
+    last_date = last.get("Дата") or today_iso
+
+    # =====================================================================
+    # 1. РЕШЕНИЕ ДНЯ — нагрузка или восстановление
+    # =====================================================================
+    bb = _num(last.get("Восстановление_BodyBattery"))
+    hrv = _num(last.get("ВСР_ночная"))
+    hrv_base = _baseline(rows, "ВСР_ночная", last_date, 30)
+    hrv_delta = (hrv - hrv_base) if (hrv is not None and hrv_base is not None) else None
+
+    acwr_garmin = _num(last.get("ACWR_Garmin"))
+    acwr_status_g = (str(last.get("ACWR_Status") or "").strip().upper()) or None
+    if acwr_garmin is not None:
+        acwr, acwr_source = acwr_garmin, "garmin"
+    else:
+        acute, chronic = _load_mean(rows, last_date, 7), _load_mean(rows, last_date, 28)
+        acwr = round((acute / chronic) * 100) / 100 if (acute is not None and chronic) else None
+        acwr_source = "self" if acwr is not None else None
+    load_high = (acwr_status_g == "HIGH") if acwr_status_g else (acwr is not None and acwr > 1.5)
+
+    gate = _load_gate(pstate, profile)
+
+    reasons = []
+    if bb is not None:
+        reasons.append({"label": "Body Battery", "value": bb, "judgment": "good" if bb >= 70 else "neutral" if bb >= 40 else "bad"})
+    if hrv_delta is not None:
+        reasons.append({
+            "label": "ВСР к базе", "value": f"{'+' if hrv_delta > 0 else ''}{round(hrv_delta * 10) / 10} мс",
+            "judgment": "neutral" if abs(hrv_delta) < 6 else ("good" if hrv_delta > 0 else "bad"),
+        })
+    if acwr is not None:
+        reasons.append({
+            "label": "ACWR (Garmin)" if acwr_source == "garmin" else "Нагрузка 7д/28д",
+            "value": f"{acwr} · {acwr_status_g}" if acwr_status_g else acwr,
+            "judgment": "bad" if load_high else ("neutral" if (acwr_status_g == "LOW" or acwr < 0.8) else "good"),
+        })
+
+    readiness = 0
+    if bb is not None:
+        hrv_bad = hrv_delta is not None and hrv_delta <= -6
+        readiness = 4 if (bb >= 70 and not hrv_bad and not load_high) else (3 if (bb >= 40 and not load_high) else 1)
+    no_garmin_today = bb is None and hrv is None and _num(last.get("Чистый_сон_мин")) is None
+
+    if no_garmin_today:
+        final_cap = min(gate["cap"] if gate["blocked"] else 2, 2)
+    elif bb is None:
+        final_cap = gate["cap"] if gate["blocked"] else 0
+    else:
+        final_cap = min(gate["cap"], readiness)
+    cap_label = {0: "нет данных", 1: "только ходьба", 2: "ходьба и плавание", 3: "умеренная аэробика", 4: "можно интенсив"}
+    verdict = cap_label[final_cap]
+
+    if no_garmin_today:
+        verdict_note = (
+            f"Нет свежих данных Garmin + {gate['condition']}. Режим: {verdict}, ничего сверх, пока часы не синхронизируются."
+            if gate["blocked"] else
+            "Нет свежих данных Garmin (часы не синхронизировались?). Режим: ходьба и плавание, пока данные не появятся — вердикт по восстановлению не строим."
+        )
+    elif bb is None and not gate["blocked"]:
+        verdict_note = "Не хватает данных Garmin за сегодня — держись лёгкой активности."
+    elif gate["blocked"] and gate["cap"] <= readiness:
+        reserve = "полный" if readiness >= 4 else "средний" if readiness >= 3 else "низкий"
+        verdict_note = f"{gate['condition']}: {gate['contra']}. По восстановлению запас {reserve}, но это не отменяет ограничение по спине."
+    elif final_cap >= 4:
+        verdict_note = "Резерв восстановления есть, ВСР не просела, нагрузка не накоплена. Ограничений по здоровью нет."
+    elif final_cap == 3:
+        verdict_note = ("ВСР ниже твоей базы — аэробная работа без ударных интервалов." if (hrv_delta is not None and hrv_delta <= -6)
+                         else "Резерв средний: аэробная работа без интенсива.")
+    else:
+        verdict_note = "Накоплена нагрузка — сегодня разгрузочный день." if load_high else "Низкий резерв восстановления — сегодня только лёгкая активность."
+
+    decision = {
+        "verdict": verdict, "note": verdict_note, "reasons": reasons,
+        "gate": {
+            "blocked": gate["blocked"], "condition": gate["condition"], "contra": gate["contra"],
+            "allowed": gate["allowed"], "provokers": gate["provokers"],
+            "review_due": gate["review_due"], "source": gate["source"], "degraded": bool(gate.get("degraded")),
+        },
+        "readiness_cap": readiness, "medical_cap": gate["cap"], "final_cap": final_cap,
+        "no_garmin_today": no_garmin_today,
+        "acwr": acwr, "acwr_status": acwr_status_g, "acwr_source": acwr_source, "load_high": load_high,
+        "garmin_device": last.get("Garmin_устройство"), "training_status": last.get("Training_Status"),
+        "caution": (f"{gate['condition']}. Разрешено: {gate['allowed'] or 'ходьба'}" if gate["blocked"] else None),
+        "limit": gate["contra"] if gate["blocked"] else None,
+    }
+
+    # =====================================================================
+    # 2. ОКНА ДНЯ
+    # =====================================================================
+    rec_sorted = sorted(
+        (r for r in recs if r.get("Recommendation_Text") and (r.get("Date") or "")[:10] <= today_iso),
+        key=lambda r: r.get("Date") or "", reverse=True,
+    )
+    latest_rec = rec_sorted[0] if rec_sorted else None
+    latest_parsed = _parse_actions(latest_rec["Recommendation_Text"]) if latest_rec else None
+    latest_actions = latest_parsed["actions"] if latest_parsed else []
+
+    bed_min = 23 * 60 + 30
+    for a in latest_actions:
+        m = re.search(r"(\d{1,2})[:.](\d{2})", str(a.get("title") or ""))
+        if m and re.search(r"отбо|спат|лож|сон", str(a.get("title") or ""), re.I):
+            bed_min = int(m.group(1)) * 60 + int(m.group(2))
+            break
+    coffee_min = bed_min - 8 * 60
+    meal_min = bed_min - 3 * 60
+
+    def _window(key, label, target_min, hint):
+        return {"key": key, "label": label, "until": _hhmm(target_min), "target_min": target_min, "hint": hint}
+
+    windows = [
+        _window("coffee", "Последний кофе", coffee_min, "за 8 ч до отбоя"),
+        _window("meal", "Последняя еда", meal_min, "за 3 ч до отбоя"),
+        _window("bed", "Отбой", bed_min,
+                "из плана советника" if any(re.search(r"отбо|спат", str(a.get("title") or ""), re.I) for a in latest_actions)
+                else "цель по умолчанию"),
+    ]
+
+    sleep_streak = 0
+    for r in reversed(rows):
+        v = _num(r.get("Чистый_сон_мин"))
+        if v is not None and _SLEEP_MIN_OK <= v <= _SLEEP_MAX_OK:
+            sleep_streak += 1
+        else:
+            break
+    streaks = []
+    if sleep_streak > 0:
+        streaks.append({"label": "Сон в зоне 7–9 ч", "count": sleep_streak, "unit": "ночей"})
+
+    def _daily_meal_sums(col):
+        sums: dict = {}
+        for m in meals:
+            if not m.get("Date"):
+                continue
+            day = (m["Date"] or "")[:10]
+            sums[day] = sums.get(day, 0) + (_num(m.get(col)) or 0)
+        return sums
+
+    def _limit_streak_days(col, cap):
+        sums = _daily_meal_sums(col)
+        streak = 0
+        for r in reversed(rows[:-1]):
+            day = r.get("Дата")
+            if not day or day not in sums:
+                break
+            if sums[day] > cap:
+                break
+            streak += 1
+        return streak
+
+    for nutrient, streak_label in (("Натрий", "Соль в норме"), ("Добавленный сахар", "Сахар в норме"), ("Насыщенные жиры", "Жиры в норме")):
+        t = next((x for x in targets if x.get("Нутриент") == nutrient), None)
+        if not t or not t.get("Колонка_в_Meals"):
+            continue
+        cap = _parse_target_num(t.get("Верхний_предел_UL"))
+        if not cap:
+            continue
+        s = _limit_streak_days(t["Колонка_в_Meals"], cap)
+        if s > 0:
+            streaks.append({"label": streak_label, "count": s, "unit": "дней"})
+
+    alcohol_streak_days = 0
+    for r in reversed(rows[:-1]):
+        g = _num(r.get("Алкоголь_гр"))
+        if g is None or g > 0:
+            break
+        alcohol_streak_days += 1
+    if alcohol_streak_days > 0:
+        streaks.append({"label": "Без алкоголя", "count": alcohol_streak_days, "unit": "дней"})
+
+    # =====================================================================
+    # 3. БЮДЖЕТ ДНЯ
+    # =====================================================================
+    today_meals = [m for m in meals if m.get("Date") and (m["Date"] or "")[:10] == today_iso]
+
+    def _sum_col(col):
+        return sum((_num(m.get(col)) or 0) for m in today_meals)
+
+    budget = []
+    for t in targets:
+        name = t.get("Нутриент")
+        if name not in _BUDGET_KEYS:
+            continue
+        col = t.get("Колонка_в_Meals")
+        if not col:
+            continue
+        is_limit = "Риск избытка" in (t.get("Категория") or "")
+        rda, ul = _parse_target_num(t.get("Норма_RDA_AI")), _parse_target_num(t.get("Верхний_предел_UL"))
+        cap = ul if is_limit else rda
+        if not cap:
+            continue
+        consumed = round(_sum_col(col) * 100) / 100
+        pct = round((consumed / cap) * 100)
+        budget.append({
+            "label": name, "unit": t.get("Единица") or "", "kind": "limit" if is_limit else "goal",
+            "consumed": consumed, "cap": cap, "pct": pct,
+            "remaining": round((cap - consumed) * 100) / 100,
+            "status": (("over" if pct > 100 else "close" if pct >= 80 else "ok") if is_limit
+                       else ("done" if pct >= 100 else "partial" if pct >= 60 else "low")),
+        })
+    budget.sort(key=lambda b: (0 if b["kind"] == "limit" else 1, -b["pct"]))
+
+    kcal_today = round(_sum_col("Calories"))
+    protein_today = round(_sum_col("Proteins"))
+
+    # =====================================================================
+    # 4. ПЛАН НЕДЕЛИ
+    # =====================================================================
+    done_map = {}
+    for a in acts:
+        if a.get("Action_ID"):
+            done_val = a.get("Done")
+            done_map[str(a["Action_ID"])] = str(done_val or "").lower() in ("да", "true") or done_val is True
+    issued = (latest_rec.get("Date") or "")[:10] if latest_rec else None
+
+    allowed_lc = str(gate["allowed"] or "").lower()
+    g_allow_walk = bool(re.search(r"ходьб|walk|прогул", allowed_lc))
+    g_allow_swim = bool(re.search(r"плаван|бассейн|swim", allowed_lc))
+
+    def _action_conflicts(a):
+        if not gate["blocked"]:
+            return False
+        t = str(a.get("type") or "").lower()
+        if t in ("load_high", "load_low"):
+            return True
+        if t == "walk":
+            return not g_allow_walk
+        if t == "swim":
+            return not g_allow_swim
+        if _LOAD_RX.search(f"{a.get('title')} {a.get('why')}"):
+            return True
+        if gate.get("degraded") and t in ("", "unknown"):
+            return True
+        return False
+
+    plan = {
+        "date": issued,
+        "actions": [
+            {
+                "id": _action_id(issued, a.get("title")),
+                "title": a.get("title"), "why": a.get("why") or "", "expect": a.get("expect") or "",
+                "priority": a.get("priority") or "средний", "metric": a.get("metric"), "type": a.get("type"),
+                "done": bool(done_map.get(_action_id(issued, a.get("title")))),
+                "blocked_by_gate": _action_conflicts(a),
+                "gate_note": (f"Противоречит ограничению: {gate['condition']}. Разрешено только: {gate['allowed'] or 'ходьба'}"
+                              if _action_conflicts(a) else None),
+            }
+            for a in latest_actions
+        ],
+    }
+
+    # =====================================================================
+    # 5. ДЛЯ ДОЛГОЛЕТИЯ
+    # =====================================================================
+    pheno_valid = sorted((p for p in pheno if _num(p.get("phenoage")) is not None and p.get("date")),
+                         key=lambda p: p["date"], reverse=True)
+    ph = pheno_valid[0] if pheno_valid else None
+
+    sleep_min_today = _num(last.get("Чистый_сон_мин"))
+    steps_today = _num(last.get("Шаги_за_вчера"))
+    alcohol_g_today = _num(last.get("Алкоголь_гр")) or 0
+    fiber_b = next((b for b in budget if b["label"] == "Клетчатка"), None)
+    sat_fat_b = next((b for b in budget if b["label"] == "Насыщенные жиры"), None)
+    sugar_b = next((b for b in budget if b["label"] == "Добавленный сахар"), None)
+    affects = []
+
+    if sleep_min_today is not None:
+        lo, hi = 420, 540
+        years, what = 0, None
+        if sleep_min_today < lo:
+            years = 0.582 * min(1, (lo - sleep_min_today) / 180) / 365
+            what = f"сон {sleep_min_today / 60:.1f} ч — короче нормы"
+        elif sleep_min_today > hi:
+            years = 0.694 * min(1, (sleep_min_today - hi) / 120) / 365
+            what = f"сон {sleep_min_today / 60:.1f} ч — длиннее нормы"
+        else:
+            what = "сон в зоне 7–9 ч"
+        affects.append({
+            "what": what,
+            "how": "Короткий/длинный сон системно повышает СРБ (воспалительный маркер формулы) — но нужно ≥3 ночи подряд, разовая ночь почти не в счёт. Источник: Ballesio 2025, You 2024 (NHANES).",
+            "markers": ["crp"], "direction": "up" if years > 0.00005 else "down" if years < -0.00005 else "neutral",
+            "weight": "unknown" if years == 0 else "moderate", "est_years": None if years == 0 else _round4(years),
+        })
+
+    if steps_today is not None:
+        delta_steps = steps_today - _STEPS_TARGET_DAILY
+        years = -3.98 * ((delta_steps / 100) / 30) / 365
+        affects.append({
+            "what": f"{'+' if delta_steps >= 0 else ''}{round(delta_steps)} шагов к норме {_STEPS_TARGET_DAILY}",
+            "how": "Замена сидения на движение снижает СРБ/лейкоциты/RDW — самая воспроизводимая связь в базе (2 независимых NHANES-анализа). Источник: Han 2023.",
+            "markers": ["crp", "wbc", "rdw"], "direction": "up" if years > 0.00005 else "down" if years < -0.00005 else "neutral",
+            "weight": "strong", "est_years": _round4(years),
+        })
+
+    mcv_shift_fl = (0.30 * (alcohol_g_today / 40) / 100) * 88
+    years = (mcv_shift_fl * _MCV_SENS) / (90 / 7)
+    affects.append({
+        "what": f"{alcohol_g_today} г алкоголя сегодня" if alcohol_g_today > 0 else "без алкоголя сегодня",
+        "how": "Алкоголь линейно повышает MCV — причинная связь (менделевская рандомизация, UK Biobank). Эффект накапливается за ~90 дней оборота эритроцитов. Источник: Thompson 2021.",
+        "markers": ["mcv"], "direction": "up" if years > 0.00002 else "neutral",
+        "weight": "moderate" if alcohol_g_today > 0 else "unknown", "est_years": _round4(years),
+    })
+
+    if fiber_b:
+        gap_g = fiber_b["cap"] - fiber_b["consumed"]
+        years = (gap_g / 8) * (0.37 * _CRP_SENS / _CRP_REF) / 42
+        affects.append({
+            "what": f"клетчатка {fiber_b['consumed']}/{fiber_b['cap']} г",
+            "how": "Клетчатка снижает СРБ — подтверждено в 7+ независимых RCT/метаанализах. Источник: Jiao 2015, Jain 2025.",
+            "markers": ["crp"], "direction": "up" if years > 0.00002 else "down" if years < -0.00002 else "neutral",
+            "weight": "moderate", "est_years": _round4(years),
+        })
+
+    if sat_fat_b and sugar_b:
+        proxy_pct = (sat_fat_b["pct"] - 100) + (sugar_b["pct"] - 100)
+        years = (0.21 * proxy_pct / 10) / 365
+        affects.append({
+            "what": f"насыщ. жиры {sat_fat_b['pct']}%, сахар {sugar_b['pct']}% от лимита",
+            "how": "Хронический избыток насыщенных жиров/сахара связан с ростом PhenoAge через глюкозу и слабее СРБ, но за один день эффект почти не заметен (нужны недели) — самый слабый по доказательности пункт формулы. Источник: Cardoso 2024.",
+            "markers": ["gluc", "crp"], "direction": "up" if years > 0.00002 else "down" if years < -0.00002 else "neutral",
+            "weight": "weak", "est_years": _round4(years),
+        })
+
+    affects_total = _round4(sum(a["est_years"] or 0 for a in affects))
+
+    if ph:
+        longevity = {
+            "phenoage": _num(ph.get("phenoage")), "chrono_age": _num(ph.get("chrono_age")), "delta": _num(ph.get("delta")),
+            "computed": (ph.get("date") or "")[:10],
+            "affects_today": affects, "affects_today_total": affects_total,
+            "affects_today_disclaimer": "Оценка направления и порядка величины по поведенческой литературе, не пересчёт настоящего PhenoAge (тот считается только по анализам крови).",
+        }
+    else:
+        longevity = None
+
+    # =====================================================================
+    # 6. СПОКОЙНО
+    # =====================================================================
+    quiet = []
+    for col, (lo, hi) in {"SpO2_ночь_среднее": (95, 100), "Дыхание_ночь_среднее": (12, 20)}.items():
+        v = _num(last.get(col))
+        if v is not None and lo <= v <= hi:
+            quiet.append("SpO2" if col == "SpO2_ночь_среднее" else "дыхание")
+    if _num(last.get("Пульс_ночной_средний")) is not None:
+        rb = _baseline(rows, "Пульс_ночной_средний", last_date, 30)
+        rv = _num(last.get("Пульс_ночной_средний"))
+        if rb is not None and abs(rv - rb) < 3:
+            quiet.append("пульс покоя")
+    if _num(last.get("Стресс_дневной_средний")) is not None:
+        sb = _baseline(rows, "Стресс_дневной_средний", last_date, 30)
+        sv = _num(last.get("Стресс_дневной_средний"))
+        if sb is not None and sv - sb < 6:
+            quiet.append("стресс")
+
+    return {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "date": today_iso, "now_local": _hhmm(now_min), "data_date": last_date,
+        "decision": decision, "windows": windows, "streaks": streaks,
+        "budget": budget, "kcal_today": kcal_today, "protein_today": protein_today, "meals_today": len(today_meals),
+        "plan": plan, "longevity": longevity, "quiet": quiet,
+    }

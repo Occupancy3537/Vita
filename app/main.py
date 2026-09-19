@@ -38,7 +38,7 @@ from psycopg import sql
 from pydantic import BaseModel
 from ulid import ULID
 
-from app.dashboard import get_bioage_dashboard, get_health_dashboard, get_today_live_metrics
+from app.dashboard import get_bioage_dashboard, get_health_dashboard, get_today_dashboard, get_today_live_metrics
 from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
 from app.doctor import anamnesis as doctor_anamnesis
@@ -62,6 +62,7 @@ from app.recommendations import (
     sync_recommendation,
 )
 import app.system_check as system_check
+import app.gate_watch as gate_watch
 from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
@@ -89,6 +90,12 @@ def _start_telegram_polling() -> None:
         return
     check_scheduler = threading.Thread(target=system_check.run_scheduler, daemon=True, name="system-check-scheduler")
     check_scheduler.start()
+    # 2026-09-20: алерт на снятие/возврат гейта нагрузки (порт из today-dashboard
+    # Build Today JSON, см. app/gate_watch.py) — тот же принцип явного флага.
+    if os.environ.get("GATE_WATCH_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return
+    gate_scheduler = threading.Thread(target=gate_watch.run_scheduler, daemon=True, name="gate-watch-scheduler")
+    gate_scheduler.start()
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 
@@ -157,6 +164,21 @@ def dashboard_bioage(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return get_bioage_dashboard(cur)
+
+
+@app.get("/dashboard/today")
+def dashboard_today(token: str = Query(default="")) -> dict:
+    """Экран «Сегодня» — порт n8n `today-dashboard (cache)` / Build Today JSON
+    (2026-09-20). Последний Sheets-зависимый дашборд-кэш: Patient_State (гейт
+    нагрузки при грыже L5/S1), Action_Log, User_Profile перенесены в Postgres
+    тем же вечером (pg_schema_today_dashboard.sql + sheets_to_pg_mirror.js) —
+    ни одной зависимости от n8n/Sheets в рантайме. Алерт на снятие/возврат
+    гейта нагрузки (был в n8n-версии через $getWorkflowStaticData) — отдельно,
+    см. app.gate_watch, эта функция чистая, без побочных эффектов."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return get_today_dashboard(cur)
 
 
 @app.post("/ingest", response_model=IngestResponse)

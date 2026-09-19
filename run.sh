@@ -13,6 +13,10 @@
 # ежедневно 08:43 VL). Причина переноса именно этого воркфлоу первым — он же был
 # самым прожорливым по памяти активным узлом (без-лимита SELECT * по двум таблицам
 # целиком каждое утро), см. докстринг модуля и STATE.md/AGENT_SYNC.md #20.
+# 2026-09-20: GATE_WATCH_ENABLED — алерт на снятие/возврат гейта нагрузки
+# (app/gate_watch.py, каждые 15 мин), порт из today-dashboard Build Today JSON
+# (A6, ревью Opus 5 2026-09-09) — снятие мед-ограничения при грыже L5/S1
+# обязано быть шумным.
 set -e
 cd "$(dirname "$0")"
 
@@ -35,6 +39,7 @@ sudo docker run -d \
   -e TELEGRAM_POLLING_ENABLED=1 \
   -e ANAMNESIS_SCHEDULER_ENABLED=1 \
   -e SYSTEM_CHECK_ENABLED=1 \
+  -e GATE_WATCH_ENABLED=1 \
   -e REGISTRAR_MODEL="${REGISTRAR_MODEL:-z-ai/glm-5.3-flash}" \
   -e REGISTRAR_PDF_MODEL="${REGISTRAR_PDF_MODEL:-google/gemini-3.1-flash-lite}" \
   -e REGISTRAR_HEALTH_SCHEMA="${REGISTRAR_HEALTH_SCHEMA:-health}" \
