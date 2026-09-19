@@ -44,6 +44,7 @@ from app.dashboard import (
     get_today_dashboard,
     get_today_live_metrics,
     get_today_nutrition,
+    get_weekly_nutrition,
 )
 from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
@@ -196,6 +197,20 @@ def dashboard_today_nutrition(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return get_today_nutrition(cur)
+
+
+@app.get("/dashboard/weekly-nutrition")
+def dashboard_weekly_nutrition(token: str = Query(default="")) -> dict:
+    """Экран «Питание за неделю» — порт n8n «Получение данных питания в кэш
+    для Дашборда» / webhook weekly-nutrients (2026-09-20). Все 4 источника уже
+    были в Postgres (Волна A2). Известный баг оригинала (ADJ-регэксп в
+    plant-diversity построен на \\w*, который не матчит кириллицу — см.
+    комментарий у _plant_norm в dashboard.py) сохранён как есть, не тихо
+    починен при переносе."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return get_weekly_nutrition(cur)
 
 
 @app.post("/ingest", response_model=IngestResponse)

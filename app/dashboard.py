@@ -23,6 +23,7 @@ health.live_steps_today (её пишет напрямую push_live_steps.py с 
 см. STATE.md 2026-09-16 — тоже больше не через n8n).
 """
 import json
+import math
 import re
 from datetime import date, datetime, timedelta, timezone
 
@@ -1337,4 +1338,408 @@ def get_today_nutrition(cur) -> dict:
             key=lambda m: m["t"],
         ),
         "anomalies": anomalies,
+    }
+
+
+# --- «Питание за неделю»: порт n8n "Получение данных питания в кэш для
+# Дашборда" / webhook weekly-nutrients (2026-09-20) ---
+#
+# Третий и последний нутришн-кэш на n8n, крупнейший (385 строк JS): недельные
+# дефициты/избытки по нутриентам (heatmap), топ-3 источника на день, качество
+# рациона (AHEI-2010/NOVA/Plant Diversity), нутришн-петля "сделал ли N из M
+# дней". Все 4 источника уже в Postgres (Волна A2) — переезд снял только
+# расчёт/расписание с n8n.
+#
+# НАЙДЕННЫЙ (не мой) баг оригинала, сохранён при переносе как есть: регэксп
+# _ADJ_RX в норм. plant-diversity построен как "корень\w*" (JS), а \w в JS не
+# матчит кириллицу (см. память js-regex-cyrillic-w — тот же класс бага, что
+# уже дважды ловил safety-фильтры) — на реальных инфлексированных формах вроде
+# "болгарский перец" \w* съедает 0 символов, регэксп практически никогда не
+# срабатывает, и норм. функция откатывается на первое слово строки (часто
+# само прилагательное, а не существительное). Портирую 1:1 для сверки с живым
+# n8n-выводом, баг доложен Владу отдельно, не тихо исправлен здесь.
+#
+# ВТОРОЙ найденный при сверке нюанс, уже не логический баг, а платформенный:
+# JS Math.round() округляет половину ВВЕРХ (к +∞), Python round() — к
+# ближайшему чётному (банковское). На реальных данных разошлось трижды на ±1 в
+# процентах (напр. round(12.5): JS даёт 13, Python — 12) — округление именно
+# ЭТОГО скрипта (много Math.round(x/y*100) на реальных, не подогнанных под
+# круглые числа исходных данных) чаще ловит границу x.5, чем предыдущие порты.
+# _js_round() ниже — намеренная замена везде, где оригинал использовал
+# Math.round (не .toFixed()).
+
+
+def _js_round(x: float) -> int:
+    return math.floor(x + 0.5)
+
+
+def _to_num0(v) -> float:
+    return _num(v) or 0.0
+
+
+_ADJ_RX = re.compile(
+    r"^(болгарск|репчат|зелен|красн|бел|бело|чёрн|черн|свеж|сушен|суш[её]н|морожен|"
+    r"отварн|варен|жарен|печён|печен|цельнозернов|стручков|листов|молот|молодо|"
+    r"крупнолистов)\s+"
+)
+_PLANT_SYN = {
+    "горошек": "горох", "айсберг": "салат", "руккола": "салат", "латук": "салат",
+    "кинза": "кориандр", "коф": "кофе", "кориц": "корица", "какао": "какао",
+    "томатная паста": "томат", "помидор": "томат", "черри": "томат",
+    "семечки": "семена", "семя": "семена",
+}
+_PLANT_SYN2 = {"карр": "карри", "кабач": "кабачок", "помидорчик": "томат", "горош": "горох"}
+_NOT_PLANT = {
+    "чук", "нор", "вода", "бульон", "молок", "сыр", "йогурт", "творог", "масл", "мед", "соус",
+    "куриц", "курин", "говядин", "свинин", "индейк", "индюш", "лосос", "рыб", "яйц", "креветк",
+    "тунец", "сельд", "треск", "мясо", "бекон", "колбас", "ветчин", "сосиск", "печен", "желатин",
+    "дрожж", "злак",
+    "болгарск", "зелен", "красн", "бел", "черн", "свеж", "сушен", "молот", "репчат", "отварн",
+    "печ", "жарен", "варен", "цельнозернов", "водоросл",
+}
+_PLANT_SUFFIX_RX = re.compile(r"(ый|ая|ое|ые|ой|ую|ого|ым|ов|ами|ам|ах|а|ы|и|у|е|я|й)$")
+
+
+def _plant_norm(s: str) -> str:
+    x = re.sub(r"[.()]", "", s.strip().lower().replace("ё", "е")).strip()
+    x = _ADJ_RX.sub("", x).strip()
+    w = x.split()
+    x = w[0] if w else x
+    x = _PLANT_SUFFIX_RX.sub("", x)
+    return _PLANT_SYN.get(x) or _PLANT_SYN.get(s.strip().lower()) or x
+
+
+def _ahei_lin(v, lo, hi):
+    if hi == lo:
+        return 10.0 if v >= hi else 0.0
+    s = ((v - lo) / (hi - lo)) * 10
+    return max(0.0, min(10.0, s))
+
+
+def _ahei_alcohol_pts(drinks, male=True):
+    if male:
+        if drinks <= 0:
+            return 2.5
+        if drinks < 0.5:
+            return 2.5 + (drinks / 0.5) * 7.5
+        if drinks <= 2.0:
+            return 10.0
+        if drinks < 3.5:
+            return 10 - ((drinks - 2.0) / 1.5) * 10
+        return 0.0
+    if drinks <= 0:
+        return 2.5
+    if drinks < 0.5:
+        return 2.5 + (drinks / 0.5) * 7.5
+    if drinks <= 1.5:
+        return 10.0
+    if drinks < 2.5:
+        return 10 - ((drinks - 1.5) / 1.0) * 10
+    return 0.0
+
+
+_AHEI_SRV = {"veg_g": 80, "fruit_g": 100, "legnut_g": 50, "redmeat_g": 100, "ssb_ml": 240, "drink_g": 14}
+def _ahei_a(male: bool) -> dict:
+    """JS определяет A внутри computeDietQuality() (wholegrain-порог зависит от
+    male) — здесь то же самое, не module-level константа."""
+    return {
+        "veg": (0, 5), "fruit": (0, 4), "wholegrain": (0, 90 if male else 75), "ssb": (1, 0), "legnut": (0, 1),
+        "redmeat": (1.5, 0), "transfat": (4, 0.5), "epadha": (0, 250), "pufa": (2, 10), "sodium": (3020, 1130),
+    }
+
+
+def _compute_diet_quality(day_rows: list[dict], week_meals: list[dict], male: bool = True) -> dict:
+    """Порт computeDietQuality() — AHEI-2010 (Chiuve 2012, пороги сверены)/NOVA/
+    Plant Diversity. Приближения задокументированы в оригинале как есть."""
+    ahei_a = _ahei_a(male)
+    day_list = []
+    for r in day_rows:
+        ds = str(r.get("Date") or "")[:10]
+        meals = [m for m in week_meals if str(m.get("Date") or "")[:10] == ds]
+        total = len(meals)
+        tagged = sum(1 for m in meals if str(m.get("NOVA") or "").strip() != "")
+
+        def _sum(k):
+            return sum(_to_num0(m.get(k)) for m in meals)
+
+        kcal = _sum("Calories") or 1
+
+        c = {
+            "veg": _ahei_lin(_sum("veg_g") / _AHEI_SRV["veg_g"], *ahei_a["veg"]),
+            "fruit": _ahei_lin(_sum("fruit_g") / _AHEI_SRV["fruit_g"], *ahei_a["fruit"]),
+            "wholegrain": _ahei_lin(_sum("wholegrain_g"), *ahei_a["wholegrain"]),
+            "ssb": _ahei_lin(_sum("ssb_ml") / _AHEI_SRV["ssb_ml"], *ahei_a["ssb"]),
+            "legnut": _ahei_lin(_sum("legume_nut_g") / _AHEI_SRV["legnut_g"], *ahei_a["legnut"]),
+            "redmeat": _ahei_lin(_sum("redmeat_g") / _AHEI_SRV["redmeat_g"], *ahei_a["redmeat"]),
+            "transfat": _ahei_lin(_sum("Трансжиры") * 9 / kcal * 100, *ahei_a["transfat"]),
+            "epadha": _ahei_lin(_sum("Омега-3 (EPA/DHA)"), *ahei_a["epadha"]),
+            "pufa": _ahei_lin(_sum("ПНЖ") * 9 / kcal * 100, *ahei_a["pufa"]),
+            "sodium": _ahei_lin(_sum("Натрий") * 2000 / kcal, *ahei_a["sodium"]),
+            "alcohol": _ahei_alcohol_pts(_sum("Алкоголь") / _AHEI_SRV["drink_g"], male),
+        }
+        ahei = sum(c.values())
+
+        nova = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}
+        for m in meals:
+            g = max(1, min(4, _js_round(_to_num0(m.get("NOVA")) or 1)))
+            nova[g] += _to_num0(m.get("Calories"))
+
+        day_list.append({"date": ds, "ahei": _js_round(ahei * 10) / 10, "components": c,
+                          "kcal": kcal, "total": total, "tagged": tagged, "nova": nova})
+
+    valid = [d for d in day_list if d["total"] > 0 and d["tagged"] / d["total"] >= 0.6]
+
+    ahei_week = _js_round(sum(d["ahei"] for d in valid) / len(valid)) if valid else None
+    comp_week = {}
+    if valid:
+        for k in list(ahei_a.keys()) + ["alcohol"]:
+            comp_week[k] = _js_round((sum(d["components"][k] for d in valid) / len(valid)) * 10) / 10
+
+    nova_cal = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}
+    nova_tot = 0.0
+    for d in valid:
+        for g in (1, 2, 3, 4):
+            nova_cal[g] += d["nova"][g]
+        nova_tot += d["kcal"]
+    nova_pct = {g: (_js_round(nova_cal[g] / nova_tot * 100) if nova_tot else 0) for g in (1, 2, 3, 4)}
+
+    plant_set = set()
+    for m in week_meals:
+        for p in re.split(r"[,;/]+", str(m.get("plants") or "")):
+            norm = _plant_norm(p)
+            norm = _PLANT_SYN2.get(norm, norm)
+            if len(norm) >= 3 and norm not in _NOT_PLANT:
+                plant_set.add(norm)
+
+    days_with_food = sum(1 for d in day_list if d["total"] > 0)
+
+    return {
+        "ahei": {
+            "week_avg": ahei_week, "target": 80, "ok": 65, "max": 110,
+            "days": [{"date": d["date"], "score": d["ahei"] if (d["tagged"] / (d["total"] or 1)) >= 0.6 else None}
+                     for d in day_list],
+            "components": comp_week, "coverage": f"{len(valid)}/{days_with_food}",
+        },
+        "nova": {"pct": nova_pct, "ultra_pct": nova_pct[4], "whole_pct": nova_pct[1]},
+        "plants": {"count": len(plant_set), "target": 30, "list": sorted(plant_set)},
+        "computed_days": len(valid),
+    }
+
+
+def _compute_nutrition_loops(day_rows: list[dict], recs: list[dict]) -> list[dict]:
+    """Порт computeNutritionLoops() — «сделал ли N из M дней» по check-контракту
+    действия из последней НЕДЕЛЬНОЙ рекомендации советника."""
+    weekly_recs = sorted(
+        (r for r in recs if r.get("Date") and str(r.get("Period_Type") or "weekly") == "weekly"),
+        key=lambda r: str(r["Date"]), reverse=True,
+    )
+    latest_rec = weekly_recs[0] if weekly_recs else None
+    if not latest_rec or not latest_rec.get("Recommendation_Text"):
+        return []
+
+    m = re.search(r"<<<ACTIONS\s*([\s\S]*?)\s*ACTIONS>>>", str(latest_rec["Recommendation_Text"]))
+    if not m:
+        return []
+    try:
+        tail = json.loads(m.group(1).strip())
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    acts = tail.get("actions") if isinstance(tail, dict) else None
+    acts = acts if isinstance(acts, list) else []
+    issued_date = str(latest_rec["Date"])[:10]
+
+    out = []
+    for a in acts:
+        c = (a or {}).get("check")
+        if not c or not c.get("col"):
+            continue
+        relevant = [r for r in day_rows if r.get("Date") and str(r["Date"])[:10] > issued_date]
+        days = []
+        for r in relevant:
+            v = _to_num0(r.get(c["col"]))
+            ok = (v <= c["value"]) if c.get("op") == "<=" else (v >= c["value"])
+            days.append({"date": str(r["Date"])[:10], "value": v, "ok": ok})
+        done_days = sum(1 for d in days if d["ok"])
+        window_days = 7
+        days_left = max(0, window_days - len(days))
+        if not days:
+            status = "insufficient_data"
+        elif done_days >= c["days_of_7"]:
+            status = "on_track"
+        elif done_days + days_left >= c["days_of_7"]:
+            status = "on_track"
+        else:
+            status = "behind"
+        out.append({
+            "title": a.get("title"), "key": c.get("key"), "kind": c.get("kind"), "op": c.get("op"),
+            "value": c.get("value"), "unit": c.get("unit"), "target_days": c.get("days_of_7"),
+            "evaluated_days": len(days), "done_days": done_days, "status": status,
+            "issued": issued_date, "days": days,
+        })
+    return out
+
+
+def _top_sources_for_day(week_meals, col, date_str, daily_target):
+    if not daily_target:
+        return []
+    day_meals = [m for m in week_meals if str(m.get("Date") or "")[:10] == date_str]
+    by_name: dict = {}
+    for m in day_meals:
+        v = _to_num0(m.get(col))
+        if v <= 0:
+            continue
+        name = m.get("Meal_description") or "Без описания"
+        by_name[name] = by_name.get(name, 0) + v
+    top = sorted(by_name.items(), key=lambda kv: kv[1], reverse=True)[:3]
+    return [{"name": name, "pct": _js_round((val / daily_target) * 100)} for name, val in top]
+
+
+def get_weekly_nutrition(cur) -> dict:
+    cur.execute('SELECT d.*, to_char(d."Date", \'YYYY-MM-DD\') AS "Date" FROM health.day_sum d ORDER BY d."Date"')
+    day_all = _rows_as_dicts(cur)
+
+    cur.execute(
+        'SELECT "Нутриент", "Колонка_в_Meals", "Единица", "Норма_RDA_AI", "Верхний_предел_UL", '
+        '"Категория", "Источник", "Примечание" FROM health.nutrient_targets ORDER BY "Нутриент"'
+    )
+    targets = _rows_as_dicts(cur)
+
+    cur.execute(
+        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
+        'FROM health.meals m ORDER BY m."Date"'
+    )
+    meals_all = _rows_as_dicts(cur)
+
+    cur.execute(
+        'SELECT "Date", "Period_Type", "Recommendation_Text", "Based_On", "Status", "Priority", '
+        '"Telegram_Text", "Alert_Text", "Has_Alert" FROM health.recommendations_log ORDER BY "Date" DESC'
+    )
+    recs = _rows_as_dicts(cur)
+
+    day_rows = sorted((r for r in day_all if r.get("Date")), key=lambda r: r["Date"], reverse=True)[:7]
+    day_rows = list(reversed(day_rows))
+    week_date_set = {r["Date"][:10] for r in day_rows}
+    week_meals = [m for m in meals_all if m.get("Date") and str(m["Date"])[:10] in week_date_set]
+
+    heat_metrics, normal_metrics, bullets = [], [], []
+    category_scores: dict = {}
+    category_details: dict = {}
+    sources: dict = {}
+
+    for t in targets:
+        col = t.get("Колонка_в_Meals")
+        if not col:
+            continue
+        rda = _parse_target_num(t.get("Норма_RDA_AI"))
+        ul = _parse_target_num(t.get("Верхний_предел_UL"))
+        categories = [c.strip() for c in str(t.get("Категория") or "").split(";") if c.strip()]
+        is_limit_type = "Риск избытка" in categories
+        ul_applies_to_diet = not re.search(r"добав", str(t.get("Верхний_предел_UL") or ""), re.I)
+
+        daily_values = [_to_num0(r.get(col)) for r in day_rows]
+        daily_pct = [
+            (_js_round((v / ul) * 100) if ul else None) if is_limit_type else (_js_round((v / rda) * 100) if rda else None)
+            for v in daily_values
+        ]
+        daily_pct = [p for p in daily_pct if p is not None]
+        if not daily_pct:
+            continue
+
+        avg_pct = _js_round(sum(daily_pct) / len(daily_pct))
+
+        upper_bound_pct = _js_round((ul / rda) * 100) if (ul and rda) else None
+        days_over_threshold = (
+            sum(1 for p in daily_pct if p > upper_bound_pct) if (upper_bound_pct and ul_applies_to_diet) else 0
+        )
+        deviates = (not is_limit_type) and (avg_pct < 85 or days_over_threshold >= 2)
+
+        avg_abs = _js_round((sum(daily_values) / len(daily_values)) * 100) / 100 if daily_values else None
+        ul_effective = ul if (ul and ul_applies_to_diet) else None
+        ul_ratio = (avg_abs / ul_effective) if (ul_effective and avg_abs is not None and ul_effective > 0) else None
+        ul_ratio_r = _js_round(ul_ratio * 100) / 100 if ul_ratio is not None else None
+        ul_note = "верхний предел относится только к добавкам, не к пище" if (ul and not ul_applies_to_diet) else None
+        days_below = sum(1 for p in daily_pct if p < 85)
+
+        last_day_pct = daily_pct[-1] if daily_pct else None
+        level = 0
+        if is_limit_type:
+            if avg_pct > 100:
+                level = 4
+            elif avg_pct >= 80:
+                level = 3
+        else:
+            if ul_ratio is not None and ul_ratio > 1:
+                level = 4
+            elif ul_ratio is not None and ul_ratio >= 0.8:
+                level = 3
+            elif avg_pct < 85 and days_below >= 3:
+                level = 2
+            elif avg_pct < 85:
+                level = 1
+
+        if is_limit_type:
+            bullets.append({
+                "label": t.get("Нутриент"), "unit": t.get("Единица"), "value": daily_values[-1],
+                "limit": ul, "avgPct": avg_pct, "avgAbs": avg_abs, "level": level, "lastDayPct": last_day_pct,
+            })
+        else:
+            for cat in categories:
+                category_scores.setdefault(cat, []).append(min(avg_pct, 100))
+                category_details.setdefault(cat, []).append({"label": t.get("Нутриент"), "pct": avg_pct})
+
+        metric_entry = {
+            "label": t.get("Нутриент"), "values": daily_pct, "avgPct": avg_pct,
+            "upperBoundPct": upper_bound_pct if ul_applies_to_diet else None, "isExcess": is_limit_type,
+            "unit": t.get("Единица") or "", "avgAbs": avg_abs, "rda": rda, "ul": ul_effective,
+            "ulRatio": ul_ratio_r, "ulNote": ul_note, "level": level, "lastDayPct": last_day_pct,
+            "note": t.get("Примечание"),
+        }
+        daily_target = ul if is_limit_type else rda
+
+        if deviates:
+            heat_metrics.append(metric_entry)
+            sources[t["Нутриент"]] = {
+                "isExcess": is_limit_type, "dayPct": daily_pct,
+                "byDay": [_top_sources_for_day(week_meals, col, r["Date"][:10], daily_target) for r in day_rows],
+            }
+        elif not is_limit_type:
+            normal_metrics.append({
+                "label": t.get("Нутриент"), "avg": avg_pct, "unit": t.get("Единица") or "",
+                "avgAbs": avg_abs, "rda": rda, "ul": ul_effective, "ulRatio": ul_ratio_r,
+                "ulNote": ul_note, "level": level,
+            })
+
+        if is_limit_type and t["Нутриент"] not in sources:
+            sources[t["Нутриент"]] = {
+                "isExcess": True, "dayPct": daily_pct,
+                "byDay": [_top_sources_for_day(week_meals, col, r["Date"][:10], daily_target) for r in day_rows],
+            }
+
+    scores = [
+        {"label": label, "pct": _js_round(sum(arr) / len(arr)),
+         "nutrients": sorted(category_details.get(label, []), key=lambda x: x["pct"], reverse=True)[:4]}
+        for label, arr in category_scores.items()
+    ]
+
+    try:
+        diet_quality = _compute_diet_quality(day_rows, week_meals, male=True)
+    except Exception as e:
+        diet_quality = {"error": str(e)}
+
+    try:
+        nutrition_loops = _compute_nutrition_loops(day_rows, recs)
+    except Exception as e:
+        nutrition_loops = [{"error": str(e)}]
+
+    return {
+        "period": {"from": day_rows[0]["Date"] if day_rows else None, "to": day_rows[-1]["Date"] if day_rows else None},
+        "days": [r["Date"] for r in day_rows],
+        "scores": scores,
+        "bullets": bullets,
+        "heatmap": heat_metrics,
+        "diet_quality": diet_quality,
+        "normal": normal_metrics,
+        "sources": sources,
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+        "nutrition_loops": nutrition_loops,
     }
