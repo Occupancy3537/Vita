@@ -48,23 +48,28 @@ _N8N_API_KEY = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiNGE3MWNhZi03ZjVkLTQ1YjEtODE4MC03MTU4YTZkODA2OTciLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZGYwOTYwODUtNzM5Zi00NWI1LWFmNWQtZGI5YjIxMzgwM2U0IiwiaWF0IjoxNzg3NjE5Mzg0LCJleHAiOjE4MTkxMTYwMDB9.EB9Nla8jN5J7ZfXITC3okLsLlUQM5o9-uY7ZgTayHwk"
 )
 
-# ["path", "?token=...", max_age_hours] — 1:1 с n8n-версией (health-dashboard
-# уже убран из проверки там же, 2026-09-16 — экран «Здоровье» из card-service).
+# (label, url, max_age_hours) — полный URL, не только path: экраны переезжают на
+# card-service по одному (bioage — 2026-09-19, #22), у каждого свой адрес после
+# переезда (localhost, а не путь у n8n) — 1:1 с n8n-версией только для тех, что
+# ещё не перенесены. (health-dashboard уже убран из проверки, 2026-09-16 —
+# экран «Здоровье» из card-service, у него отдельный вечноживой /dashboard/health
+# внутри самого card-service, тут отдельно не проверяем.)
 WEBHOOK_CHECKS = [
-    ("today-dashboard", "?token=blS1Chm38kO5wab2zPVC", 4),
-    ("bioage-dashboard", "?token=HbcQb4XNeqMFwMtnOQhx", 27),
-    ("weekly-nutrients", "?token=8j1bXp92BF5VabxNq2VN", 30),
-    ("recipes", "?token=Bz8nnNaltVyeUKfVLy71", 30),
+    ("today-dashboard", "http://n8n:443/webhook/today-dashboard?token=blS1Chm38kO5wab2zPVC", 4),
+    ("bioage-dashboard", "http://127.0.0.1:8080/dashboard/bioage?token=QpcRi1JgTF75uzOf4WrV", 27),
+    ("weekly-nutrients", "http://n8n:443/webhook/weekly-nutrients?token=8j1bXp92BF5VabxNq2VN", 30),
+    ("recipes", "http://n8n:443/webhook/recipes?token=Bz8nnNaltVyeUKfVLy71", 30),
 ]
 
-# Критичные воркфлоу — обновлено под текущую архитектуру (2026-09-19): убраны
+# Критичные воркфлоу — обновлено под текущую архитектуру (2026-09-19, #22): убраны
 # сознательно неактивные (Capitan/relay, старые Sub-Agent'ы, Anamnesis Collector,
-# health-dashboard cache) — держать их в списке значило бы получать ложную
-# тревогу каждое утро за то, что уже и так правильно выключено.
+# health-dashboard cache, bioage-dashboard cache — на card-service с #22) —
+# держать их в списке значило бы получать ложную тревогу каждое утро за то, что
+# уже и так правильно выключено.
 EXPECTED_ACTIVE_N8N = [
     "_Error Handler", "_System Check", "_Backup Alert",
     "Health Watchdog", "Weekly AI Advisor", "Reports",
-    "today-dashboard (cache)", "bioage-dashboard (cache)",
+    "today-dashboard (cache)",
     "Dashboard Cached", "PhenoAge Calc", "Anomaly_Detector/Correlations",
 ]
 
@@ -83,8 +88,7 @@ def _check_webhooks(problems: list, notes: list) -> dict:
     """Возвращает ответ today-dashboard (нужен ниже для проверки гейта) —
     та же экономия одного лишнего запроса, что была в оригинале."""
     today_cache = None
-    for path, q, max_h in WEBHOOK_CHECKS:
-        url = _N8N_BASE + path + q
+    for path, url, max_h in WEBHOOK_CHECKS:
         try:
             r = httpx.get(url, timeout=20.0)
             r.raise_for_status()
