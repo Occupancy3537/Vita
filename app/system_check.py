@@ -57,7 +57,7 @@ _N8N_API_KEY = (
 WEBHOOK_CHECKS = [
     ("today-dashboard", "http://127.0.0.1:8080/dashboard/today?token=QpcRi1JgTF75uzOf4WrV", 4),
     ("bioage-dashboard", "http://127.0.0.1:8080/dashboard/bioage?token=QpcRi1JgTF75uzOf4WrV", 27),
-    ("weekly-nutrients", "http://n8n:443/webhook/weekly-nutrients?token=8j1bXp92BF5VabxNq2VN", 30),
+    ("weekly-nutrients", "http://127.0.0.1:8080/dashboard/weekly-nutrition?token=QpcRi1JgTF75uzOf4WrV", 30),
 ]
 # "recipes" убран отсюда 2026-09-20 (по прямому запросу Влада — "тратит токены
 # впустую"): воркфлоу «Вычисление дефицитов для рекомендации рецептов» ни разу
