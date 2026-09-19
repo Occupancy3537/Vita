@@ -1205,3 +1205,136 @@ def get_today_dashboard(cur) -> dict:
         "budget": budget, "kcal_today": kcal_today, "protein_today": protein_today, "meals_today": len(today_meals),
         "plan": plan, "longevity": longevity, "quiet": quiet,
     }
+
+
+# --- «Питание сегодня» (виджет todaynutr): порт n8n "Dashboard Cached" /
+# webhook today-nutrition (2026-09-20) ---
+#
+# Второй по счёту после today-dashboard дашборд-кэш ещё на n8n — но, в отличие
+# от него, здесь НЕТ ни одного Sheets-источника вообще: все 3 Postgres-таблицы
+# уже читались из PG (Волна A2, квоту на них починили раньше). Перенос — чисто
+# снятие с n8n-расписания/staticData, без миграции данных.
+#
+# Разбирался с таймзоной отдельно: у ЭТОГО конкретного n8n-воркфлоу задан свой
+# workflow-level `timezone: Asia/Vladivostok` (settings, не переменная
+# окружения контейнера — тот вообще в UTC) — иначе `$now.toFormat('yyyy-MM-dd')`
+# в фильтре "сегодняшних" приёмов пищи ловил бы UTC-дату, которая отстаёт от
+# владивостокской на 10 часов каждую ночь (00:00–10:00 ВЛ = ещё вчера в UTC) —
+# реального бага в проде не было, но легко было бы внести его в порт, не заметив.
+
+
+def _js_num(v) -> float:
+    """Число как его увидел бы JS Number(v): "" и None → 0, запятая-дробная
+    строка ("24,3") НЕ парсится (в отличие от _num/toNum выше) → 0, как и в
+    оригинале — health.meals пишется card-service, точка гарантирована, но
+    порт должен вести себя как оригинал, а не тише него."""
+    if v is None or v == "":
+        return 0.0
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _or0(v):
+    """JS `v || 0`: falsy (None/"") → 0, иначе значение КАК ЕСТЬ (в т.ч.
+    "0"-строка остаётся строкой) — используется только для поля target в
+    выводе (оригинал отдаёт его без парсинга), не для арифметики."""
+    return 0 if (v is None or v == "") else v
+
+
+def get_today_nutrition(cur) -> dict:
+    cur.execute(
+        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
+        'FROM health.meals m ORDER BY m."Date"'
+    )
+    meals_all = _rows_as_dicts(cur)
+
+    cur.execute(
+        'SELECT "User_ID", "Name", "Calories_target", "Protein_target", "Fat_target", "Carbs_target", '
+        '"Date_of_birth" FROM health.nutrition_profile ORDER BY "User_ID"'
+    )
+    profile_rows = _rows_as_dicts(cur)
+    profile = profile_rows[0] if profile_rows else {}
+
+    cur.execute(
+        'SELECT date::text AS "date", anomaly_count, strong_count, raw_anomalies::text AS "raw_anomalies" '
+        "FROM health.anomaly_log ORDER BY date DESC"
+    )
+    anomalies_rows = _rows_as_dicts(cur)
+
+    cur.execute('SELECT d.*, to_char(d."Дата", \'YYYY-MM-DD\') AS "Дата" FROM health.daily_trends d ORDER BY d."Дата"')
+    trends_all = _rows_as_dicts(cur)
+
+    today = _dkey(datetime.now(timezone.utc) + timedelta(hours=10))
+    today_meals = [m for m in meals_all if str(m.get("Date") or "").startswith(today)]
+
+    total_kcal = sum(_js_num(m.get("Calories")) for m in today_meals)
+    total_prot = sum(_js_num(m.get("Proteins")) for m in today_meals)
+    total_fat = sum(_js_num(m.get("Fats")) for m in today_meals)
+    total_carb = sum(_js_num(m.get("Carbs")) for m in today_meals)
+
+    cal_target_num = _js_num(profile.get("Calories_target"))
+    prot_target_num = _js_num(profile.get("Protein_target"))
+    fat_target_num = _js_num(profile.get("Fat_target"))
+    carb_target_num = _js_num(profile.get("Carbs_target"))
+
+    sorted_anom = sorted(anomalies_rows, key=lambda a: a.get("date") or "", reverse=True)
+    latest = sorted_anom[0] if sorted_anom else None
+
+    anomalies = {"count": 0, "strong_count": 0, "report_date": None, "raw": []}
+    if latest:
+        try:
+            raw_list = json.loads(latest.get("raw_anomalies") or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raw_list = []
+        trends_rows = sorted((r for r in trends_all if r.get("Дата")), key=lambda r: r["Дата"])[-7:]
+        raw_list = [
+            {**a, "history": [v for v in (_num(row.get(a.get("metric"))) for row in trends_rows) if v is not None]}
+            for a in raw_list
+        ]
+        anomalies = {
+            "count": int(latest.get("anomaly_count") or 0),
+            "strong_count": int(latest.get("strong_count") or 0),
+            "report_date": latest.get("date"),
+            "raw": raw_list,
+        }
+
+    return {
+        "date": today,
+        "user": profile.get("Name") or "Неизвестный",
+        "summary": {
+            "calories": {
+                "consumed": total_kcal, "target": _or0(profile.get("Calories_target")),
+                "remaining": cal_target_num - total_kcal,
+            },
+            "macros": {
+                "proteins": {
+                    "consumed": total_prot, "target": _or0(profile.get("Protein_target")),
+                    "remaining": prot_target_num - total_prot,
+                },
+                "fats": {
+                    "consumed": round(total_fat, 1), "target": _or0(profile.get("Fat_target")),
+                    "remaining": round(fat_target_num - total_fat, 1),
+                },
+                "carbs": {
+                    "consumed": round(total_carb, 1), "target": _or0(profile.get("Carbs_target")),
+                    "remaining": round(carb_target_num - total_carb, 1),
+                },
+            },
+        },
+        "meals_count": len(today_meals),
+        "meals": sorted(
+            (
+                {
+                    "t": str(m.get("Date") or "").replace("T", " ")[11:16],
+                    "d": str(m.get("Meal_description") or "").strip(),
+                    "k": round(_js_num(m.get("Calories"))), "p": round(_js_num(m.get("Proteins"))),
+                    "f": round(_js_num(m.get("Fats"))), "c": round(_js_num(m.get("Carbs"))),
+                }
+                for m in today_meals
+            ),
+            key=lambda m: m["t"],
+        ),
+        "anomalies": anomalies,
+    }

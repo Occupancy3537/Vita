@@ -38,7 +38,13 @@ from psycopg import sql
 from pydantic import BaseModel
 from ulid import ULID
 
-from app.dashboard import get_bioage_dashboard, get_health_dashboard, get_today_dashboard, get_today_live_metrics
+from app.dashboard import (
+    get_bioage_dashboard,
+    get_health_dashboard,
+    get_today_dashboard,
+    get_today_live_metrics,
+    get_today_nutrition,
+)
 from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
 from app.doctor import anamnesis as doctor_anamnesis
@@ -179,6 +185,17 @@ def dashboard_today(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return get_today_dashboard(cur)
+
+
+@app.get("/dashboard/today-nutrition")
+def dashboard_today_nutrition(token: str = Query(default="")) -> dict:
+    """Виджет «Питание сегодня» — порт n8n `Dashboard Cached` / webhook
+    `today-nutrition` (2026-09-20). Все 3 источника уже были в Postgres (Волна
+    A2) — переезд снял только сам расчёт/расписание с n8n, данные не мигрировали."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return get_today_nutrition(cur)
 
 
 @app.post("/ingest", response_model=IngestResponse)
