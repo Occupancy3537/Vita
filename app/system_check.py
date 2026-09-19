@@ -61,15 +61,16 @@ WEBHOOK_CHECKS = [
     ("recipes", "http://n8n:443/webhook/recipes?token=Bz8nnNaltVyeUKfVLy71", 30),
 ]
 
-# Критичные воркфлоу — обновлено под текущую архитектуру (2026-09-20, #24): убраны
-# сознательно неактивные (Capitan/relay, старые Sub-Agent'ы, Anamnesis Collector,
-# health-dashboard cache, bioage-dashboard cache — на card-service с #22,
-# today-dashboard cache — на card-service с #24) — держать их в списке значило
-# бы получать ложную тревогу каждое утро за то, что уже и так правильно выключено.
+# Критичные воркфлоу — обновлено под текущую архитектуру (2026-09-20, #24/#25):
+# убраны сознательно неактивные (Capitan/relay, старые Sub-Agent'ы, Anamnesis
+# Collector, health-dashboard cache, bioage-dashboard cache — на card-service
+# с #22, today-dashboard cache — на card-service с #24, Dashboard Cached
+# (today-nutrition) — на card-service с #25) — держать их в списке значило бы
+# получать ложную тревогу каждое утро за то, что уже и так правильно выключено.
 EXPECTED_ACTIVE_N8N = [
     "_Error Handler", "_System Check", "_Backup Alert",
     "Health Watchdog", "Weekly AI Advisor", "Reports",
-    "Dashboard Cached", "PhenoAge Calc", "Anomaly_Detector/Correlations",
+    "PhenoAge Calc", "Anomaly_Detector/Correlations",
 ]
 
 
