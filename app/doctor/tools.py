@@ -567,7 +567,8 @@ TOOL_REGISTRY = [
     },
     {
         "name": "Plan_Lab",
-        "description": "Запланируй пересдачу/новый анализ.",
+        "description": "Запланируй пересдачу/новый анализ. Сначала проверь «УЖЕ "
+                        "ЗАПЛАНИРОВАННЫЕ АНАЛИЗЫ» в досье — не вызывай, если тест там уже есть.",
         "parameters": {"type": "object", "properties": {
             "test": {"type": "string"}, "category": {"type": "string"},
             "interval_months": {"type": "integer"}, "reason": {"type": "string"},

@@ -112,6 +112,28 @@ def test_labs_out_of_range_respects_limit():
     assert len(r) == 5
 
 
+def test_planned_labs_maps_columns():
+    """2026-09-19: до этого lab_plan нигде не читался доктором — реальный
+    итог, B12 запланирован дважды подряд в двух разговорах. Видимость вместо
+    жёсткого правила под конкретный тест."""
+    cur = FakeCursor([[
+        ("LP-01", "Витамин B12 (сыворотка)", "Витамины", "2026-10-18",
+         "Пограничный B12 на фоне радикулопатии", "AI-доктор"),
+    ]])
+    r = context._planned_labs(cur)
+    assert r == [{
+        "plan_id": "LP-01", "test": "Витамин B12 (сыворотка)", "category": "Витамины",
+        "next_due": "2026-10-18", "reason": "Пограничный B12 на фоне радикулопатии", "source": "AI-доктор",
+    }]
+
+
+def test_planned_labs_respects_limit():
+    rows = [(f"LP-{i}", f"Тест {i}", "", None, "", "") for i in range(20)]
+    cur = FakeCursor([rows])
+    r = context._planned_labs(cur, limit=5)
+    assert len(r) == 5
+
+
 # --- room climate cache -------------------------------------------------------
 
 @pytest.fixture(autouse=True)
@@ -194,12 +216,12 @@ def test_room_climate_none_when_never_succeeded(monkeypatch):
 def test_build_dossier_has_all_expected_keys(monkeypatch):
     monkeypatch.setattr(context, "get_context", lambda cur, mode, payload: {"stub": True})
     monkeypatch.setattr(context, "_room_climate", lambda: None)
-    cur = FakeCursor([[] for _ in range(8)])  # 8 health.*-запросов внутри build_dossier
+    cur = FakeCursor([[] for _ in range(9)])  # 9 health.*-запросов внутри build_dossier
 
     d = context.build_dossier(cur, "тест")
     assert set(d.keys()) == {
         "memory", "garmin_yesterday", "garmin_week_trend", "nutrition_today",
         "meals_today", "active_meds", "open_investigations", "recent_doctor_notes",
-        "labs_out_of_range", "room_climate",
+        "labs_out_of_range", "planned_labs", "room_climate",
     }
     assert d["memory"] == {"stub": True}

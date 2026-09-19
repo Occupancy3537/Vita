@@ -185,6 +185,25 @@ def _labs_out_of_range(cur, limit: int = 10) -> list[dict]:
     return out[:limit]
 
 
+def _planned_labs(cur, limit: int = 15) -> list[dict]:
+    """2026-09-19: до этого health.lab_plan нигде не читался доктором вообще —
+    Plan_Lab был write-only чёрным ящиком. Реальный итог: за 2 отдельных
+    разговора доктор дважды спланировал пересдачу B12 (17.09 и 18.09), не имея
+    возможности узнать про первую запись. Правильный фикс — не жёсткое правило
+    "не дублируй B12" (это не масштабируется на другие анализы), а видимость:
+    досье как и остальные разделы (open_investigations, active_meds)."""
+    cur.execute(
+        "SELECT \"Plan_ID\", \"Test\", \"Category\", \"Next_Due\", \"Reason\", \"Source\" "
+        "FROM health.lab_plan WHERE lower(coalesce(\"Status\", 'active')) = 'active' "
+        "ORDER BY \"Next_Due\" NULLS LAST LIMIT %s",
+        (limit,),
+    )
+    return [
+        {"plan_id": pid, "test": t, "category": cat, "next_due": due, "reason": r, "source": src}
+        for pid, t, cat, due, r, src in cur.fetchall()
+    ][:limit]
+
+
 def _room_climate(timeout: float = 3.0) -> Optional[dict]:
     """Единственный мост в n8n (план §2.3), с кэшем на _ROOM_CLIMATE_CACHE_TTL_S
     (см. комментарий у константы — живой замер разошёлся с оценкой плана на
@@ -221,5 +240,6 @@ def build_dossier(cur, text: str = "") -> dict:
         "open_investigations": _open_investigations(cur),
         "recent_doctor_notes": _recent_doctor_notes(cur),
         "labs_out_of_range": _labs_out_of_range(cur),
+        "planned_labs": _planned_labs(cur),
         "room_climate": _room_climate(),
     }

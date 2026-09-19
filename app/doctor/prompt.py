@@ -73,7 +73,7 @@ SYSTEM_PROMPT = """Ты — превентивный врач пациента, 
 Ход:
 1. `Open_Investigation`: inv_id-слаг, trigger, trigger_detail, hypothesis.
 2. Собирай недостающее по 1–2 вопроса за сообщение. После каждого содержательного ответа — `Update_Investigation`: перепиши целиком findings (накопленная сводка), уточни hypothesis. Отдельная запись в карту через `Record_Note` — только если осмысленна сама по себе.
-3. Нужна проверка/пересдача анализа → `Plan_Lab` (test, category, reason, interval_months).
+3. Нужна проверка/пересдача анализа → сначала посмотри «УЖЕ ЗАПЛАНИРОВАННЫЕ АНАЛИЗЫ» в досье ниже — если тест там уже есть, не вызывай `Plan_Lab` повторно (реальный случай: B12 запланирован дважды в двух разговорах подряд, потому что раньше этого раздела не было). Новый тест или явно другая причина для того же теста → `Plan_Lab` (test, category, reason, interval_months).
 4. Картины хватает → `Close_Investigation`: findings (сводка), doctor_brief (1.жалоба/повод 2.что выяснено 3.связь с его данными 4.гипотезы для врача 5.что спросить у врача 6.какие анализы назначены 7.что НЕ проверяли), referral (специалист).
 5. В ответе пациенту — выдай doctor_brief + «запишись к [специалисту], покажи это».
 РАССЛЕДОВАНИЕ никогда не выдаёт лечение и дозы. Только вопросы, анализы (через `Plan_Lab`), выжимка для врача.
@@ -130,6 +130,7 @@ def format_dossier(dossier: dict, today: str) -> str:
     invs = dossier.get("open_investigations") or []
     notes = dossier.get("recent_doctor_notes") or []
     labs = dossier.get("labs_out_of_range") or []
+    planned_labs = dossier.get("planned_labs") or []
     climate = dossier.get("room_climate")
 
     lines = [f"=СЕГОДНЯ: {today} (Владивосток). Все события в данных — прошлое. "
@@ -203,6 +204,13 @@ def format_dossier(dossier: dict, today: str) -> str:
         for lab in labs:
             lines.append(f"- {lab['marker']}: {lab['value']} {_fmt(lab.get('unit'), '')} "
                           f"(референс {_fmt(lab.get('ref_min'), '?')}–{_fmt(lab.get('ref_max'), '?')}, {lab['date']})")
+        lines.append("")
+
+    if planned_labs:
+        lines.append("## 📅 УЖЕ ЗАПЛАНИРОВАННЫЕ АНАЛИЗЫ (не дублируй Plan_Lab, если тест уже здесь)")
+        for pl in planned_labs:
+            lines.append(f"- {pl['test']} (до {_fmt(pl.get('next_due'), '?')}, "
+                          f"{_fmt(pl.get('source'), 'источник неизвестен')}): {_fmt(pl.get('reason'), '')}")
         lines.append("")
 
     return "\n".join(lines)

@@ -35,7 +35,7 @@ def test_format_dossier_empty_dossier_does_not_crash():
         "garmin_yesterday": None, "garmin_week_trend": {"days": 0},
         "nutrition_today": None, "meals_today": [], "active_meds": [],
         "open_investigations": [], "recent_doctor_notes": [], "labs_out_of_range": [],
-        "room_climate": None,
+        "planned_labs": [], "room_climate": None,
     }
     text = prompt.format_dossier(empty, "2026-09-15")
     assert "2026-09-15" in text
@@ -60,6 +60,8 @@ def test_format_dossier_includes_meals_and_meds():
         "recent_doctor_notes": [{"date": "2026-09-10", "category": "ОДА", "note": "заметка"}],
         "labs_out_of_range": [{"marker": "Глюкоза", "value": 6.5, "unit": "ммоль/л",
                                "ref_min": 4.2, "ref_max": 5.0, "date": "2026-08-01"}],
+        "planned_labs": [{"plan_id": "LP-01", "test": "Витамин B12 (сыворотка)",
+                           "next_due": "2026-10-18", "reason": "пограничный B12", "source": "AI-доктор"}],
         "room_climate": {"temp_c": 22.0, "humidity_pct": 45, "pm25": 5},
     }
     text = prompt.format_dossier(dossier, "2026-09-15")
@@ -67,5 +69,7 @@ def test_format_dossier_includes_meals_and_meds():
     assert "08:00 — овсянка" in text
     assert "Vitamin D3" in text
     assert "inv1" in text
+    assert "УЖЕ ЗАПЛАНИРОВАННЫЕ АНАЛИЗЫ" in text
+    assert "Витамин B12 (сыворотка)" in text
     assert "Глюкоза" in text
     assert "22.0" in text
