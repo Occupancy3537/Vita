@@ -58,8 +58,18 @@ WEBHOOK_CHECKS = [
     ("today-dashboard", "http://127.0.0.1:8080/dashboard/today?token=QpcRi1JgTF75uzOf4WrV", 4),
     ("bioage-dashboard", "http://127.0.0.1:8080/dashboard/bioage?token=QpcRi1JgTF75uzOf4WrV", 27),
     ("weekly-nutrients", "http://n8n:443/webhook/weekly-nutrients?token=8j1bXp92BF5VabxNq2VN", 30),
-    ("recipes", "http://n8n:443/webhook/recipes?token=Bz8nnNaltVyeUKfVLy71", 30),
 ]
+# "recipes" убран отсюда 2026-09-20 (по прямому запросу Влада — "тратит токены
+# впустую"): воркфлоу «Вычисление дефицитов для рекомендации рецептов» ни разу
+# не читается фронтендом (grep v4.html/index.html — пусто), последний реальный
+# прогон 07.09, при этом висел активным AI Agent-узлом на Schedule Trigger.
+# Заодно нашлась и починена настоящая находка (#26): webhook_entity держал
+# регистрацию ЖИВОЙ даже при active=0 в workflow_entity — обратный случай
+# уже знакомого "raw-SQL-активация не перерегистрирует вебхуки", только здесь
+# сама деактивация (сделанная кем-то раньше не через REST API) не сняла
+# регистрацию. Почищено циклом activate→deactivate через REST API — второй
+# вызов заставил n8n пересобрать реестр вебхуков и снять его по-настоящему
+# (проверено: старый /webhook/recipes теперь 404).
 
 # Критичные воркфлоу — обновлено под текущую архитектуру (2026-09-20, #24/#25):
 # убраны сознательно неактивные (Capitan/relay, старые Sub-Agent'ы, Anamnesis
