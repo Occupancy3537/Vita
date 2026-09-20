@@ -182,6 +182,81 @@ def test_sync_actions_empty_list_returns_empty_string():
     assert wa.sync_actions_to_card([], "2026-09-20") == ""
 
 
+# --- премортем #5: is_bioage_driver/metric_overdue реально считаются -----------
+
+_PHENO_LOG = [{
+    "date": "2026-09-20", "formula_version": "Levine2018 / CRP=mg/L / 2026-09",
+    "contributions": {"gluc": 0.85, "wbc": -1.04, "rdw": 0.72, "alb": -0.07},
+}]
+
+_LAB_PLAN = [
+    {"Test": "Ферритин + B12 + фолат", "Status": "active", "Next_Due": "2026-01-01"},  # давно просрочен
+    {"Test": "Липидограмма + ApoB + Lp(a)", "Status": "active", "Next_Due": "2026-10-20"},  # ещё не наступил
+    {"Test": "Старый снятый пункт", "Status": "done", "Next_Due": "2020-01-01"},  # завершён, не считается
+]
+
+
+def test_bioage_driver_patterns_picks_significant_positive_contributions():
+    patterns = wa._bioage_driver_patterns(_PHENO_LOG)
+    text_gluc = "Пересдать глюкозу натощак"
+    text_wbc = "Понаблюдать лейкоциты"  # wbc отрицательный (улучшает), не драйвер
+    assert any(rx.search(text_gluc) for rx in patterns)
+    assert not any(rx.search(text_wbc) for rx in patterns)
+
+
+def test_bioage_driver_patterns_empty_when_no_valid_log():
+    assert wa._bioage_driver_patterns([]) == []
+    assert wa._bioage_driver_patterns([{"formula_version": "init"}]) == []
+
+
+def test_overdue_lab_tests_flags_only_active_and_overdue():
+    overdue = wa._overdue_lab_tests(_LAB_PLAN, "2026-09-20")
+    assert "Ферритин + B12 + фолат" in overdue
+    assert "Липидограмма + ApoB + Lp(a)" not in overdue
+    assert "Старый снятый пункт" not in overdue
+
+
+def test_action_bioage_flags_matches_driver_and_overdue_keywords():
+    patterns = wa._bioage_driver_patterns(_PHENO_LOG)
+    overdue = wa._overdue_lab_tests(_LAB_PLAN, "2026-09-20")
+    action_driver = {"title": "Пересдать глюкозу", "why": "натощак"}
+    action_overdue = {"title": "Сдать B12", "why": "давно не проверяли"}
+    action_neither = {"title": "Больше воды пить", "why": "тест"}
+
+    assert wa._action_bioage_flags(action_driver, patterns, overdue) == (True, False)
+    assert wa._action_bioage_flags(action_overdue, patterns, overdue) == (False, True)
+    assert wa._action_bioage_flags(action_neither, patterns, overdue) == (False, False)
+
+
+def test_sync_actions_passes_real_bioage_flags_into_propose_request(monkeypatch):
+    """Регрессия премортема #5: раньше is_bioage_driver/metric_overdue были
+    ВСЕГДА False, потому что вообще не передавались. Теперь для действия,
+    которое реально касается драйвера PhenoAge, ProposeRequest должен нести
+    is_bioage_driver=True."""
+    from app import recommendations as rc
+
+    captured = []
+
+    class FakeResp:
+        accepted = True
+        id = "rc_x"
+        priority = "high"
+        rejected_gate = None
+        rejected_reason = None
+
+    def fake_propose(req):
+        captured.append(req)
+        return FakeResp()
+
+    monkeypatch.setattr(rc, "propose_recommendation", fake_propose)
+    wa.sync_actions_to_card(
+        [{"title": "Пересдать глюкозу натощак", "type": "medical", "why": "тест"}],
+        "2026-09-20", pheno_log=_PHENO_LOG, lab_plan=_LAB_PLAN,
+    )
+    assert captured[0].is_bioage_driver is True
+    assert captured[0].metric_overdue is False
+
+
 # --- write_recommendations_log (интеграционный, реальная таблица) --------------
 
 TEST_DATE = "1999-12-31"
@@ -221,12 +296,12 @@ def test_write_recommendations_log_inserts_then_overwrites_same_date():
 # --- run_once (полностью замоканная оркестрация) -------------------------------
 
 def test_run_once_sends_telegram_and_writes_log(monkeypatch):
-    src = {"recs": [], "targets": []}
+    src = {"recs": [], "targets": [], "pheno_log": [], "lab_plan": []}
     monkeypatch.setattr(wa, "_fetch_all", lambda cur: src)
     monkeypatch.setattr(wa, "build_context", lambda s: {"window": {"to": "2026-09-20"}})
     monkeypatch.setattr(wa, "build_prompt", lambda ctx: "промпт")
     monkeypatch.setattr(wa, "call_model", lambda prompt: "текст\n\n<<<ACTIONS\n{\"actions\": []}\nACTIONS>>>")
-    monkeypatch.setattr(wa, "sync_actions_to_card", lambda actions, date: "")
+    monkeypatch.setattr(wa, "sync_actions_to_card", lambda actions, date, pheno_log=None, lab_plan=None: "")
 
     written = {}
     monkeypatch.setattr(wa, "write_recommendations_log", lambda cur, row: written.update(row))
