@@ -26,7 +26,11 @@
 # 09:00 VL), порт n8n Health Watchdog.
 # 2026-09-20: NUTRITION_REPORTS_ENABLED — app/nutrition_reports.py (ежедневно
 # 21:45 VL + еженедельно вс 12:00 VL), порт n8n Reports (дневной путь) +
-# Weekly Food Report. Последний LLM-порт группы 2.
+# Weekly Food Report.
+# 2026-09-20: WEEKLY_ADVISOR_ENABLED — app/weekly_advisor.py (еженедельно
+# вс 20:00 VL), порт n8n Weekly AI Advisor. Крупнейший и последний порт
+# группы 2 (26 нод n8n, ~760 строк JS). health.recommendations_log теперь
+# пишется напрямую в Postgres (DELETE+INSERT по Date), не в Sheets.
 set -e
 cd "$(dirname "$0")"
 
@@ -54,6 +58,7 @@ sudo docker run -d \
   -e DIET_TAGGER_ENABLED=1 \
   -e HEALTH_WATCHDOG_ENABLED=1 \
   -e NUTRITION_REPORTS_ENABLED=1 \
+  -e WEEKLY_ADVISOR_ENABLED=1 \
   -e REGISTRAR_MODEL="${REGISTRAR_MODEL:-z-ai/glm-5.3-flash}" \
   -e REGISTRAR_PDF_MODEL="${REGISTRAR_PDF_MODEL:-google/gemini-3.1-flash-lite}" \
   -e REGISTRAR_HEALTH_SCHEMA="${REGISTRAR_HEALTH_SCHEMA:-health}" \

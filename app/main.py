@@ -78,6 +78,7 @@ import app.small_webhooks as small_webhooks
 import app.diet_tagger as diet_tagger
 import app.health_watchdog as health_watchdog
 import app.nutrition_reports as nutrition_reports
+import app.weekly_advisor as weekly_advisor
 from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
@@ -135,6 +136,12 @@ def _start_telegram_polling() -> None:
     daily_report_scheduler.start()
     weekly_report_scheduler = threading.Thread(target=nutrition_reports.run_weekly_scheduler, daemon=True, name="nutrition-weekly-report-scheduler")
     weekly_report_scheduler.start()
+    # 2026-09-20 (группа 2, финал): Weekly AI Advisor — крупнейший порт волны,
+    # закрывает группу 2 целиком.
+    if os.environ.get("WEEKLY_ADVISOR_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return
+    advisor_scheduler = threading.Thread(target=weekly_advisor.run_scheduler, daemon=True, name="weekly-advisor-scheduler")
+    advisor_scheduler.start()
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 

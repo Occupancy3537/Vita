@@ -18,10 +18,13 @@
   эта проверка была нужна на переходный период миграции Sheets→PG, который уже
   закрыт; Postgres теперь единственный источник для этих данных в самой этой
   проверке, сверять не с чем.
-- Свежесть Recommendations_Log — источник до сих пор только Google Sheets
-  (Weekly AI Advisor ещё не портирован, Этап C6 дорожной карты), у card-service
-  нет прямого доступа к Sheets. Не строил ради одной проверки новый мост —
-  вернётся сама, когда советник переедет.
+- Свежесть Recommendations_Log — с переносом Weekly AI Advisor (2026-09-20,
+  #33) таблица теперь в Postgres и технически доступна отсюда, но отдельную
+  проверку свежести пока не строил — сам советник (app/weekly_advisor.py)
+  падает в Telegram явным предупреждением, если модель не ответила или блок
+  действий не распарсился, так что немой сбой самому себе он не устроит;
+  отдельная internal-проверка «когда была последняя запись» — не сегодняшняя
+  задача, можно добавить позже, если понадобится.
 - Дубли по дате в Daily_Trends/day_sum — в Postgres дата это PRIMARY KEY,
   дубликат структурно невозможен (ON CONFLICT/PK не даст вставить); в Sheets-
   версии эта проверка была нужна ровно потому, что Sheets такого не гарантирует.
@@ -71,17 +74,17 @@ WEBHOOK_CHECKS = [
 # вызов заставил n8n пересобрать реестр вебхуков и снять его по-настоящему
 # (проверено: старый /webhook/recipes теперь 404).
 
-# Критичные воркфлоу — обновлено под текущую архитектуру (2026-09-20, #24/#25):
+# Критичные воркфлоу — обновлено под текущую архитектуру (2026-09-20, #24/#25/#33):
 # убраны сознательно неактивные (Capitan/relay, старые Sub-Agent'ы, Anamnesis
 # Collector, health-dashboard cache, bioage-dashboard cache — на card-service
 # с #22, today-dashboard cache — на card-service с #24, Dashboard Cached
 # (today-nutrition) — на card-service с #25, Diet Quality Tagger — на card-service
 # с #30, Health Watchdog — на card-service с #31, Reports — на card-service с
-# #32) — держать их в списке значило бы получать ложную тревогу каждое утро
-# за то, что уже и так правильно выключено.
+# #32, Weekly AI Advisor — на card-service с #33, закрывает группу 2 целиком) —
+# держать их в списке значило бы получать ложную тревогу каждое утро за то,
+# что уже и так правильно выключено.
 EXPECTED_ACTIVE_N8N = [
     "_Error Handler", "_System Check",
-    "Weekly AI Advisor",
     "PhenoAge Calc", "Anomaly_Detector/Correlations",
 ]
 # _Backup Alert — на card-service с 2026-09-20 (app/backup_alert.py, группа малых утилит).
@@ -218,8 +221,8 @@ def _check_n8n_active(problems: list, notes: list) -> None:
 def build_message() -> dict:
     problems: list = []
     notes: list = [
-        "Recommendations_Log (свежесть советника) не проверяется — источник ещё только Google "
-        "Sheets, вернётся при переносе Weekly AI Advisor в card-service",
+        "Recommendations_Log (свежесть советника) отдельно не проверяется — сам "
+        "Weekly AI Advisor шлёт явное предупреждение в Telegram при сбое",
     ]
 
     today_cache = _check_webhooks(problems, notes)
