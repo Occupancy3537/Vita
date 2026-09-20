@@ -20,6 +20,8 @@
 # 2026-09-20: SMALL_ALERTS_ENABLED — планировщики app/memory_archive_check.py
 # (ежедневно 08:00 VL) и app/backup_alert.py (ежедневно 09:00 UTC) — порты
 # n8n _Memory Pre-Archive Check и _Backup Alert.
+# 2026-09-20: DIET_TAGGER_ENABLED — app/diet_tagger.py (каждые 15 мин), порт
+# n8n Diet Quality Tagger. Первый порт группы 2 с реальным LLM-вызовом.
 set -e
 cd "$(dirname "$0")"
 
@@ -44,6 +46,7 @@ sudo docker run -d \
   -e SYSTEM_CHECK_ENABLED=1 \
   -e GATE_WATCH_ENABLED=1 \
   -e SMALL_ALERTS_ENABLED=1 \
+  -e DIET_TAGGER_ENABLED=1 \
   -e REGISTRAR_MODEL="${REGISTRAR_MODEL:-z-ai/glm-5.3-flash}" \
   -e REGISTRAR_PDF_MODEL="${REGISTRAR_PDF_MODEL:-google/gemini-3.1-flash-lite}" \
   -e REGISTRAR_HEALTH_SCHEMA="${REGISTRAR_HEALTH_SCHEMA:-health}" \

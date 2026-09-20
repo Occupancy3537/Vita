@@ -75,6 +75,7 @@ import app.gate_watch as gate_watch
 import app.memory_archive_check as memory_archive_check
 import app.backup_alert as backup_alert
 import app.small_webhooks as small_webhooks
+import app.diet_tagger as diet_tagger
 from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
@@ -115,6 +116,11 @@ def _start_telegram_polling() -> None:
     mac_scheduler.start()
     backup_scheduler = threading.Thread(target=backup_alert.run_scheduler, daemon=True, name="backup-alert-scheduler")
     backup_scheduler.start()
+    # 2026-09-20 (группа 2): порт Diet Quality Tagger — первый в очереди с LLM-вызовом.
+    if os.environ.get("DIET_TAGGER_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return
+    tagger_scheduler = threading.Thread(target=diet_tagger.run_scheduler, daemon=True, name="diet-tagger-scheduler")
+    tagger_scheduler.start()
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 
