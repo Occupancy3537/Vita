@@ -38,6 +38,7 @@ import httpx
 from app.dashboard import _dkey, _num
 from app.db import get_conn
 from app.doctor import telegram
+from app.patient_gate import profile_hernia_active, profile_swim_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,6 @@ MIN_ABS_DELTA = {
 KEY_RX = re.compile(r"мрт|кт |узи|диагноз|не в норме|не норм|операц|госпитал|аллерг|перелом|вывих|"
                      r"хроническ|экструз|грыж|коксартроз|модик|modic|глауком|радикулопат|протруз", re.I)
 ROUTINE_NORMAL_RX = re.compile(r"^(\s*)(в норме|в пределах нормы|норма\b|все показатели в норме)", re.I)
-HERNIA_RX = re.compile(r"грыж|радикулопат|протру[зи]|экструз|модик|modic|корешк", re.I)
 LOAD_RX = re.compile(
     r"интенсив|интервал|hiit|бег|пробеж|прыж|присед|становая|штанг|турник|подтяг|отжим|планк|"
     r"скручиван|макгил|ротац|наклон|подним[а-яё]*\s+(?:тяж|вес)|подн(ять|имать)\s+(?:тяж|вес)|"
@@ -147,17 +147,24 @@ def _fetch_all(cur) -> dict:
     cur.execute('SELECT "Visit_ID", "Date" FROM health.visits')
     lab_visit = _rows(cur)
 
-    cur.execute('SELECT date, chrono_age, phenoage, delta, markers_used, formula_version FROM health.phenoage_log')
+    cur.execute('SELECT date, chrono_age, phenoage, delta, markers_used, formula_version, contributions FROM health.phenoage_log')
     pheno_log = _rows(cur)
 
     cur.execute("SELECT date::text AS date, raw_anomalies FROM health.anomaly_log")
     anomaly_log = _rows(cur)
 
+    # Премортем (2026-09-20, задача "1,3,4,5,7", проблема #5 "gate6_priority
+    # никогда не получал реальные флаги") — нужен для _bioage_driver_patterns/
+    # _overdue_lab_tests в sync_actions_to_card, тот же запрос, что и в
+    # Health Watchdog (#31).
+    cur.execute('SELECT "Test", "Status", "Next_Due" FROM health.lab_plan')
+    lab_plan = _rows(cur)
+
     return {
         "daily": daily, "day_sum": day_sum, "meals": meals, "targets": targets, "notes": notes,
         "profile": (profile_rows[0] if profile_rows else {}), "recs": recs, "pstate": pstate, "anam": anam,
         "sym": sym, "inv": inv, "meds": meds, "lab_res": lab_res, "lab_mark": lab_mark,
-        "lab_visit": lab_visit, "pheno_log": pheno_log, "anomaly_log": anomaly_log,
+        "lab_visit": lab_visit, "pheno_log": pheno_log, "anomaly_log": anomaly_log, "lab_plan": lab_plan,
     }
 
 
@@ -480,13 +487,12 @@ def build_context(src: dict) -> dict:
          "review_due": x.get("Review_Due")}
         for x in pstate if str(x.get("Status") or "").lower() == "active"
     ]
-    if not active_restrictions and HERNIA_RX.search(prof_oda) and not re.search(
-            r"ремисси|снят|полн(ое|ая) восстановлен|разрешена нагрузка", prof_oda, re.I):
+    if not active_restrictions and profile_hernia_active(prof_oda):
         active_restrictions.append({
             "condition": ("Грыжа/радикулопатия (Patient_State не прочитан, профиль подтверждает)" if pstate_empty
                           else "Грыжа/радикулопатия (из профиля, Patient_State без активных ограничений)"),
             "contra_load": "осевая нагрузка, подъём тяжестей, скручивания, бег, прыжки, интервалы",
-            "allowed": "ходьба, плавание" if re.search(r"плаван|бассейн", prof_oda, re.I) else "ходьба",
+            "allowed": "ходьба, плавание" if profile_swim_allowed(prof_oda) else "ходьба",
             "source": "User_Profile", "degraded": pstate_empty or None,
         })
     restrictions_unknown = pstate_empty and not active_restrictions
@@ -843,27 +849,133 @@ def _prev_weekly(recs: list[dict], today_date: str) -> Optional[dict]:
 # 4. Sync Actions to Card
 # =====================================================================
 
-def sync_actions_to_card(actions: list[dict], date: str) -> str:
+PHENOAGE_DRIVER_THRESHOLD = 0.3  # |вклад маркера в дельту|, тот же порядок величины, что Z_MODERATE в anomaly_detector — "заметно", не "любой ненулевой"
+LAB_OVERDUE_DAYS = 14  # тот же порог, что Health Watchdog (#31) уже использует для просроченного Lab_Plan
+
+# Стеммированные варианты app.dashboard.PHENO_MARKERS — там regex настроен на
+# точное совпадение для разбора клинических записей (Doctor_Notes), здесь же
+# сопоставляем со свободным текстом действия от LLM, где слово может стоять в
+# любом падеже ("глюкозу", "глюкозы") — точный "глюкоза" такое не поймает.
+# Отдельная мини-карта, не полноценный стеммер — тот же стиль усечения корня,
+# что уже в HERNIA_RX/LOAD_RX этого файла ("экструз", "радикулопат" и т.п.).
+_PHENO_DRIVER_FREE_TEXT_RX = {
+    "alb": re.compile(r"альбумин", re.I),
+    "creat": re.compile(r"креатинин", re.I),
+    "gluc": re.compile(r"глюкоз", re.I),
+    "crp": re.compile(r"с-реактивн|срб\b|\bcrp\b", re.I),
+    "lymph": re.compile(r"лимфоцит", re.I),
+    "mcv": re.compile(r"\bmcv\b|средн\w* объ[её]м эритроцит", re.I),
+    "rdw": re.compile(r"\brdw\b|ширин\w* распредел\w* эритроцит", re.I),
+    "alp": re.compile(r"щелочн\w* фосфатаз|\balp\b|\bщф\b", re.I),
+    "wbc": re.compile(r"лейкоцит|\bwbc\b", re.I),
+}
+
+
+def _bioage_driver_patterns(pheno_log: list[dict]) -> list:
+    """Премортем (2026-09-20, проблема #5): раньше is_bioage_driver никогда не
+    вычислялся, gate6_priority(False, False) всегда молчал. Берёт последнюю
+    валидную запись health.phenoage_log, находит маркеры с contribution >=
+    PHENOAGE_DRIVER_THRESHOLD В СТОРОНУ УХУДШЕНИЯ (положительный вклад —
+    делает PhenoAge старше), возвращает их стеммированные regex."""
+    valid = [r for r in pheno_log if r.get("formula_version") and r["formula_version"] != "init" and r.get("contributions")]
+    if not valid:
+        return []
+    latest = sorted(valid, key=lambda r: str(r.get("date") or ""))[-1]
+    contrib = latest.get("contributions")
+    if isinstance(contrib, str):
+        try:
+            contrib = json.loads(contrib)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+    if not isinstance(contrib, dict):
+        return []
+    out = []
+    for code, val in contrib.items():
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            continue
+        if v >= PHENOAGE_DRIVER_THRESHOLD and code in _PHENO_DRIVER_FREE_TEXT_RX:
+            out.append(_PHENO_DRIVER_FREE_TEXT_RX[code])
+    return out
+
+
+def _overdue_lab_tests(lab_plan: list[dict], today_date: str) -> list[str]:
+    """Активные пункты Lab_Plan, просроченные на LAB_OVERDUE_DAYS+ — та же
+    логика/порог, что уже в health_watchdog.py (#31), не придумываю новую."""
+    out = []
+    try:
+        today = datetime.strptime(today_date, "%Y-%m-%d").date()
+    except ValueError:
+        return out
+    for r in lab_plan:
+        test = r.get("Test")
+        if not test or str(r.get("Status") or "active").lower() in ("done", "paused", "archived"):
+            continue
+        due = str(r.get("Next_Due") or "")[:10]
+        if len(due) != 10:
+            continue
+        try:
+            due_date = datetime.strptime(due, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if (today - due_date).days >= LAB_OVERDUE_DAYS:
+            out.append(test)
+    return out
+
+
+_OVERDUE_MATCH_STOPWORDS = {"для", "или", "при", "как", "что", "это"}
+
+
+def _action_bioage_flags(action: dict, driver_patterns: list, overdue_tests: list[str]) -> tuple[bool, bool]:
+    """Best-effort сопоставление действия советника с драйверами био-возраста/
+    просроченными анализами по ключевым словам в title+why — не гарантированная
+    связка (советник — LLM, формулирует свободным текстом), но лучше, чем
+    флаг, который никогда не срабатывает вообще. Порог длины слова — 3 (не 4):
+    много названий анализов — короткие витаминные аббревиатуры (B12, D3, K2),
+    4 отсекало бы их все; несколько частых коротких служебных слов исключены
+    отдельно, чтобы не давать ложных совпадений на пустом месте."""
+    text = f"{action.get('title') or ''} {action.get('why') or ''}"
+    is_driver = any(rx.search(text) for rx in driver_patterns)
+    text_low = text.lower()
+    overdue = False
+    for test in overdue_tests:
+        words = [w for w in re.split(r"[^а-яёa-z0-9]+", test.lower())
+                 if len(w) >= 3 and w not in _OVERDUE_MATCH_STOPWORDS]
+        if any(w in text_low for w in words):
+            overdue = True
+            break
+    return is_driver, overdue
+
+
+def sync_actions_to_card(actions: list[dict], date: str, pheno_log: Optional[list[dict]] = None,
+                          lab_plan: Optional[list[dict]] = None) -> str:
     """Порт "Sync Actions to Card" (51 строк JS). В оригинале — HTTP POST на
     card-service:8080/recommendations/propose для каждого действия отдельно;
     здесь это тот же самый процесс, поэтому вызываем propose_recommendation()
     напрямую (тот же путь G1-G6, никакого HTTP-обхода).
 
-    ВАЖНО: оригинальный JS НИКОГДА не передавал is_bioage_driver/metric_overdue
-    в body (их там просто нет) — значит gate6_priority(False, False) всегда
-    возвращает 'normal', и ветка "приоритет высокий" в сводке (r.priority ===
-    'high') на практике НИКОГДА не срабатывала в проде. Это сохранено как есть
-    (не чиним молча — если Влад захочет, чтобы советник реально помечал
-    biovозраст-драйверы высоким приоритетом, это отдельная осознанная задача,
-    не часть 1:1 переноса)."""
+    ВКЛЮЧЕНО (2026-09-20, премортем, задача Влада "1,3,4,5,7", проблема #5):
+    оригинальный JS НИКОГДА не передавал is_bioage_driver/metric_overdue в
+    body — gate6_priority(False, False) всегда возвращал 'normal', ветка
+    "приоритет высокий" в сводке не срабатывала ни разу. Теперь эти два флага
+    реально считаются (_bioage_driver_patterns/_overdue_lab_tests/
+    _action_bioage_flags) из phenoage_log.contributions и Lab_Plan — best-effort
+    сопоставление по ключевым словам, не гарантированная связка, но реальная,
+    а не всегда-False заглушка."""
     from app.recommendations import ProposeRequest, propose_recommendation
+
+    driver_patterns = _bioage_driver_patterns(pheno_log or [])
+    overdue_tests = _overdue_lab_tests(lab_plan or [], date)
 
     results = []
     for i, a in enumerate(actions):
+        is_driver, overdue = _action_bioage_flags(a, driver_patterns, overdue_tests)
         req = ProposeRequest(
             title=a["title"], action=a["title"], rationale=(a.get("why") or None),
             kind=a.get("type"), source_ref=f"advisor:{date}:{i}", origin="advisor",
             started_ts=datetime.now(timezone.utc),
+            is_bioage_driver=is_driver, metric_overdue=overdue,
         )
         if a.get("metric"):
             req.metric_key = a["metric"]
@@ -931,7 +1043,7 @@ def run_once() -> None:
 
     row = parse_advisor_response(raw, ctx, src["targets"], prev_weekly)
 
-    summary = sync_actions_to_card(row["actions"], row["Date"])
+    summary = sync_actions_to_card(row["actions"], row["Date"], src["pheno_log"], src["lab_plan"])
     if summary:
         row["Telegram_Text"] = row["Telegram_Text"] + "\n\n🗂 card (тест, на текст выше не влияет):\n" + summary
 

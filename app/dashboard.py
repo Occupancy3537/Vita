@@ -27,6 +27,8 @@ import math
 import re
 from datetime import date, datetime, timedelta, timezone
 
+from app.patient_gate import profile_hernia_active, profile_swim_allowed
+
 # --- «Здоровье»-экран: порт n8n Code-ноды "Build Health JSON" (2026-09-16) ---
 #
 # Причина порта та же, что у get_today_live_metrics выше: health-dashboard (cache)
@@ -691,7 +693,6 @@ def get_bioage_dashboard(cur) -> dict:
 # алерт как side-effect живёт отдельно, в app.gate_watch (эта функция здесь —
 # чистая, без побочных эффектов, как get_bioage_dashboard/get_health_dashboard).
 
-_HERNIA_RX = re.compile(r"грыж|радикулопат|протру[зи]|экструз|модик|modic|корешк", re.I)
 _LOAD_RX = re.compile(
     r"интенсив|интервал|hiit|бег|пробеж|прыж|присед|становая|штанг|турник|подтяг|"
     r"отжим|планк|скручиван|макгил|ротац|наклон|подним|тяж(?:есть|ести|[её]л|\b)|"
@@ -764,9 +765,8 @@ def _load_gate(pstate: list[dict], profile: dict) -> dict:
         }
 
     oda = str(profile.get("ОДА и неврология") or "")
-    prof_hernia = bool(_HERNIA_RX.search(oda)) and not re.search(
-        r"ремисси|снят|полн(ое|ая) восстановлен|разрешена нагрузка", oda, re.I)
-    prof_swim = prof_hernia and bool(re.search(r"плаван|бассейн", oda, re.I))
+    prof_hernia = profile_hernia_active(oda)
+    prof_swim = prof_hernia and profile_swim_allowed(oda)
 
     # A6 fail-safe (ревью Opus 5, 2026-09-09): 0 строк в Patient_State = чтение
     # НЕ ПРОШЛО (синк не отработал), а НЕ «ограничений нет».
