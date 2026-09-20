@@ -81,6 +81,8 @@ import app.health_watchdog as health_watchdog
 import app.nutrition_reports as nutrition_reports
 import app.weekly_advisor as weekly_advisor
 import app.anomaly_detector as anomaly_detector
+import app.meds_from_calendar as meds_from_calendar
+import app.monthly_trend as monthly_trend
 from app.biohacking_ingest import BiohackingPayload, process_ingest
 from app.write_path import process as process_source
 
@@ -113,6 +115,10 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # app/biohacking_ingest.py::process_ingest().
     ("ANOMALY_DETECTOR_ENABLED", lambda: anomaly_detector.run_daily_scheduler(), "anomaly-daily-scheduler"),
     ("ANOMALY_DETECTOR_ENABLED", lambda: anomaly_detector.run_weekly_scheduler(), "anomaly-weekly-scheduler"),
+    # 2026-09-21 (группа 1, последний пункт): Card: Meds from Calendar.
+    ("MEDS_FROM_CALENDAR_ENABLED", lambda: meds_from_calendar.run_scheduler(), "meds-from-calendar-scheduler"),
+    # 2026-09-21 (группа 1, закрывает её целиком): Monthly_Trend_Wellness.
+    ("MONTHLY_TREND_ENABLED", lambda: monthly_trend.run_scheduler(), "monthly-trend-scheduler"),
 ]
 
 

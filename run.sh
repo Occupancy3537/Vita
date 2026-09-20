@@ -31,6 +31,11 @@
 # вс 20:00 VL), порт n8n Weekly AI Advisor. Крупнейший и последний порт
 # группы 2 (26 нод n8n, ~760 строк JS). health.recommendations_log теперь
 # пишется напрямую в Postgres (DELETE+INSERT по Date), не в Sheets.
+# 2026-09-21: MEDS_FROM_CALENDAR_ENABLED — app/meds_from_calendar.py
+# (ежедневно 09:00 VL), порт n8n Card: Meds from Calendar. Использует тот же
+# Calendar-credential, что и группа 3 (1/2).
+# 2026-09-21: MONTHLY_TREND_ENABLED — app/monthly_trend.py (1-е число месяца,
+# 10:00 VL), порт n8n Monthly_Trend_Wellness — закрывает группу 1 целиком.
 # 2026-09-20: ANOMALY_DETECTOR_ENABLED + CARD_GOOGLE_*/RESCUETIME_API_KEY —
 # группа 3 (1/2, вместе с Collect_Biohacking_Data -> POST /ingest/biohacking,
 # см. app/biohacking_ingest.py). CARD_GOOGLE_CLIENT_ID/SECRET общие для
@@ -68,6 +73,8 @@ sudo docker run -d \
   -e NUTRITION_REPORTS_ENABLED=1 \
   -e WEEKLY_ADVISOR_ENABLED=1 \
   -e ANOMALY_DETECTOR_ENABLED=1 \
+  -e MEDS_FROM_CALENDAR_ENABLED=1 \
+  -e MONTHLY_TREND_ENABLED=1 \
   -e CARD_GOOGLE_CLIENT_ID="$CARD_GOOGLE_CLIENT_ID" \
   -e CARD_GOOGLE_CLIENT_SECRET="$CARD_GOOGLE_CLIENT_SECRET" \
   -e CARD_GOOGLE_SHEETS_REFRESH_TOKEN="$CARD_GOOGLE_SHEETS_REFRESH_TOKEN" \
