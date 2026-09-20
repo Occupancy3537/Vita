@@ -79,6 +79,8 @@ import app.diet_tagger as diet_tagger
 import app.health_watchdog as health_watchdog
 import app.nutrition_reports as nutrition_reports
 import app.weekly_advisor as weekly_advisor
+import app.anomaly_detector as anomaly_detector
+from app.biohacking_ingest import BiohackingPayload, process_ingest
 from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
@@ -142,6 +144,16 @@ def _start_telegram_polling() -> None:
         return
     advisor_scheduler = threading.Thread(target=weekly_advisor.run_scheduler, daemon=True, name="weekly-advisor-scheduler")
     advisor_scheduler.start()
+    # 2026-09-20 (группа 3, 1/2): Anomaly_Detector/Correlations — расписания
+    # (дневной 09:15 ВЛ + недельный дайджест вс 11:00 ВЛ). Третий путь запуска
+    # (сразу после ингеста) — прямой вызов run_daily_check() из
+    # app/biohacking_ingest.py::process_ingest(), не через этот флаг.
+    if os.environ.get("ANOMALY_DETECTOR_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return
+    anomaly_daily_scheduler = threading.Thread(target=anomaly_detector.run_daily_scheduler, daemon=True, name="anomaly-daily-scheduler")
+    anomaly_daily_scheduler.start()
+    anomaly_weekly_scheduler = threading.Thread(target=anomaly_detector.run_weekly_scheduler, daemon=True, name="anomaly-weekly-scheduler")
+    anomaly_weekly_scheduler.start()
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 
@@ -396,6 +408,20 @@ def _write_structured_facts(facts: list[StructuredFact], origin: str) -> Structu
                     skipped += 1
         conn.commit()
     return StructuredFactsResponse(written=written, skipped_duplicate=skipped)
+
+
+@app.post("/ingest/biohacking")
+def ingest_biohacking(payload: BiohackingPayload) -> dict:
+    """Порт n8n `Collect_Biohacking_Data` (2026-09-20, группа 3) — см.
+    app/biohacking_ingest.py. Это то, на что раньше слал send_to_n8n.py
+    (garminbot) — эндпоинт слушает 127.0.0.1, публично не проброшен (тот же
+    принцип, что у /ingest//doctor/turn — garminbot и card-service на одном
+    VPS, нет нужды идти через nginx/nip.io). Не гейтится DASHBOARD_TOKEN'ом
+    (это не read-only дашборд-путь, а write-путь того же класса, что уже
+    описан в докстринге модуля наверху файла — публично недоступен по
+    построению, не по токену)."""
+    row = process_ingest(payload)
+    return {"status": "ok", "date": row.get("Дата")}
 
 
 @app.post("/facts/device", response_model=StructuredFactsResponse)

@@ -31,6 +31,14 @@
 # вс 20:00 VL), порт n8n Weekly AI Advisor. Крупнейший и последний порт
 # группы 2 (26 нод n8n, ~760 строк JS). health.recommendations_log теперь
 # пишется напрямую в Postgres (DELETE+INSERT по Date), не в Sheets.
+# 2026-09-20: ANOMALY_DETECTOR_ENABLED + CARD_GOOGLE_*/RESCUETIME_API_KEY —
+# группа 3 (1/2, вместе с Collect_Biohacking_Data -> POST /ingest/biohacking,
+# см. app/biohacking_ingest.py). CARD_GOOGLE_CLIENT_ID/SECRET общие для
+# Sheets и Calendar (один OAuth-клиент); refresh_token у каждого свой —
+# Calendar-креды отдельно авторизованы Владом на перенос (более
+# чувствительные данные, чем ячейки таблицы). RESCUETIME_API_KEY раньше
+# лежал открытым текстом в параметрах n8n-ноды — вынесен в переменную
+# окружения (гигиена, не поведенческое отличие).
 set -e
 cd "$(dirname "$0")"
 
@@ -59,6 +67,12 @@ sudo docker run -d \
   -e HEALTH_WATCHDOG_ENABLED=1 \
   -e NUTRITION_REPORTS_ENABLED=1 \
   -e WEEKLY_ADVISOR_ENABLED=1 \
+  -e ANOMALY_DETECTOR_ENABLED=1 \
+  -e CARD_GOOGLE_CLIENT_ID="$CARD_GOOGLE_CLIENT_ID" \
+  -e CARD_GOOGLE_CLIENT_SECRET="$CARD_GOOGLE_CLIENT_SECRET" \
+  -e CARD_GOOGLE_SHEETS_REFRESH_TOKEN="$CARD_GOOGLE_SHEETS_REFRESH_TOKEN" \
+  -e CARD_GOOGLE_CALENDAR_REFRESH_TOKEN="$CARD_GOOGLE_CALENDAR_REFRESH_TOKEN" \
+  -e RESCUETIME_API_KEY="$RESCUETIME_API_KEY" \
   -e REGISTRAR_MODEL="${REGISTRAR_MODEL:-z-ai/glm-5.3-flash}" \
   -e REGISTRAR_PDF_MODEL="${REGISTRAR_PDF_MODEL:-google/gemini-3.1-flash-lite}" \
   -e REGISTRAR_HEALTH_SCHEMA="${REGISTRAR_HEALTH_SCHEMA:-health}" \
