@@ -109,17 +109,19 @@ def test_get_outdoor_weather_calls_open_meteo(monkeypatch):
     assert r["current"]["temperature_2m"] == 15.0
 
 
-def test_get_room_climate_now_calls_bridge(monkeypatch):
-    def fake_get(url, timeout=None):
-        assert url == tools.ROOM_CLIMATE_URL
-        class R:
-            def raise_for_status(self): pass
-            def json(self): return {"temp_c": 22.0}
-        return R()
-
-    monkeypatch.setattr(httpx, "get", fake_get)
-    r = tools.get_room_climate_now(None, {})
+def test_get_room_climate_now_reads_microclimate_table():
+    """2026-09-20 (#28): n8n-мост (room-climate-now) убран, прямой SELECT из
+    health.microclimate через _room_climate (app.doctor.context)."""
+    cur = FakeCursor([[("22,0", "50", "2", "2026-09-19T23:05:31.971Z")]])
+    r = tools.get_room_climate_now(cur, {})
     assert r["temp_c"] == 22.0
+    assert r["humidity_pct"] == 50.0
+
+
+def test_get_room_climate_now_no_data():
+    cur = FakeCursor([[]])
+    r = tools.get_room_climate_now(cur, {})
+    assert r == {"error": "no_data"}
 
 
 # --- Nutrition_Analyzer ------------------------------------------------------

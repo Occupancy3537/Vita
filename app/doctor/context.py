@@ -2,9 +2,12 @@
 Досье пациента для одного хода (план §3.3, §3.9): `get_context()` (П4 — браслет,
 горячий слой, retrieval по вопросу) + срезы схемы `health` напрямую через
 Postgres — Garmin, сегодняшнее питание, активные препараты, открытые
-расследования, последние заметки врача, лабы вне референса. Комнатный климат —
-единственный мост в n8n, который план оставляет (§2.3: там реально нужны
-Google-креды).
+расследования, последние заметки врача, лабы вне референса, комнатный климат.
+
+2026-09-20 (#28): комнатный климат был последним живым мостом в n8n (план
+§2.3 сознательно его оставлял — там реально нужны были Google-креды) — теперь
+читается из health.microclimate (зеркало того же листа, ночной
+sheets_to_pg_mirror.js), ни одного обращения к n8n в этом модуле не осталось.
 
 Раньше (старый доктор) это собиралось из 9+ Sheets-инструментов, вызываемых
 моделью ПО ЖЕЛАНИЮ — не гарантия, что она вообще спросит. Здесь всё это —
@@ -13,28 +16,12 @@ Google-креды).
 `ai-agent-tool-call-doubles-latency`: любой инструмент-вызов добавляет целый
 лишний проход модели, а эти данные релевантны почти всегда).
 """
-import os
-import time
 from typing import Optional
 
-import httpx
 from psycopg import sql
 
 from app.db import schema
 from app.memory import get_context
-
-ROOM_CLIMATE_URL = os.environ.get(
-    "DOCTOR_ROOM_CLIMATE_URL", "http://n8n:443/webhook/room-climate-now"
-)  # порт 443 — реальный внутренний порт n8n для вебхуков в этом сетапе (проверено
-# живым запросом из контейнера card-service, не 5678 — угадать не получилось бы)
-
-# План §2.3 оценивал этот мост в 83мс — живой замер дал ~1.6с (n8n-вебхук читает
-# датчик из Google Sheets синхронно на каждый запрос). Датчик и так обновляется
-# раз в час (см. toolDescription ниже) — кэш на 10 минут убирает почти все живые
-# походы в Sheets, не жертвуя актуальностью показания заметнее, чем оно и так
-# устаревает между обновлениями сенсора.
-_ROOM_CLIMATE_CACHE_TTL_S = 600
-_room_climate_cache: dict = {"value": None, "fetched_at": 0.0}
 
 
 def _num(v) -> Optional[float]:
@@ -204,26 +191,20 @@ def _planned_labs(cur, limit: int = 15) -> list[dict]:
     ][:limit]
 
 
-def _room_climate(timeout: float = 3.0) -> Optional[dict]:
-    """Единственный мост в n8n (план §2.3), с кэшем на _ROOM_CLIMATE_CACHE_TTL_S
-    (см. комментарий у константы — живой замер разошёлся с оценкой плана на
-    порядок). Деградирует молча в последнее известное значение (не в None, если
-    оно есть) при сбое живого похода — комнатный климат никогда не был
-    критичным путём ни в одном сценарии доктора, устаревшее показание лучше
-    отсутствующего."""
-    now = time.monotonic()
-    if _room_climate_cache["value"] is not None and \
-            now - _room_climate_cache["fetched_at"] < _ROOM_CLIMATE_CACHE_TTL_S:
-        return _room_climate_cache["value"]
-    try:
-        resp = httpx.get(ROOM_CLIMATE_URL, timeout=timeout)
-        resp.raise_for_status()
-        value = resp.json()
-        _room_climate_cache["value"] = value
-        _room_climate_cache["fetched_at"] = now
-        return value
-    except Exception:
-        return _room_climate_cache["value"]  # None, если ещё ни разу не получалось
+def _room_climate(cur) -> Optional[dict]:
+    """2026-09-20 (#28): был единственным мостом в n8n (план §2.3, room-climate-
+    now) — n8n-вебхук читал Google Sheets синхронно на каждый запрос (~1.6с,
+    план оценивал в 83мс — разошлось на порядок, отсюда и был кэш на 10 мин).
+    health.microclimate теперь зеркалируется из того же листа ночным
+    sheets_to_pg_mirror.js (пишет его сенсор Яндекс.Дома, раз в час, эту
+    сторону не переносим) — обычный SELECT по PK не нуждается в кэше и не
+    может "устареть между обновлениями сенсора" сильнее, чем сама таблица."""
+    cur.execute('SELECT "Температура", "Влажность", "PM2.5", "Дата" FROM health.microclimate ORDER BY "Дата" DESC LIMIT 1')
+    row = cur.fetchone()
+    if row is None:
+        return None
+    temp, hum, pm25, measured_at = row
+    return {"temp_c": _num(temp), "humidity_pct": _num(hum), "pm25": _num(pm25), "measured_at": measured_at}
 
 
 def build_dossier(cur, text: str = "") -> dict:
@@ -241,5 +222,5 @@ def build_dossier(cur, text: str = "") -> dict:
         "recent_doctor_notes": _recent_doctor_notes(cur),
         "labs_out_of_range": _labs_out_of_range(cur),
         "planned_labs": _planned_labs(cur),
-        "room_climate": _room_climate(),
+        "room_climate": _room_climate(cur),
     }

@@ -1,10 +1,5 @@
 """Phase 3 плана нового доктора — context.py. Юниты на фейковом курсоре (health.*
-не имеет тестовой схемы-аналога) + отдельно кэш комнатного климата (план §2.3
-оценивал мост в 83мс, живой замер дал ~1.6с — кэш обязателен, не опционален,
-см. комментарий у _ROOM_CLIMATE_CACHE_TTL_S)."""
-import httpx
-import pytest
-
+не имеет тестовой схемы-аналога)."""
 from app.doctor import context
 
 
@@ -134,89 +129,23 @@ def test_planned_labs_respects_limit():
     assert len(r) == 5
 
 
-# --- room climate cache -------------------------------------------------------
+# --- room climate (2026-09-20, #28: health.microclimate, n8n-мост убран) ----
 
-@pytest.fixture(autouse=True)
-def reset_climate_cache():
-    context._room_climate_cache["value"] = None
-    context._room_climate_cache["fetched_at"] = 0.0
-    yield
-    context._room_climate_cache["value"] = None
-    context._room_climate_cache["fetched_at"] = 0.0
+def test_room_climate_maps_columns():
+    cur = FakeCursor([[("24,3", "55", "3", "2026-09-19T23:05:31.971Z")]])
+    r = context._room_climate(cur)
+    assert r == {"temp_c": 24.3, "humidity_pct": 55.0, "pm25": 3.0, "measured_at": "2026-09-19T23:05:31.971Z"}
 
 
-def test_room_climate_fetches_and_caches(monkeypatch):
-    calls = {"n": 0}
-
-    def fake_get(url, timeout=None):
-        calls["n"] += 1
-        class R:
-            def raise_for_status(self): pass
-            def json(self): return {"temp_c": 22.0}
-        return R()
-
-    monkeypatch.setattr(httpx, "get", fake_get)
-    r1 = context._room_climate()
-    r2 = context._room_climate()
-    assert r1 == {"temp_c": 22.0}
-    assert r2 == {"temp_c": 22.0}
-    assert calls["n"] == 1  # второй вызов — из кэша, не сеть
-
-
-def test_room_climate_refetches_after_ttl(monkeypatch):
-    calls = {"n": 0}
-
-    def fake_get(url, timeout=None):
-        calls["n"] += 1
-        class R:
-            def raise_for_status(self): pass
-            def json(self): return {"temp_c": 22.0 + calls["n"]}
-        return R()
-
-    monkeypatch.setattr(httpx, "get", fake_get)
-    monkeypatch.setattr(context, "_ROOM_CLIMATE_CACHE_TTL_S", 0)  # мгновенно протухает
-
-    r1 = context._room_climate()
-    r2 = context._room_climate()
-    assert calls["n"] == 2
-    assert r1 != r2
-
-
-def test_room_climate_falls_back_to_stale_on_error(monkeypatch):
-    def fake_get_ok(url, timeout=None):
-        class R:
-            def raise_for_status(self): pass
-            def json(self): return {"temp_c": 22.0}
-        return R()
-
-    monkeypatch.setattr(httpx, "get", fake_get_ok)
-    first = context._room_climate()
-    assert first == {"temp_c": 22.0}
-
-    monkeypatch.setattr(context, "_ROOM_CLIMATE_CACHE_TTL_S", 0)
-
-    def fake_get_fail(url, timeout=None):
-        raise httpx.ConnectError("сеть легла")
-
-    monkeypatch.setattr(httpx, "get", fake_get_fail)
-    stale = context._room_climate()
-    assert stale == {"temp_c": 22.0}  # старое значение лучше None
-
-
-def test_room_climate_none_when_never_succeeded(monkeypatch):
-    def fake_get_fail(url, timeout=None):
-        raise httpx.ConnectError("сеть легла")
-
-    monkeypatch.setattr(httpx, "get", fake_get_fail)
-    assert context._room_climate() is None
+def test_room_climate_none_when_no_rows():
+    assert context._room_climate(FakeCursor([[]])) is None
 
 
 # --- build_dossier ------------------------------------------------------------
 
 def test_build_dossier_has_all_expected_keys(monkeypatch):
     monkeypatch.setattr(context, "get_context", lambda cur, mode, payload: {"stub": True})
-    monkeypatch.setattr(context, "_room_climate", lambda: None)
-    cur = FakeCursor([[] for _ in range(9)])  # 9 health.*-запросов внутри build_dossier
+    cur = FakeCursor([[] for _ in range(10)])  # 10 health.*-запросов внутри build_dossier (room_climate теперь тоже SQL, не httpx)
 
     d = context.build_dossier(cur, "тест")
     assert set(d.keys()) == {

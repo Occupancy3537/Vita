@@ -10,7 +10,8 @@ loop.py (Phase 4), которому нужно вызывать любой ин�
 - Read_Symptoms/Read_Investigations/Get_Patient_Medical_History/Get_Meals_Today:
   были Sheets/HTTP-инструментами агента — теперь прямой SELECT.
 - Get_Outdoor_Weather: был toolHttpRequest на open-meteo — тот же URL, прямой httpx.
-- Get_Room_Climate_Now: единственный оставленный мост в n8n (план §2.3).
+- Get_Room_Climate_Now: был единственным оставленным мостом в n8n (план §2.3) —
+  закрыт 2026-09-20 (#28), теперь прямой SELECT из health.microclimate.
 - Nutrition_Analyzer/Analyze_Symptom_Food: были executeWorkflowTrigger на
   суб-воркфлоу — портированы как функции, алгоритм не менялся.
 
@@ -38,7 +39,7 @@ from app.doctor.contract import (
 )
 
 from app.db import schema
-from app.doctor.context import ROOM_CLIMATE_URL, _num
+from app.doctor.context import _num, _room_climate
 
 OPEN_METEO_URL = (
     "https://api.open-meteo.com/v1/forecast?latitude=43.1198&longitude=131.8869"
@@ -168,9 +169,10 @@ def get_outdoor_weather(cur, args: dict) -> dict:
 
 
 def get_room_climate_now(cur, args: dict) -> dict:
-    resp = httpx.get(ROOM_CLIMATE_URL, timeout=5.0)
-    resp.raise_for_status()
-    return resp.json()
+    """2026-09-20 (#28): читает health.microclimate напрямую — n8n-мост
+    (room-climate-now) убран, см. app.doctor.context._room_climate."""
+    value = _room_climate(cur)
+    return value if value is not None else {"error": "no_data"}
 
 
 # --- Nutrition Analyzer (портирован из Sub-Agent: Nutrition Analyzer) -------
