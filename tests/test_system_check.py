@@ -60,14 +60,16 @@ def test_check_n8n_active_all_present_is_clean(monkeypatch):
 
 
 def test_check_n8n_active_missing_one_is_a_problem(monkeypatch):
+    missing_one = system_check.EXPECTED_ACTIVE_N8N[0]
+
     def fake_get(url, headers=None, timeout=None):
-        names = [n for n in system_check.EXPECTED_ACTIVE_N8N if n != "Health Watchdog"]
+        names = [n for n in system_check.EXPECTED_ACTIVE_N8N if n != missing_one]
         return _resp(url, status_code=200, json={"data": [{"name": n, "active": True} for n in names]})
     monkeypatch.setattr(httpx, "get", fake_get)
     problems, notes = [], []
     system_check._check_n8n_active(problems, notes)
     assert len(problems) == 1
-    assert "Health Watchdog" in problems[0]
+    assert missing_one in problems[0]
 
 
 def test_check_n8n_active_request_fails_is_a_note_not_a_problem(monkeypatch):

@@ -76,6 +76,7 @@ import app.memory_archive_check as memory_archive_check
 import app.backup_alert as backup_alert
 import app.small_webhooks as small_webhooks
 import app.diet_tagger as diet_tagger
+import app.health_watchdog as health_watchdog
 from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
@@ -121,6 +122,11 @@ def _start_telegram_polling() -> None:
         return
     tagger_scheduler = threading.Thread(target=diet_tagger.run_scheduler, daemon=True, name="diet-tagger-scheduler")
     tagger_scheduler.start()
+    # 2026-09-20 (группа 2): порт Health Watchdog — safety-смежный, LLM-разбор анализов.
+    if os.environ.get("HEALTH_WATCHDOG_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return
+    watchdog_scheduler = threading.Thread(target=health_watchdog.run_scheduler, daemon=True, name="health-watchdog-scheduler")
+    watchdog_scheduler.start()
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 
