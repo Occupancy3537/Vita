@@ -77,6 +77,7 @@ import app.backup_alert as backup_alert
 import app.small_webhooks as small_webhooks
 import app.diet_tagger as diet_tagger
 import app.health_watchdog as health_watchdog
+import app.nutrition_reports as nutrition_reports
 from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
@@ -127,6 +128,13 @@ def _start_telegram_polling() -> None:
         return
     watchdog_scheduler = threading.Thread(target=health_watchdog.run_scheduler, daemon=True, name="health-watchdog-scheduler")
     watchdog_scheduler.start()
+    # 2026-09-20 (группа 2, последний LLM-порт): Reports (дневной путь) + Weekly Food Report.
+    if os.environ.get("NUTRITION_REPORTS_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return
+    daily_report_scheduler = threading.Thread(target=nutrition_reports.run_daily_scheduler, daemon=True, name="nutrition-daily-report-scheduler")
+    daily_report_scheduler.start()
+    weekly_report_scheduler = threading.Thread(target=nutrition_reports.run_weekly_scheduler, daemon=True, name="nutrition-weekly-report-scheduler")
+    weekly_report_scheduler.start()
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 

@@ -76,11 +76,12 @@ WEBHOOK_CHECKS = [
 # Collector, health-dashboard cache, bioage-dashboard cache — на card-service
 # с #22, today-dashboard cache — на card-service с #24, Dashboard Cached
 # (today-nutrition) — на card-service с #25, Diet Quality Tagger — на card-service
-# с #30, Health Watchdog — на card-service с #31) — держать их в списке значило
-# бы получать ложную тревогу каждое утро за то, что уже и так правильно выключено.
+# с #30, Health Watchdog — на card-service с #31, Reports — на card-service с
+# #32) — держать их в списке значило бы получать ложную тревогу каждое утро
+# за то, что уже и так правильно выключено.
 EXPECTED_ACTIVE_N8N = [
     "_Error Handler", "_System Check",
-    "Weekly AI Advisor", "Reports",
+    "Weekly AI Advisor",
     "PhenoAge Calc", "Anomaly_Detector/Correlations",
 ]
 # _Backup Alert — на card-service с 2026-09-20 (app/backup_alert.py, группа малых утилит).
