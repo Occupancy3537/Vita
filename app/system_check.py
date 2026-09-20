@@ -88,9 +88,13 @@ WEBHOOK_CHECKS = [
 # n8n, то есть эта проверка ежедневно молча слала бы "🔴 НЕ АКТИВНЫ: _System
 # Check" с 19.09 (не проверял историю отправленных сообщений — увидел только
 # сейчас, сверяя список активных воркфлоу перед отключением Advisor). Убрано.
+# 2026-09-20 (#34): Anomaly_Detector/Correlations — на card-service вместе с
+# Collect_Biohacking_Data (app/anomaly_detector.py, app/biohacking_ingest.py),
+# группа 3 (1/2). Урок из "_System Check" учтён — убираю из списка сразу, тем
+# же коммитом, что и деактивацию, а не отдельным заходом позже.
 EXPECTED_ACTIVE_N8N = [
     "_Error Handler",
-    "PhenoAge Calc", "Anomaly_Detector/Correlations",
+    "PhenoAge Calc",
 ]
 # _Backup Alert — на card-service с 2026-09-20 (app/backup_alert.py, группа малых утилит).
 
