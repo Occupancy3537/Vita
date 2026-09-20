@@ -78,10 +78,11 @@ WEBHOOK_CHECKS = [
 # (today-nutrition) — на card-service с #25) — держать их в списке значило бы
 # получать ложную тревогу каждое утро за то, что уже и так правильно выключено.
 EXPECTED_ACTIVE_N8N = [
-    "_Error Handler", "_System Check", "_Backup Alert",
+    "_Error Handler", "_System Check",
     "Health Watchdog", "Weekly AI Advisor", "Reports",
     "PhenoAge Calc", "Anomaly_Detector/Correlations",
 ]
+# _Backup Alert — на card-service с 2026-09-20 (app/backup_alert.py, группа малых утилит).
 
 
 def _d10(v) -> str:

@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Дневник питания</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+  :root{
+    --bg-0:#0F1417;
+    --bg-1:#161D21;
+    --bg-2:#1D262B;
+    --line:#2A353B;
+    --ink-0:#EAF0F1;
+    --ink-1:#9FB0B5;
+    --ink-2:#647377;
+    --teal:#5FCBBE;
+    --amber:#E8A94A;
+    --coral:#E17B6B;
+  }
+
+  *{box-sizing:border-box; margin:0; padding:0;}
+
+  body{
+    background:
+      radial-gradient(ellipse at 20% -10%, #1B2529 0%, transparent 55%),
+      var(--bg-0);
+    color:var(--ink-0);
+    font-family:'Inter', sans-serif;
+    min-height:100vh;
+    display:flex;
+    align-items:flex-start;
+    justify-content:center;
+    padding:28px 16px;
+  }
+
+  .panel{
+    width:min(400px, 94vw);
+    background:linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+    border:1px solid var(--line);
+    border-radius:14px;
+    overflow:hidden;
+    box-shadow:0 20px 60px -20px rgba(0,0,0,0.6);
+  }
+
+  /* ---------- header ---------- */
+  .head{
+    padding:16px 18px 14px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+  }
+  .head-title{
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--ink-1);
+  }
+  .head-sub{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    color:var(--ink-2);
+    margin-top:2px;
+  }
+  .head-date{
+    font-family:'JetBrains Mono', monospace;
+    font-size:12px;
+    color:var(--ink-2);
+    letter-spacing:0.02em;
+  }
+
+  /* ---------- anomaly cards ---------- */
+  .anomalies-wrap{
+    margin:14px 18px 0;
+  }
+  .anomalies-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:8px;
+  }
+  .anomalies-head-title{
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--ink-2);
+  }
+  .anomalies-head-meta{
+    font-family:'JetBrains Mono', monospace;
+    font-size:10px;
+    color:var(--ink-2);
+  }
+
+  .a-card{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:9px 10px;
+    border-radius:10px;
+    background:var(--bg-2);
+    border:1px solid var(--line);
+    margin-bottom:6px;
+  }
+  .a-card:last-child{ margin-bottom:0; }
+
+  .a-trend-icon{
+    flex-shrink:0;
+    width:22px; height:22px;
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  .a-mid{
+    flex:1;
+    min-width:0;
+  }
+  .a-label{
+    font-size:12px;
+    font-weight:500;
+    color:var(--ink-0);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .a-base{
+    font-family:'JetBrains Mono', monospace;
+    font-size:10px;
+    color:var(--ink-2);
+    margin-top:1px;
+  }
+
+  .a-spark{ flex-shrink:0; }
+
+  .a-val-wrap{
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+    gap:5px;
+    width:58px;
+    justify-content:flex-end;
+  }
+  .a-val{
+    font-family:'JetBrains Mono', monospace;
+    font-size:15px;
+    font-weight:600;
+    line-height:1;
+  }
+  .a-sev-dot{
+    width:6px; height:6px; border-radius:50%;
+    flex-shrink:0;
+  }
+  .a-sev-dot.strong{ background:var(--ink-1); }
+  .a-sev-dot.moderate{ background:transparent; border:1.2px solid var(--ink-2); }
+
+  /* ---------- ring grid ---------- */
+  .rings{
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:2px;
+    background:var(--line);
+    margin-top:16px;
+  }
+  .ring-cell{
+    background:var(--bg-1);
+    padding:20px 8px 16px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:10px;
+  }
+  .ring-cell svg{ display:block; }
+  .ring-track{ fill:none; stroke:var(--line); stroke-width:6; }
+  .ring-val{
+    fill:none;
+    stroke-width:6;
+    stroke-linecap:round;
+    transform-origin:50% 50%;
+    transform:rotate(-90deg);
+    transition:stroke-dashoffset 0.8s ease;
+  }
+  .ring-center{
+    font-family:'JetBrains Mono', monospace;
+    font-size:19px;
+    font-weight:700;
+    fill:var(--ink-0);
+  }
+  .ring-pct{
+    font-family:'JetBrains Mono', monospace;
+    font-size:9px;
+    fill:var(--ink-2);
+  }
+  .ring-label{
+    font-size:11px;
+    font-weight:500;
+    color:var(--ink-1);
+    letter-spacing:0.03em;
+  }
+  .ring-sub{
+    font-family:'JetBrains Mono', monospace;
+    font-size:10px;
+    color:var(--ink-2);
+  }
+
+  @media (max-width: 460px){
+    .rings{ grid-template-columns:repeat(2, 1fr); }
+    .a-label{ white-space:normal; }
+    body{ padding:12px 8px; }
+  }
+
+  /* ---------- footer ---------- */
+  .foot{
+    padding:12px 18px 16px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    border-top:1px solid var(--line);
+    margin-top:6px;
+  }
+  .foot-status{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:10px;
+    color:var(--ink-2);
+    font-family:'JetBrains Mono', monospace;
+  }
+  .dot{
+    width:6px; height:6px; border-radius:50%;
+    background:var(--teal);
+    box-shadow:0 0 8px var(--teal);
+    transition:background 0.3s, box-shadow 0.3s;
+  }
+  .foot-updated{
+    font-family:'JetBrains Mono', monospace;
+    font-size:10px;
+    color:var(--ink-2);
+  }
+</style>
+</head>
+<body>
+
+<div class="panel">
+
+  <div class="head">
+    <div>
+      <div class="head-title">Дневник питания</div>
+      <div class="head-sub" id="userName">—</div>
+    </div>
+    <div class="head-date" id="headDate">—</div>
+  </div>
+
+  <div class="anomalies-wrap" id="anomaliesWrap" style="display:none;">
+    <div class="anomalies-head">
+      <span class="anomalies-head-title">Отклонения</span>
+      <span class="anomalies-head-meta" id="anomaliesMeta"></span>
+    </div>
+    <div id="anomaliesList"></div>
+  </div>
+
+  <div class="rings" id="rings"></div>
+
+  <div class="foot">
+    <div class="foot-status"><span class="dot" id="statusDot"></span> <span id="statusText">live</span></div>
+    <div class="foot-updated" id="lastUpdate">—</div>
+  </div>
+
+</div>
+
+<script>
+const WEBHOOK_URL = 'https://144.31.194.174.nip.io/card/dashboard/today-nutrition?token=QpcRi1JgTF75uzOf4WrV';
+const REFRESH_MS = 5 * 60 * 1000; // 5 минут
+
+const R = 30, C = 2 * Math.PI * R;
+
+// Надёжное округление — суммирование в n8n даёт "хвосты" плавающей точки
+// (3136.10000000000402), toFixed режет их и убирает лишние нули.
+function round(v, decimals){
+  if (v === undefined || v === null || isNaN(v)) return 0;
+  const n = Number(parseFloat(v).toFixed(decimals));
+  return n;
+}
+
+function ringSVG(pct, color){
+  const offset = C - (Math.min(pct,100)/100) * C;
+  return `
+    <svg width="76" height="76" viewBox="0 0 76 76">
+      <circle class="ring-track" cx="38" cy="38" r="${R}"></circle>
+      <circle class="ring-val" cx="38" cy="38" r="${R}"
+        stroke="${color}"
+        stroke-dasharray="${C}"
+        stroke-dashoffset="${offset}"></circle>
+    </svg>`;
+}
+
+function renderRings(data){
+  const s = data.summary;
+  const metrics = [
+    { label:"Калории",  val:round(s.calories.consumed, 0),        target:round(s.calories.target, 0),        unit:"",  color:"var(--teal)"  },
+    { label:"Белки",    val:round(s.macros.proteins.consumed, 0), target:round(s.macros.proteins.target, 0), unit:"г", color:"var(--teal)"  },
+    { label:"Углеводы", val:round(s.macros.carbs.consumed, 0),    target:round(s.macros.carbs.target, 0),    unit:"г", color:"var(--amber)" },
+    { label:"Жиры",     val:round(s.macros.fats.consumed, 0),     target:round(s.macros.fats.target, 0),     unit:"г", color:"var(--coral)" },
+  ];
+
+  const ringsEl = document.getElementById('rings');
+  ringsEl.innerHTML = '';
+  metrics.forEach(m=>{
+    const pct = m.target > 0 ? Math.round((m.val/m.target)*100) : 0;
+    const cell = document.createElement('div');
+    cell.className = 'ring-cell';
+    cell.innerHTML = `
+      <div style="position:relative; width:76px; height:76px;">
+        ${ringSVG(pct, m.color)}
+        <div style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+          <div class="ring-center">${pct}%</div>
+          <div class="ring-pct">${m.val}${m.unit}</div>
+        </div>
+      </div>
+      <div style="text-align:center;">
+        <div class="ring-label">${m.label}</div>
+        <div class="ring-sub">/ ${m.target}${m.unit}</div>
+      </div>
+    `;
+    ringsEl.appendChild(cell);
+  });
+}
+
+// Реальные hex-значения (не CSS var()) — нужны, чтобы приклеивать альфа-канал к цвету.
+// CSS var() нельзя конкатенировать со строкой прозрачности — это была причина
+// сплошного чёрного фона на предыдущей версии графика.
+const COLOR = { teal:'#5FCBBE', coral:'#E17B6B', ink1:'#9FB0B5', ink2:'#647377' };
+
+// SVG-иконка тренда: цвет = положительное/отрицательное изменение (главный сигнал),
+// направление треугольника = вырос показатель или упал.
+function trendIcon(direction, isImprovement){
+  const color = isImprovement ? COLOR.teal : COLOR.coral;
+  const path = direction === 'up'
+    ? 'M11 4 L18 16 L4 16 Z'
+    : 'M11 18 L4 6 L18 6 Z';
+  return `<svg width="22" height="22" viewBox="0 0 22 22">
+      <circle cx="11" cy="11" r="10" fill="${color}22"/>
+      <path d="${path}" fill="${color}"/>
+    </svg>`;
+}
+
+// Компактный график: 7 точек, линия + точки, последняя окрашена по улучшению/ухудшению.
+// Серая полоса на фоне — зона "нормы" (baseline ± 1.5·SD, тот же порог, что используется
+// для детекции умеренных отклонений). SD восстанавливаем из тех же данных, что уже есть:
+// z = (value - baseline) / SD  =>  SD = (value - baseline) / z.
+// Принудительный минимальный запас по Y, чтобы небольшие колебания нормы не схлопывались
+// в плоскую линию рядом с выбросом аномального дня.
+function sparkline(points, isImprovement, normalRange, direction){
+  const w = 64, h = 26, pad = 3;
+  const color = isImprovement ? COLOR.teal : COLOR.coral;
+
+  let rawMin = Math.min(...points), rawMax = Math.max(...points);
+  if (normalRange) {
+    rawMin = Math.min(rawMin, normalRange[0]);
+    rawMax = Math.max(rawMax, normalRange[1]);
+  }
+  const span = rawMax - rawMin;
+  const minSpan = Math.max(Math.abs(rawMax), 1) * 0.08;
+  const effSpan = Math.max(span, minSpan);
+  const mid = (rawMax + rawMin) / 2;
+  const min = mid - effSpan / 2, max = mid + effSpan / 2;
+  const range = (max - min) || 1;
+
+  const yOf = v => h - pad - ((v - min) / range) * (h - pad*2);
+  const stepX = (w - pad*2) / (points.length - 1);
+  const coords = points.map((p, i) => [pad + i * stepX, yOf(p)]);
+
+  const linePath = coords.map((c,i)=> (i===0?'M':'L') + c[0].toFixed(1) + ' ' + c[1].toFixed(1)).join(' ');
+
+  // Точка "хорошая" или "плохая" зависит от того, с какой стороны она вышла за норму
+  // и что для этой метрики лучше (direction: lower_better / higher_better / neutral).
+  function outlierColor(v){
+    if (!normalRange) return COLOR.ink2;
+    const [lo, hi] = normalRange;
+    if (v >= lo && v <= hi) return COLOR.ink2; // в норме
+    const wentAbove = v > hi;
+    if (direction === 'lower_better') return wentAbove ? COLOR.coral : COLOR.teal;
+    if (direction === 'higher_better') return wentAbove ? COLOR.teal : COLOR.coral;
+    return COLOR.coral; // neutral — направление не задаёт "лучше/хуже", просто отмечаем выброс
+  }
+
+  const dots = coords.map((c, i) => {
+    const isLast = i === coords.length - 1;
+
+    let fill, r;
+    if (isLast) {
+      fill = color; // последняя точка — по её собственному interpretation (уже посчитан z для неё)
+      r = 2.4;
+    } else {
+      fill = outlierColor(points[i]);
+      r = fill === COLOR.ink2 ? 1.4 : 2;
+    }
+
+    return `<circle cx="${c[0].toFixed(1)}" cy="${c[1].toFixed(1)}" r="${r}" fill="${fill}"/>`;
+  }).join('');
+
+  let bandRect = '';
+  if (normalRange) {
+    const yTop = Math.max(pad, yOf(normalRange[1]));
+    const yBot = Math.min(h - pad, yOf(normalRange[0]));
+    bandRect = `<rect x="${pad}" y="${yTop.toFixed(1)}" width="${(w-pad*2).toFixed(1)}" height="${Math.max(yBot-yTop,0).toFixed(1)}" fill="${COLOR.ink2}26"/>`;
+  }
+
+  return `<svg class="a-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+      ${bandRect}
+      <path d="${linePath}" fill="none" stroke="${COLOR.ink2}" stroke-width="1.4"/>
+      ${dots}
+    </svg>`;
+}
+
+// Временная генерация правдоподобного тренда — используется только как fallback,
+// если у метрики почему-то нет истории с бэкенда.
+function fakeTrend(baseline, current){
+  const pts = [];
+  for (let i = 0; i < 6; i++){
+    const jitter = (Math.sin(i * 1.7) * 0.5 + (Math.random()-0.5) * 0.3) * Math.abs(baseline) * 0.06;
+    pts.push(baseline + jitter);
+  }
+  pts.push(current);
+  return pts;
+}
+
+function renderAnomalies(anomalies){
+  const wrap = document.getElementById('anomaliesWrap');
+  if (!anomalies || anomalies.count === 0) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+  document.getElementById('anomaliesMeta').innerText = 'отчёт за ' + (anomalies.report_date || '—');
+
+  const listEl = document.getElementById('anomaliesList');
+  listEl.innerHTML = '';
+
+  (anomalies.raw || []).forEach(a => {
+    const isImprovement = a.interpretation === 'улучшение';
+    const direction = a.z >= 0 ? 'up' : 'down';
+    const trend = (a.history && a.history.length >= 2) ? a.history : fakeTrend(a.baseline_mean, a.value);
+    const valColor = isImprovement ? COLOR.teal : COLOR.coral;
+    const displayVal = round(a.value, 1);
+    const displayBase = round(a.baseline_mean, 2);
+
+    // Восстанавливаем SD из уже известных value/baseline/z, зона нормы = baseline ± 1.5·SD
+    const sd = a.z && a.z !== 0 ? Math.abs((a.value - a.baseline_mean) / a.z) : null;
+    const normalRange = sd ? [a.baseline_mean - 1.5*sd, a.baseline_mean + 1.5*sd] : null;
+
+    const card = document.createElement('div');
+    card.className = 'a-card';
+    card.innerHTML = `
+      <div class="a-trend-icon">${trendIcon(direction, isImprovement)}</div>
+      <div class="a-mid">
+        <div class="a-label">${a.label}</div>
+        <div class="a-base">baseline ${displayBase}</div>
+      </div>
+      ${sparkline(trend, isImprovement, normalRange, a.direction)}
+      <div class="a-val-wrap">
+        <span class="a-sev-dot ${a.severity}" title="${a.severity === 'strong' ? 'сильное' : 'умеренное'} отклонение"></span>
+        <div class="a-val" style="color:${valColor}">${displayVal}</div>
+      </div>
+    `;
+    listEl.appendChild(card);
+  });
+}
+
+async function fetchData(){
+  const dot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  dot.style.background = 'var(--amber)';
+  dot.style.boxShadow = '0 0 8px var(--amber)';
+  statusText.innerText = 'обновление…';
+
+  try {
+    const res = await fetch(WEBHOOK_URL);
+    if (!res.ok) throw new Error('network');
+    const data = await res.json();
+
+    document.getElementById('userName').innerText = data.user || '—';
+    document.getElementById('headDate').innerText = data.date || '—';
+
+    renderRings(data);
+    renderAnomalies(data.anomalies);
+
+    dot.style.background = 'var(--teal)';
+    dot.style.boxShadow = '0 0 8px var(--teal)';
+    statusText.innerText = 'live';
+
+    const now = new Date();
+    document.getElementById('lastUpdate').innerText =
+      'обновлено ' + now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+
+  } catch (e) {
+    dot.style.background = 'var(--coral)';
+    dot.style.boxShadow = '0 0 8px var(--coral)';
+    statusText.innerText = 'нет связи';
+    document.getElementById('lastUpdate').innerText = 'ошибка запроса';
+  }
+}
+
+fetchData();
+setInterval(fetchData, REFRESH_MS);
+</script>
+
+</body>
+</html>

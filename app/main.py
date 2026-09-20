@@ -34,6 +34,7 @@ from typing import Literal, Optional
 
 import psycopg
 from fastapi import Body, BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from psycopg import sql
 from pydantic import BaseModel
 from ulid import ULID
@@ -50,6 +51,7 @@ from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
 from app.doctor import anamnesis as doctor_anamnesis
 from app.doctor import poller as doctor_poller
+from app.doctor import telegram as doctor_telegram
 from app.doctor.intake import handle_update
 from app.journal import write_journal
 from app.memory import get_context, get_object, index_entity, run_pre_archive_check
@@ -70,6 +72,9 @@ from app.recommendations import (
 )
 import app.system_check as system_check
 import app.gate_watch as gate_watch
+import app.memory_archive_check as memory_archive_check
+import app.backup_alert as backup_alert
+import app.small_webhooks as small_webhooks
 from app.write_path import process as process_source
 
 app = FastAPI(title="card-service", version="0.0.1")
@@ -103,6 +108,13 @@ def _start_telegram_polling() -> None:
         return
     gate_scheduler = threading.Thread(target=gate_watch.run_scheduler, daemon=True, name="gate-watch-scheduler")
     gate_scheduler.start()
+    # 2026-09-20 (группа малых утилит): порт _Memory Pre-Archive Check + _Backup Alert.
+    if os.environ.get("SMALL_ALERTS_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return
+    mac_scheduler = threading.Thread(target=memory_archive_check.run_scheduler, daemon=True, name="memory-archive-check-scheduler")
+    mac_scheduler.start()
+    backup_scheduler = threading.Thread(target=backup_alert.run_scheduler, daemon=True, name="backup-alert-scheduler")
+    backup_scheduler.start()
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 
@@ -211,6 +223,59 @@ def dashboard_weekly_nutrition(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return get_weekly_nutrition(cur)
+
+
+# --- малые утилиты (2026-09-20, группа малых воркфлоу) ---------------------
+
+@app.get("/check-breakfast")
+def check_breakfast_endpoint() -> dict:
+    """Порт n8n `Был ли завтрак?`. У оригинала не было проверки токена — не
+    добавляю её здесь (не мой вызов менять контракт при переносе)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return small_webhooks.check_breakfast(cur)
+
+
+class ActionAckRequest(BaseModel):
+    token: str = ""
+    id: str = ""
+    done: bool = True
+
+
+@app.post("/action-ack")
+def action_ack_endpoint(req: ActionAckRequest) -> dict:
+    """Порт n8n `action-ack` — отметка «сделал» на карточке действия дня.
+    2026-09-20: теперь пишет напрямую в health.action_log (не в Sheets)."""
+    return small_webhooks.action_ack(req.token, req.id, req.done)
+
+
+_WIDGET_TOKEN = "wFSIRB6DO4l6ZrUSlJR5"  # тот же токен, что был у n8n-воркфлоу "Страница наружу - Виджет"
+
+
+@app.get("/widget/nutrition-diary", response_class=HTMLResponse)
+def nutrition_diary_widget(token: str = Query(default="")) -> str:
+    """Порт n8n «Страница наружу - Виджет» — статическая HTML-страница
+    (клиентский JS сам зовёт /dashboard/today-nutrition). См. комментарий в
+    app/small_webhooks.py про починенную ссылку на старый n8n-эндпоинт."""
+    if token != _WIDGET_TOKEN:
+        raise HTTPException(status_code=403, detail="forbidden")
+    return small_webhooks.get_nutrition_widget_html()
+
+
+class BackupStatusRequest(BaseModel):
+    token: str = ""
+    result: str = ""
+    detail: str = ""
+    ts: str = ""
+
+
+@app.post("/backup-status")
+def backup_status_endpoint(req: BackupStatusRequest) -> dict:
+    """Порт n8n `_Backup Alert` (webhook-часть) — пинг от nightly_backup.sh."""
+    alert = backup_alert.handle_ping(req.token, req.result, req.detail, req.ts)
+    if alert:
+        doctor_telegram.send_message(backup_alert.CHAT_ID, alert, parse_mode="HTML")
+    return {"ok": True}
 
 
 @app.post("/ingest", response_model=IngestResponse)
