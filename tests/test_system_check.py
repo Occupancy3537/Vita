@@ -109,6 +109,78 @@ def test_missing_dates_no_gap_when_all_present():
     assert gap == set()
 
 
+def test_check_numeric_garbage_flags_comma_that_survives_replace(monkeypatch):
+    """Не сама запятая (replace(',', '.') её чинит) — а НАСТОЯЩИЙ мусор,
+    который не парсится числом даже после этого (премортем #1: тот же класс
+    бага, что нашёлся живой проверкой в MicroClimate температуре)."""
+    cur = MagicMock()
+    cols = system_check._NUTRIENT_NUMERIC_COLS
+    row_meals = ["2026-09-19"] + (["не число"] + [None] * (len(cols) - 1))
+    cur.execute.return_value = None
+    cur.fetchall.return_value = [tuple(row_meals)]
+    problems, notes = [], []
+    system_check._check_numeric_garbage(cur, problems, notes)
+    assert any("meals" in p and cols[0] in p for p in problems)
+
+
+def test_check_numeric_garbage_comma_decimal_is_not_a_problem():
+    """Запятая-десятичная — ОЖИДАЕМЫЙ формат Sheets-эры, не баг сам по себе:
+    replace(',', '.') должен её принять молча."""
+    cur = MagicMock()
+    cols = system_check._NUTRIENT_NUMERIC_COLS
+    row = ["2026-09-19"] + (["24,3"] + [None] * (len(cols) - 1))
+    cur.fetchall.return_value = [tuple(row)]
+    problems, notes = [], []
+    system_check._check_numeric_garbage(cur, problems, notes)
+    assert problems == []
+
+
+def test_check_numeric_garbage_empty_table_is_silent():
+    cur = MagicMock()
+    cur.fetchall.return_value = []
+    problems, notes = [], []
+    system_check._check_numeric_garbage(cur, problems, notes)
+    assert problems == [] and notes == []
+
+
+def test_check_anomaly_freshness_ok_when_same_day():
+    cur = MagicMock()
+    today = system_check._vl_now().date()
+    cur.fetchone.side_effect = [(today,), (today,)]
+    problems, notes = [], []
+    system_check._check_anomaly_freshness(cur, problems, notes)
+    assert problems == []
+
+
+def test_check_anomaly_freshness_flags_when_stale():
+    cur = MagicMock()
+    today = system_check._vl_now().date()
+    cur.fetchone.side_effect = [(today,), (today - timedelta(days=3),)]
+    problems, notes = [], []
+    system_check._check_anomaly_freshness(cur, problems, notes)
+    assert len(problems) == 1
+    assert "отстаёт" in problems[0]
+
+
+def test_check_anomaly_freshness_flags_when_never_written():
+    cur = MagicMock()
+    today = system_check._vl_now().date()
+    cur.fetchone.side_effect = [(today,), (None,)]
+    problems, notes = [], []
+    system_check._check_anomaly_freshness(cur, problems, notes)
+    assert len(problems) == 1
+    assert "вообще не пишет" in problems[0]
+
+
+def test_check_anomaly_freshness_skips_when_daily_trends_empty():
+    cur = MagicMock()
+    cur.fetchone.side_effect = [(None,)]
+    problems, notes = [], []
+    system_check._check_anomaly_freshness(cur, problems, notes)
+    assert problems == []
+    assert len(notes) == 1
+
+
 def test_build_message_all_clean_no_problems(monkeypatch):
     def fake_get(url, headers=None, timeout=None):
         if "api/v1/workflows" in url:

@@ -195,6 +195,81 @@ def _check_pg_status(cur, problems: list) -> None:
         problems.append("🔴 Postgres (health) не отвечает или health.daily_trends пуст — проверь контейнер pg / сеть pgnet")
 
 
+# Премортем (2026-09-20, задача Влада "давай сделаем 1,3,4,5,7", проблема #1
+# "тихая эрозия данных через накопленные находки"): за одну сессию всплыли
+# три независимых бага одного и того же класса — запятая-десятичная в
+# MicroClimate (climate-поля молча пустели), устаревший EXPECTED_ACTIVE_N8N
+# (ложная тревога месяцами), multiline-параметр ломал n8n-ноду записи. Все
+# три нашлись случайно, не системной проверкой. Ниже — два системных чека,
+# которые ловят СЛЕДУЮЩИЕ такие находки автоматически, а не по счастливой
+# случайности во время несвязанной задачи.
+_NUTRIENT_NUMERIC_COLS = [
+    "Calories", "Proteins", "Carbs", "Fats", "Магний", "Витамин D",
+    "Омега-3 (EPA/DHA)", "Селен", "Йод", "Калий", "Железо", "Кальций",
+    "Витамин B12", "Витамин К", "Витамин Е", "Цинк", "Клетчатка", "Холестерин",
+    "Добавленный сахар", "Натрий", "Кофеин", "Насыщенные жиры", "Трансжиры",
+]
+
+
+def _check_numeric_garbage(cur, problems: list, notes: list) -> None:
+    """Ловит именно тот класс бага, что нашёлся живой проверкой в MicroClimate
+    (temperature="26,4" — запятая-десятичная, float() падает молча внутри
+    try/except, поле навсегда пустое): сканирует нутриент-колонки health.meals
+    и health.day_sum за последние 10 дней на значения, которые не парсятся
+    как число ни как есть, ни после replace(',', '.'). Не проверяет
+    health.daily_trends — эта таблица пишется card-service'ом же самим
+    (biohacking_ingest.py уже форматирует числа единообразно через _js_str),
+    риск локали там не у нас, а у внешних источников на входе."""
+    since = (_vl_now() - timedelta(days=10)).date()
+    for table, date_col in (("meals", "Date"), ("day_sum", "Date")):
+        cols = ", ".join(f'"{c}"' for c in _NUTRIENT_NUMERIC_COLS)
+        try:
+            cur.execute(f'SELECT "{date_col}", {cols} FROM health.{table} WHERE "{date_col}" >= %s', (since,))
+        except Exception as e:
+            notes.append(f"{table}: проверка на мусор в числах не удалась ({str(e)[:60]})")
+            continue
+        rows = cur.fetchall()
+        if not rows:
+            continue
+        bad = set()
+        for row in rows:
+            for col, val in zip(_NUTRIENT_NUMERIC_COLS, row[1:]):
+                if val is None or str(val).strip() == "":
+                    continue
+                try:
+                    float(str(val).replace(",", "."))
+                except ValueError:
+                    bad.add(col)
+        if bad:
+            problems.append(f"{table}: не парсятся как число (проверь формат/локаль): {', '.join(sorted(bad))}")
+
+
+def _check_anomaly_freshness(cur, problems: list, notes: list) -> None:
+    """Anomaly_Detector — на card-service с #34, три независимых пути запуска
+    (после ингеста + два расписания), поэтому «тихо перестал работать» не
+    выглядело бы как ошибка нигде — просто health.anomaly_log перестал бы
+    расти. Сверяем: если у daily_trends есть свежая дата, у anomaly_log
+    должна быть запись на неё же (или на день раньше — таймингом расписаний)."""
+    cur.execute('SELECT max("Дата") FROM health.daily_trends')
+    row = cur.fetchone()
+    latest_trend = row[0] if row else None
+    if latest_trend is None:
+        notes.append("anomaly_log: daily_trends пуст, проверка свежести пропущена")
+        return
+    cur.execute("SELECT max(date) FROM health.anomaly_log")
+    row = cur.fetchone()
+    latest_anomaly = row[0] if row else None
+    if latest_anomaly is None:
+        problems.append("🔴 health.anomaly_log пуст, хотя daily_trends не пуст — детектор аномалий вообще не пишет")
+        return
+    gap_days = (latest_trend - latest_anomaly).days
+    if gap_days > 1:
+        problems.append(
+            f"health.anomaly_log отстаёт от daily_trends на {gap_days} дн. "
+            f"(последняя запись {latest_anomaly}, а Daily_Trends уже {latest_trend}) — детектор аномалий не запускался?"
+        )
+
+
 def _check_load_gate(today_cache: dict, problems: list, notes: list) -> None:
     """Инвариант безопасности: у пациента активная грыжа L5/S1 в Patient_State —
     гейт ОБЯЗАН быть blocked. Если today-dashboard отдаёт blocked=false, это
@@ -239,6 +314,8 @@ def build_message() -> dict:
     with get_conn() as conn, conn.cursor() as cur:
         _check_gaps(cur, problems, notes)
         _check_pg_status(cur, problems)
+        _check_numeric_garbage(cur, problems, notes)
+        _check_anomaly_freshness(cur, problems, notes)
     _check_load_gate(today_cache, problems, notes)
     _check_n8n_active(problems, notes)
 
@@ -252,7 +329,8 @@ def build_message() -> dict:
     else:
         msg = (
             f"✅ Система в норме ({ts} ВЛ). Вебхуки живы, кэши свежие, Daily_Trends/day_sum/Meals "
-            "без дыр за 5 дней, гейт blocked (грыжа), критичные воркфлоу active."
+            "без дыр за 5 дней, числа в питании парсятся, anomaly_log свежий, гейт blocked (грыжа), "
+            "критичные воркфлоу active."
         )
     return {"message": msg, "has_problems": bool(problems), "problems": problems, "notes": notes}
 
