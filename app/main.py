@@ -30,7 +30,8 @@ from datetime import datetime, timezone
 # по умолчанию показывает только WARNING+) — а это единственный канал видеть,
 # что long-polling живой, раз в контейнере нет отдельного дашборда для этого.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-from typing import Literal, Optional
+logger = logging.getLogger(__name__)
+from typing import Callable, Literal, Optional
 
 import psycopg
 from fastapi import Body, BackgroundTasks, FastAPI, HTTPException, Query
@@ -86,74 +87,49 @@ from app.write_path import process as process_source
 app = FastAPI(title="card-service", version="0.0.1")
 
 
+# НАХОДКА премортема (2026-09-20, задача Влада "давай сделаем 1,3,4,5,7"):
+# раньше это была ЦЕПОЧКА `if not FLAG: return` — каждый следующий флаг
+# проверялся, только если ВСЕ предыдущие были включены. Работало только
+# потому, что TELEGRAM_POLLING_ENABLED в run.sh всегда стоял первым и всегда
+# =1 — но один случайно не выставленный флаг ближе к началу списка молча
+# гасил бы всё, что после него, без единой ошибки в логе. Теперь каждый флаг
+# независим: список (флаг, функция, имя потока), цикл, try/except на запуск
+# потока — падение одного пункта не мешает остальным. Внешнее поведение при
+# сегодняшней конфигурации run.sh (все флаги=1) не меняется.
+_STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
+    ("TELEGRAM_POLLING_ENABLED", lambda: doctor_poller.run_polling_loop(), "telegram-poller"),
+    ("ANAMNESIS_SCHEDULER_ENABLED", lambda: doctor_anamnesis.run_scheduler(), "anamnesis-scheduler"),
+    ("SYSTEM_CHECK_ENABLED", lambda: system_check.run_scheduler(), "system-check-scheduler"),
+    ("GATE_WATCH_ENABLED", lambda: gate_watch.run_scheduler(), "gate-watch-scheduler"),
+    ("SMALL_ALERTS_ENABLED", lambda: memory_archive_check.run_scheduler(), "memory-archive-check-scheduler"),
+    ("SMALL_ALERTS_ENABLED", lambda: backup_alert.run_scheduler(), "backup-alert-scheduler"),
+    ("DIET_TAGGER_ENABLED", lambda: diet_tagger.run_scheduler(), "diet-tagger-scheduler"),
+    ("HEALTH_WATCHDOG_ENABLED", lambda: health_watchdog.run_scheduler(), "health-watchdog-scheduler"),
+    ("NUTRITION_REPORTS_ENABLED", lambda: nutrition_reports.run_daily_scheduler(), "nutrition-daily-report-scheduler"),
+    ("NUTRITION_REPORTS_ENABLED", lambda: nutrition_reports.run_weekly_scheduler(), "nutrition-weekly-report-scheduler"),
+    ("WEEKLY_ADVISOR_ENABLED", lambda: weekly_advisor.run_scheduler(), "weekly-advisor-scheduler"),
+    # Anomaly_Detector/Correlations: третий путь запуска (сразу после ингеста)
+    # не через этот список — прямой вызов run_daily_check() из
+    # app/biohacking_ingest.py::process_ingest().
+    ("ANOMALY_DETECTOR_ENABLED", lambda: anomaly_detector.run_daily_scheduler(), "anomaly-daily-scheduler"),
+    ("ANOMALY_DETECTOR_ENABLED", lambda: anomaly_detector.run_weekly_scheduler(), "anomaly-weekly-scheduler"),
+]
+
+
 @app.on_event("startup")
-def _start_telegram_polling() -> None:
-    """Step 2 плана (§3.2, 2026-09-16) — включается явным env-флагом, не по
-    умолчанию: запуск снимает вебхук Telegram (deleteWebhook) необратимо для
-    n8n-стороны, пока флаг не выставлен обратно и polling не остановлен —
-    не должно включаться случайно вместе с обычным деплоем."""
-    if os.environ.get("TELEGRAM_POLLING_ENABLED", "").lower() not in ("1", "true", "yes"):
-        return
-    thread = threading.Thread(target=doctor_poller.run_polling_loop, daemon=True, name="telegram-poller")
-    thread.start()
-    # Волна 2 (B1, 2026-09-17): анамнез-планировщик — тем же явным флагом (урок
-    # run.sh: без флага деплой молча оставляет фичу выключенной).
-    if os.environ.get("ANAMNESIS_SCHEDULER_ENABLED", "").lower() not in ("1", "true", "yes"):
-        return
-    scheduler = threading.Thread(target=doctor_anamnesis.run_scheduler, daemon=True, name="anamnesis-scheduler")
-    scheduler.start()
-    # 2026-09-19: порт _System Check из n8n (самый прожорливый по памяти активный
-    # воркфлоу — см. докстринг app/system_check.py), тот же принцип явного флага.
-    if os.environ.get("SYSTEM_CHECK_ENABLED", "").lower() not in ("1", "true", "yes"):
-        return
-    check_scheduler = threading.Thread(target=system_check.run_scheduler, daemon=True, name="system-check-scheduler")
-    check_scheduler.start()
-    # 2026-09-20: алерт на снятие/возврат гейта нагрузки (порт из today-dashboard
-    # Build Today JSON, см. app/gate_watch.py) — тот же принцип явного флага.
-    if os.environ.get("GATE_WATCH_ENABLED", "").lower() not in ("1", "true", "yes"):
-        return
-    gate_scheduler = threading.Thread(target=gate_watch.run_scheduler, daemon=True, name="gate-watch-scheduler")
-    gate_scheduler.start()
-    # 2026-09-20 (группа малых утилит): порт _Memory Pre-Archive Check + _Backup Alert.
-    if os.environ.get("SMALL_ALERTS_ENABLED", "").lower() not in ("1", "true", "yes"):
-        return
-    mac_scheduler = threading.Thread(target=memory_archive_check.run_scheduler, daemon=True, name="memory-archive-check-scheduler")
-    mac_scheduler.start()
-    backup_scheduler = threading.Thread(target=backup_alert.run_scheduler, daemon=True, name="backup-alert-scheduler")
-    backup_scheduler.start()
-    # 2026-09-20 (группа 2): порт Diet Quality Tagger — первый в очереди с LLM-вызовом.
-    if os.environ.get("DIET_TAGGER_ENABLED", "").lower() not in ("1", "true", "yes"):
-        return
-    tagger_scheduler = threading.Thread(target=diet_tagger.run_scheduler, daemon=True, name="diet-tagger-scheduler")
-    tagger_scheduler.start()
-    # 2026-09-20 (группа 2): порт Health Watchdog — safety-смежный, LLM-разбор анализов.
-    if os.environ.get("HEALTH_WATCHDOG_ENABLED", "").lower() not in ("1", "true", "yes"):
-        return
-    watchdog_scheduler = threading.Thread(target=health_watchdog.run_scheduler, daemon=True, name="health-watchdog-scheduler")
-    watchdog_scheduler.start()
-    # 2026-09-20 (группа 2, последний LLM-порт): Reports (дневной путь) + Weekly Food Report.
-    if os.environ.get("NUTRITION_REPORTS_ENABLED", "").lower() not in ("1", "true", "yes"):
-        return
-    daily_report_scheduler = threading.Thread(target=nutrition_reports.run_daily_scheduler, daemon=True, name="nutrition-daily-report-scheduler")
-    daily_report_scheduler.start()
-    weekly_report_scheduler = threading.Thread(target=nutrition_reports.run_weekly_scheduler, daemon=True, name="nutrition-weekly-report-scheduler")
-    weekly_report_scheduler.start()
-    # 2026-09-20 (группа 2, финал): Weekly AI Advisor — крупнейший порт волны,
-    # закрывает группу 2 целиком.
-    if os.environ.get("WEEKLY_ADVISOR_ENABLED", "").lower() not in ("1", "true", "yes"):
-        return
-    advisor_scheduler = threading.Thread(target=weekly_advisor.run_scheduler, daemon=True, name="weekly-advisor-scheduler")
-    advisor_scheduler.start()
-    # 2026-09-20 (группа 3, 1/2): Anomaly_Detector/Correlations — расписания
-    # (дневной 09:15 ВЛ + недельный дайджест вс 11:00 ВЛ). Третий путь запуска
-    # (сразу после ингеста) — прямой вызов run_daily_check() из
-    # app/biohacking_ingest.py::process_ingest(), не через этот флаг.
-    if os.environ.get("ANOMALY_DETECTOR_ENABLED", "").lower() not in ("1", "true", "yes"):
-        return
-    anomaly_daily_scheduler = threading.Thread(target=anomaly_detector.run_daily_scheduler, daemon=True, name="anomaly-daily-scheduler")
-    anomaly_daily_scheduler.start()
-    anomaly_weekly_scheduler = threading.Thread(target=anomaly_detector.run_weekly_scheduler, daemon=True, name="anomaly-weekly-scheduler")
-    anomaly_weekly_scheduler.start()
+def _start_background_schedulers() -> None:
+    """Каждый пункт — независимый явный env-флаг, не включается по умолчанию
+    (см. историю run.sh: без флага деплой молча оставляет фичу выключенной —
+    урок волны B1). TELEGRAM_POLLING_ENABLED особенный: запуск снимает вебхук
+    Telegram (deleteWebhook) необратимо для n8n-стороны, пока флаг не
+    выставлен обратно и polling не остановлен."""
+    for flag, target, name in _STARTUP_TASKS:
+        if os.environ.get(flag, "").lower() not in ("1", "true", "yes"):
+            continue
+        try:
+            threading.Thread(target=target, daemon=True, name=name).start()
+        except Exception:
+            logger.exception("startup: не удалось запустить поток %s (флаг %s) — остальные не затронуты", name, flag)
 
 Channel = Literal["telegram", "device", "lab", "visit", "manual"]
 
