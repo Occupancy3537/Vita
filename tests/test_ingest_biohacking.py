@@ -28,6 +28,7 @@ def _stub_all(monkeypatch):
 def teardown_function():
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute('DELETE FROM health.daily_trends WHERE "Дата" = %s', (TEST_DATE,))
+        cur.execute("DELETE FROM health.garmin_ingest_log WHERE date = %s", (TEST_DATE,))
         conn.commit()
 
 

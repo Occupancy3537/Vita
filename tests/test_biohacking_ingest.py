@@ -240,6 +240,7 @@ def _cleanup():
     yield
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute('DELETE FROM health.daily_trends WHERE "Дата" = %s', (TEST_DATE,))
+        cur.execute("DELETE FROM health.garmin_ingest_log WHERE date = %s", (TEST_DATE,))
         conn.commit()
 
 
@@ -288,3 +289,86 @@ def test_process_ingest_survives_climate_and_calendar_failures(monkeypatch):
     payload = bi.BiohackingPayload(date=TEST_DATE, steps=5000)
     row = bi.process_ingest(payload)  # не должно упасть, несмотря на отказ всех внешних API
     assert row["Дата"] == TEST_DATE
+
+
+# --- премортем #7: сырой лог пишется первым, переигровка без дублей -----------
+
+def _stub_external(monkeypatch):
+    monkeypatch.setattr(bi, "fetch_nutrition", lambda cur: [])
+    monkeypatch.setattr(bi, "fetch_climate", lambda: [])
+    monkeypatch.setattr(bi, "fetch_calendar_events", lambda d: [])
+    monkeypatch.setattr(bi, "fetch_rescuetime", lambda d: [])
+    monkeypatch.setattr(bi, "fetch_weather", lambda: {})
+    monkeypatch.setattr(bi, "compute_pressure_deltas", lambda w: {})
+    monkeypatch.setattr(bi, "sync_device_facts", lambda row: None)
+    monkeypatch.setattr(bi, "sync_to_sheets", lambda row: None)
+    import app.anomaly_detector as ad
+    monkeypatch.setattr(ad, "run_daily_check", lambda: None)
+
+
+def test_process_ingest_logs_raw_payload_before_processing(monkeypatch):
+    _stub_external(monkeypatch)
+    payload = bi.BiohackingPayload(date=TEST_DATE, steps=8000)
+    bi.process_ingest(payload)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, raw_payload->>'steps' FROM health.garmin_ingest_log WHERE date = %s", (TEST_DATE,))
+        rows = cur.fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "done"
+    assert rows[0][1] == "8000.0"  # как отдал payload.model_dump() (float) — сырой лог не форматирует
+
+
+def test_process_ingest_marks_log_failed_on_error_and_reraises(monkeypatch):
+    monkeypatch.setattr(bi, "fetch_nutrition", lambda cur: [])
+    monkeypatch.setattr(bi, "fetch_climate", lambda: [])
+    monkeypatch.setattr(bi, "fetch_calendar_events", lambda d: [])
+    monkeypatch.setattr(bi, "fetch_rescuetime", lambda d: [])
+
+    def boom_weather():
+        raise RuntimeError("сбой сборки строки")
+    monkeypatch.setattr(bi, "fetch_weather", boom_weather)
+
+    def boom_build(*a, **kw):
+        raise RuntimeError("сбой сборки строки")
+    monkeypatch.setattr(bi, "build_daily_trends_row", boom_build)
+
+    payload = bi.BiohackingPayload(date=TEST_DATE, steps=1)
+    with pytest.raises(RuntimeError):
+        bi.process_ingest(payload)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, error FROM health.garmin_ingest_log WHERE date = %s", (TEST_DATE,))
+        row = cur.fetchone()
+    assert row[0] == "failed"
+    assert "сбой сборки строки" in row[1]
+
+
+def test_reprocess_from_log_replays_without_duplicating_daily_trends_row(monkeypatch):
+    """Регрессия премортема #7: переигровка того же дня — не второй ряд, а
+    обновление того же самого (UPSERT по "Дата"), сама причина запрета
+    "не запускай send_to_n8n.py вручную" здесь структурно снята."""
+    _stub_external(monkeypatch)
+    payload = bi.BiohackingPayload(date=TEST_DATE, steps=1000)
+    bi.process_ingest(payload)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id FROM health.garmin_ingest_log WHERE date = %s", (TEST_DATE,))
+        log_id = cur.fetchone()[0]
+
+    bi.reprocess_from_log(log_id)  # тот же payload, ещё раз
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute('SELECT count(*), "Шаги_за_вчера" FROM health.daily_trends WHERE "Дата" = %s GROUP BY "Шаги_за_вчера"', (TEST_DATE,))
+        rows = cur.fetchall()
+    assert len(rows) == 1  # одна строка, не две
+    assert rows[0][0] == 1
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT status FROM health.garmin_ingest_log WHERE id = %s", (log_id,))
+        assert cur.fetchone()[0] == "done (replay)"
+
+
+def test_reprocess_from_log_raises_on_unknown_id():
+    with pytest.raises(ValueError):
+        bi.reprocess_from_log(999_999_999)

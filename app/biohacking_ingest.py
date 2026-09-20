@@ -39,6 +39,7 @@ of values" (execution_entity id 17933/18924) — это баг n8n-ноды Post
 RescueTime API-ключ раньше лежал открытым текстом в параметрах httpRequest-
 ноды — здесь вынесен в переменную окружения RESCUETIME_API_KEY (гигиена,
 не поведенческое отличие)."""
+import json
 import logging
 import math
 import os
@@ -667,11 +668,37 @@ def sync_device_facts(row: dict) -> None:
             logger.exception("biohacking_ingest: не удалось синхронизировать device-факты (не блокирует запись daily_trends)")
 
 
-def process_ingest(payload: BiohackingPayload) -> dict:
-    """Оркестратор — порт всей цепочки Webhook -> ... -> Write DT PG ->
-    Call 'Anomaly_Detector'. Возвращает записанную строку (для теста/ответа
-    эндпоинта)."""
-    garmin = payload.model_dump(exclude_none=False)
+# Премортем (2026-09-20, задача "1,3,4,5,7", проблема #7 "хроническая
+# нестабильность Гарминовского пайплайна лечилась точечно, не системно"):
+# health.garmin_ingest_log хранит СЫРОЙ payload ПЕРВЫМ делом, до всякой
+# обработки. Раньше эта граница ломалась несколько раз по-разному (лаг
+# Гармина + null-clobber, задвоение вебхука, multiline-баг n8n-ноды записи,
+# запятая-десятичная в MicroClimate) — каждый раз чинили конкретный симптом.
+# Теперь сбой на ЛЮБОМ шаге сборки/записи не теряет сырые данные — их можно
+# безопасно переиграть через reprocess_from_log(), без запуска send_to_n8n.py
+# вручную (CLAUDE.md): UPSERT в daily_trends идемпотентен по "Дата", повторная
+# обработка того же дня не создаёт дублей, только обновляет существующую
+# строку — сама причина запрета "не запускай вручную" (риск задвоения) здесь
+# структурно не может случиться.
+def _log_raw_ingest(cur, garmin: dict) -> int:
+    cur.execute(
+        "INSERT INTO health.garmin_ingest_log (date, raw_payload) VALUES (%s, %s::jsonb) RETURNING id",
+        (garmin.get("date"), json.dumps(garmin, ensure_ascii=False, default=str)),
+    )
+    return cur.fetchone()[0]
+
+
+def _mark_ingest_result(cur, log_id: int, status: str, error: Optional[str] = None) -> None:
+    cur.execute(
+        "UPDATE health.garmin_ingest_log SET status=%s, error=%s, processed_at=now() WHERE id=%s",
+        (status, error, log_id),
+    )
+
+
+def _build_and_write(garmin: dict) -> dict:
+    """Собственно вся обработка (было единственным телом process_ingest до
+    добавления raw-лога) — вынесена отдельно, чтобы process_ingest() и
+    reprocess_from_log() звали одно и то же, не дублируя цепочку."""
     day_iso = garmin["date"]
 
     with get_conn() as conn, conn.cursor() as cur:
@@ -713,4 +740,52 @@ def process_ingest(payload: BiohackingPayload) -> dict:
     except Exception:
         logger.exception("biohacking_ingest: run_daily_check упал — daily_trends уже записан, не блокируем ответ")
 
+    return row
+
+
+def process_ingest(payload: BiohackingPayload) -> dict:
+    """Оркестратор — порт всей цепочки Webhook -> ... -> Write DT PG ->
+    Call 'Anomaly_Detector'. Возвращает записанную строку (для теста/ответа
+    эндпоинта). Сырой payload логируется ДО обработки (см. комментарий выше
+    про garmin_ingest_log) — если что-то ниже упадёт, лог остаётся с
+    status='failed' и его можно переиграть через reprocess_from_log(), не
+    запуская send_to_n8n.py заново."""
+    garmin = payload.model_dump(exclude_none=False)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        log_id = _log_raw_ingest(cur, garmin)
+        conn.commit()
+
+    try:
+        row = _build_and_write(garmin)
+    except Exception as e:
+        with get_conn() as conn, conn.cursor() as cur:
+            _mark_ingest_result(cur, log_id, "failed", str(e)[:2000])
+            conn.commit()
+        raise
+
+    with get_conn() as conn, conn.cursor() as cur:
+        _mark_ingest_result(cur, log_id, "done")
+        conn.commit()
+    return row
+
+
+def reprocess_from_log(log_id: int) -> dict:
+    """Ручная переигровка сырого payload'а из health.garmin_ingest_log —
+    безопасная альтернатива повторному запуску send_to_n8n.py: UPSERT в
+    health.daily_trends идемпотентен по "Дата", повторная обработка того же
+    дня не плодит дубли, только обновляет существующую строку. Не вызывается
+    автоматически ни из чего — сознательно ручной инструмент на случай
+    реального сбоя (используй из python-консоли в контейнере, как и другие
+    разовые операции в этом проекте)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT raw_payload FROM health.garmin_ingest_log WHERE id = %s", (log_id,))
+        found = cur.fetchone()
+    if not found:
+        raise ValueError(f"garmin_ingest_log id={log_id} не найден")
+    garmin = found[0]
+    row = _build_and_write(garmin)
+    with get_conn() as conn, conn.cursor() as cur:
+        _mark_ingest_result(cur, log_id, "done (replay)")
+        conn.commit()
     return row
