@@ -1,28 +1,19 @@
 """Phase 5 плана нового доктора — commit.py: транзакционная запись health.*+
-card.*. health.* не имеет тестовой схемы-аналога (как и везде в этом проекте,
-см. test_doctor_tools.py/_context.py) — здесь пишем реальные строки в health.*
-с явным тестовым префиксом id (`test-commit-...`) и убираем их в teardown, тот
-же принцип, что уже применялся для card.rf_event при разработке П5 (см. STATE.md
-"Тестовые записи из прод-базы убрал"). card.* (episode/fact/journal) — через
-conftest.py, автоматически truncate'ится."""
+card.*. 2026-09-21 (#38/#47): commit.py теперь пишет в REGISTRAR_HEALTH_SCHEMA
+(тот же переключатель, что и app/registrar.py), conftest.py задаёт card_test и
+создаёт двойники symptom_log/doctor_notes/investigations/lab_plan — прод
+health.* эти тесты больше не касаются вообще. (Раньше писали реальные строки
+с префиксом test-commit- и убирали в teardown — "известные 5 падений" держались
+именно из-за этого: тестовый Open_Investigation конфликтовал с настоящей
+открытой записью Влада в health.investigations, инвариант "только одно
+открытое" отрабатывал корректно, просто не на той базе.) card.*
+(episode/fact/journal) — через conftest.py, автоматически truncate'ится."""
 import pytest
 
 from app.db import get_conn
-from app.doctor.commit import CommitError, already_committed, apply_staged_writes
+from app.doctor.commit import _HEALTH_SCHEMA, CommitError, already_committed, apply_staged_writes
 from app.doctor.contract import StagedWrite
 from app.doctor.dialog import write_turn
-
-
-@pytest.fixture(autouse=True)
-def cleanup_health_test_rows():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM health.symptom_log WHERE symptom_id LIKE 'test-commit-%'")
-        cur.execute("DELETE FROM health.doctor_notes WHERE category LIKE 'test-commit-%'")
-        cur.execute("DELETE FROM health.investigations WHERE inv_id LIKE 'test-commit-%'")
-        cur.execute("DELETE FROM health.lab_plan WHERE \"Test\" LIKE 'test-commit-%'")
-        conn.commit()
-
 
 _next_update_id = iter(range(1, 100_000))
 
@@ -52,7 +43,7 @@ def test_symptom_write_creates_symptom_log_and_episode():
     assert r["applied"] == ["symptom"]
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT symptom, severity, status FROM health.symptom_log WHERE symptom_id = 'test-commit-sid1'")
+        cur.execute(f"SELECT symptom, severity, status FROM {_HEALTH_SCHEMA}.symptom_log WHERE symptom_id = 'test-commit-sid1'")
         row = cur.fetchone()
         # severity — колонка TEXT (как и в остальной health.*, см. Phase 0), не integer.
         assert row == ("тестовая боль", "3", "active")
@@ -84,7 +75,7 @@ def test_note_write():
     assert r["committed"] is True
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT note FROM health.doctor_notes WHERE category = 'test-commit-cat'")
+        cur.execute(f"SELECT note FROM {_HEALTH_SCHEMA}.doctor_notes WHERE category = 'test-commit-cat'")
         assert cur.fetchone()[0] == "тестовая заметка"
 
 
@@ -96,7 +87,7 @@ def test_open_investigation_when_none_open():
     assert r["committed"] is True
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT status FROM health.investigations WHERE inv_id = 'test-commit-inv1'")
+        cur.execute(f"SELECT status FROM {_HEALTH_SCHEMA}.investigations WHERE inv_id = 'test-commit-inv1'")
         assert cur.fetchone()[0] == "open"
 
 
@@ -112,7 +103,7 @@ def test_open_investigation_rejected_when_one_already_open():
                              turn_id=turn_id2)
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM health.investigations WHERE inv_id = 'test-commit-inv3'")
+        cur.execute(f"SELECT count(*) FROM {_HEALTH_SCHEMA}.investigations WHERE inv_id = 'test-commit-inv3'")
         assert cur.fetchone()[0] == 0  # откат — вторая запись не появилась
 
 
@@ -125,7 +116,7 @@ def test_update_investigation_success():
                          turn_id=_turn())
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT findings FROM health.investigations WHERE inv_id = 'test-commit-inv4'")
+        cur.execute(f"SELECT findings FROM {_HEALTH_SCHEMA}.investigations WHERE inv_id = 'test-commit-inv4'")
         assert cur.fetchone()[0] == "новые данные"
 
 
@@ -145,7 +136,7 @@ def test_close_investigation_success():
                          turn_id=_turn())
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT status, doctor_brief FROM health.investigations WHERE inv_id = 'test-commit-inv5'")
+        cur.execute(f"SELECT status, doctor_brief FROM {_HEALTH_SCHEMA}.investigations WHERE inv_id = 'test-commit-inv5'")
         assert cur.fetchone() == ("report_ready", "итог")
 
     # лимит освобождён — новое открытие теперь возможно
@@ -153,7 +144,7 @@ def test_close_investigation_success():
                                       payload={"inv_id": "test-commit-inv6", "trigger": "тест2"})],
                          turn_id=_turn())
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT status FROM health.investigations WHERE inv_id = 'test-commit-inv6'")
+        cur.execute(f"SELECT status FROM {_HEALTH_SCHEMA}.investigations WHERE inv_id = 'test-commit-inv6'")
         assert cur.fetchone()[0] == "open"
 
 
@@ -171,7 +162,7 @@ def test_plan_lab_with_interval_computes_next_due():
     assert r["committed"] is True
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('SELECT "Status", "Next_Due" FROM health.lab_plan WHERE "Test" = \'test-commit-glucose\'')
+        cur.execute(f'SELECT "Status", "Next_Due" FROM {_HEALTH_SCHEMA}.lab_plan WHERE "Test" = \'test-commit-glucose\'')
         status, next_due = cur.fetchone()
         assert status == "active"
         assert next_due is not None and len(next_due) == 10  # YYYY-MM-DD
@@ -182,7 +173,7 @@ def test_plan_lab_without_interval_next_due_is_null():
     apply_staged_writes(sw, turn_id=_turn())
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('SELECT "Next_Due" FROM health.lab_plan WHERE "Test" = \'test-commit-onetime\'')
+        cur.execute(f'SELECT "Next_Due" FROM {_HEALTH_SCHEMA}.lab_plan WHERE "Test" = \'test-commit-onetime\'')
         assert cur.fetchone()[0] is None
 
 
@@ -194,7 +185,7 @@ def test_unknown_kind_raises_and_nothing_commits():
                              turn_id=turn_id)
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM health.doctor_notes WHERE category = 'test-commit-x'")
+        cur.execute(f"SELECT count(*) FROM {_HEALTH_SCHEMA}.doctor_notes WHERE category = 'test-commit-x'")
         assert cur.fetchone()[0] == 0  # первый write отменён откатом
 
 
@@ -217,17 +208,17 @@ def test_transactionality_third_write_fails_nothing_persists():
         apply_staged_writes(batch, turn_id=turn_id)
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM health.symptom_log WHERE symptom_id = 'test-commit-tx-sid'")
+        cur.execute(f"SELECT count(*) FROM {_HEALTH_SCHEMA}.symptom_log WHERE symptom_id = 'test-commit-tx-sid'")
         assert cur.fetchone()[0] == 0
-        cur.execute("SELECT count(*) FROM health.doctor_notes WHERE category = 'test-commit-tx-note'")
+        cur.execute(f"SELECT count(*) FROM {_HEALTH_SCHEMA}.doctor_notes WHERE category = 'test-commit-tx-note'")
         assert cur.fetchone()[0] == 0
-        cur.execute("SELECT count(*) FROM health.investigations WHERE inv_id = 'test-commit-tx-inv'")
+        cur.execute(f"SELECT count(*) FROM {_HEALTH_SCHEMA}.investigations WHERE inv_id = 'test-commit-tx-inv'")
         assert cur.fetchone()[0] == 0
         cur.execute("SELECT count(*) FROM card_test.episode WHERE symptom_key = 'test-commit-tx-sid'")
         assert cur.fetchone()[0] == 0
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM health.investigations WHERE inv_id = 'test-commit-blocker'")
+        cur.execute(f"DELETE FROM {_HEALTH_SCHEMA}.investigations WHERE inv_id = 'test-commit-blocker'")
         conn.commit()
 
 
@@ -242,7 +233,7 @@ def test_idempotent_by_turn_id_second_call_is_noop():
     assert r2 == {"committed": False, "reason": "already_committed"}
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM health.doctor_notes WHERE category = 'test-commit-idem'")
+        cur.execute(f"SELECT count(*) FROM {_HEALTH_SCHEMA}.doctor_notes WHERE category = 'test-commit-idem'")
         assert cur.fetchone()[0] == 1  # не задвоилось
 
 

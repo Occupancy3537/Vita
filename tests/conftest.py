@@ -28,6 +28,40 @@ with get_conn() as _conn, _conn.cursor() as _cur:
           "Lab_Min" text, "Lab_Max" text, _synced_at timestamptz NOT NULL DEFAULT now(),
           PRIMARY KEY ("Visit_ID", "Marker_ID"))
     """)
+    # 2026-09-21 (#38/#47, аудит ZCode): двойники для app/doctor/commit.py —
+    # раньше писал буквально в health.symptom_log/doctor_notes/investigations/
+    # lab_plan, из-за чего "известные 5 падений" test_doctor_commit.py на самом
+    # деле были не багом, а конфликтом с настоящей открытой записью Влада в
+    # health.investigations (одновременно только одно открытое расследование —
+    # инвариант отрабатывал правильно, просто на проде, не на тестовых данных).
+    # DDL упрощён относительно прод-схемы (без identity/trigger updated_at) —
+    # ни один тест на эти детали не полагается, тот же принцип, что у visits/results.
+    _cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schema()}.symptom_log (
+          id bigserial PRIMARY KEY, symptom_id text NOT NULL, ts timestamptz NOT NULL,
+          symptom text, system text, severity text, status text, change text,
+          domain text, context text, hypothesis text, notes text,
+          source text NOT NULL DEFAULT 'AI-доктор', created_at timestamptz NOT NULL DEFAULT now())
+    """)
+    _cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schema()}.doctor_notes (
+          id bigserial PRIMARY KEY, note_date date, category text, note text,
+          trigger text, plan text, doctor text, source text NOT NULL DEFAULT 'AI-доктор',
+          created_at timestamptz NOT NULL DEFAULT now())
+    """)
+    _cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schema()}.investigations (
+          inv_id text PRIMARY KEY, opened date, trigger text, trigger_detail text,
+          hypothesis text, status text, findings text, questions_pending text,
+          labs_suggested text, doctor_brief text, referral text, updated date, closed date,
+          created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())
+    """)
+    _cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schema()}.lab_plan (
+          "Plan_ID" text PRIMARY KEY, "Test" text, "Category" text, "Interval_Months" text,
+          "Last_Done" text, "Next_Due" text, "Reason" text, "Status" text, "Source" text,
+          "Notes" text, _synced_at timestamptz NOT NULL DEFAULT now())
+    """)
     _conn.commit()
 
 
@@ -37,6 +71,7 @@ TABLES_TO_CLEAN = [
     "visit", "lab_result", "memory_note", "journal", "entity_index", "metric_coverage",
     "rf_event", "rf_session", "dialog_turn", "agent_step",
     "visits", "results",  # двойники health.* для дуал-райта регистратора
+    "symptom_log", "doctor_notes", "investigations", "lab_plan",  # двойники health.* для commit.py
 ]
 
 

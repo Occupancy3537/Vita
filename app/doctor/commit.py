@@ -21,6 +21,7 @@ health.symptom_log/doctor_notes — append-only лог (как и было у с
 строкам. card.episode/fact — через уже готовые write_path.apply_draft() +
 extraction.Draft, чтобы П4-память видела ту же картину, не отдельную копию.
 """
+import os
 from typing import Optional
 
 from psycopg import sql
@@ -34,6 +35,16 @@ from app.doctor.contract import (
 from app.extraction import Draft
 from app.journal import write_journal
 from app.write_path import apply_draft
+
+# 2026-09-21 (#38/#47, аудит ZCode "тесты пишут в боевую health.*"): тот же
+# переключатель, что уже использует app/registrar.py для health.visits/results —
+# tests/conftest.py задаёт card_test, изолируя тесты commit.py от РЕАЛЬНОЙ
+# медкарты. Найдено этим же фиксом: 5 "известных" падений test_doctor_commit.py
+# держались не из-за бага в коде, а потому что тесты писали Open_Investigation
+# прямо в health.investigations — и там уже 2+ недели лежит настоящая открытая
+# запись Влада (radikulopatiya-l5s1-right-leg), с которой тестовый инвариант
+# "только одно открытое расследование" честно и предсказуемо конфликтовал.
+_HEALTH_SCHEMA = os.environ.get("REGISTRAR_HEALTH_SCHEMA", "health")
 
 
 class CommitError(Exception):
@@ -55,7 +66,7 @@ def already_committed(cur, turn_id: str) -> bool:
 
 def _write_symptom(cur, args: RecordSymptomArgs, turn_id: str) -> None:
     cur.execute(
-        "INSERT INTO health.symptom_log "
+        f"INSERT INTO {_HEALTH_SCHEMA}.symptom_log "
         "(symptom_id, ts, symptom, system, severity, status, change, domain, context, hypothesis, notes) "
         "VALUES (%s, now(), %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (args.symptom_id, args.symptom, args.system, args.severity, args.status,
@@ -71,7 +82,7 @@ def _write_symptom(cur, args: RecordSymptomArgs, turn_id: str) -> None:
 
 def _write_note(cur, args: RecordNoteArgs) -> None:
     cur.execute(
-        "INSERT INTO health.doctor_notes (note_date, category, note, trigger, plan) "
+        f"INSERT INTO {_HEALTH_SCHEMA}.doctor_notes (note_date, category, note, trigger, plan) "
         "VALUES (CURRENT_DATE, %s, %s, %s, %s)",
         (args.category, args.note, args.trigger, args.plan),
     )
@@ -80,11 +91,11 @@ def _write_note(cur, args: RecordNoteArgs) -> None:
 def _has_open_investigation(cur, exclude_inv_id: Optional[str] = None) -> bool:
     if exclude_inv_id:
         cur.execute(
-            "SELECT 1 FROM health.investigations WHERE lower(status) = 'open' AND inv_id != %s LIMIT 1",
+            f"SELECT 1 FROM {_HEALTH_SCHEMA}.investigations WHERE lower(status) = 'open' AND inv_id != %s LIMIT 1",
             (exclude_inv_id,),
         )
     else:
-        cur.execute("SELECT 1 FROM health.investigations WHERE lower(status) = 'open' LIMIT 1")
+        cur.execute(f"SELECT 1 FROM {_HEALTH_SCHEMA}.investigations WHERE lower(status) = 'open' LIMIT 1")
     return cur.fetchone() is not None
 
 
@@ -95,7 +106,7 @@ def _open_investigation(cur, args: OpenInvestigationArgs) -> None:
             "(план §3.6: одновременно только одно)"
         )
     cur.execute(
-        "INSERT INTO health.investigations "
+        f"INSERT INTO {_HEALTH_SCHEMA}.investigations "
         "(inv_id, opened, updated, status, trigger, trigger_detail, hypothesis) "
         "VALUES (%s, CURRENT_DATE, CURRENT_DATE, 'open', %s, %s, %s) "
         "ON CONFLICT (inv_id) DO NOTHING",
@@ -105,7 +116,7 @@ def _open_investigation(cur, args: OpenInvestigationArgs) -> None:
 
 def _update_investigation(cur, args: UpdateInvestigationArgs) -> None:
     cur.execute(
-        "UPDATE health.investigations SET updated = CURRENT_DATE, "
+        f"UPDATE {_HEALTH_SCHEMA}.investigations SET updated = CURRENT_DATE, "
         "hypothesis = COALESCE(%s, hypothesis), findings = COALESCE(%s, findings), "
         "questions_pending = COALESCE(%s, questions_pending), "
         "labs_suggested = COALESCE(%s, labs_suggested) "
@@ -118,7 +129,7 @@ def _update_investigation(cur, args: UpdateInvestigationArgs) -> None:
 
 def _close_investigation(cur, args: CloseInvestigationArgs) -> None:
     cur.execute(
-        "UPDATE health.investigations SET status = 'report_ready', updated = CURRENT_DATE, "
+        f"UPDATE {_HEALTH_SCHEMA}.investigations SET status = 'report_ready', updated = CURRENT_DATE, "
         "closed = CURRENT_DATE, findings = COALESCE(%s, findings), "
         "doctor_brief = COALESCE(%s, doctor_brief), referral = COALESCE(%s, referral) "
         "WHERE inv_id = %s AND lower(status) = 'open'",
@@ -136,7 +147,7 @@ def _plan_lab(cur, args: PlanLabArgs) -> None:
                     (args.interval_months,))
         next_due = cur.fetchone()[0]
     cur.execute(
-        'INSERT INTO health.lab_plan '
+        f'INSERT INTO {_HEALTH_SCHEMA}.lab_plan '
         '("Plan_ID", "Test", "Category", "Interval_Months", "Next_Due", "Reason", "Status", "Source") '
         "VALUES (%s, %s, %s, %s, %s, %s, 'active', 'AI-доктор')",
         (plan_id, args.test, args.category,
