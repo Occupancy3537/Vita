@@ -70,6 +70,7 @@ import httpx
 
 from app.db import get_conn
 from app.doctor import telegram
+from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
@@ -438,8 +439,9 @@ def run_daily_scheduler() -> None:
         try:
             _sleep_until(DAILY_HOUR_VL, DAILY_MINUTE_VL)
             run_daily_check()
-        except Exception:
+        except Exception as e:
             logger.exception("anomaly_detector: run_daily_check упал — повтор завтра")
+            alert_on_failure("anomaly_detector_daily", e)
             time.sleep(3600)
 
 
@@ -449,6 +451,7 @@ def run_weekly_scheduler() -> None:
         try:
             _sleep_until(WEEKLY_HOUR_VL, 0, weekday=6)  # 6 = воскресенье (Python Monday=0)
             run_weekly_digest()
-        except Exception:
+        except Exception as e:
             logger.exception("anomaly_detector: run_weekly_digest упал — повтор через неделю")
+            alert_on_failure("anomaly_detector_weekly", e)
             time.sleep(3600)

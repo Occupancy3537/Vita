@@ -20,6 +20,7 @@ import httpx
 
 from app.dashboard import _js_round
 from app.db import get_conn
+from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,7 @@ def run_scheduler() -> None:
             n = run_once()
             if n:
                 logger.info("diet_tagger: протегировано %s приёмов пищи", n)
-        except Exception:
+        except Exception as e:
             logger.exception("diet_tagger run_once упал — повтор через %ss", INTERVAL_SECONDS)
+            alert_on_failure("diet_tagger", e)
         time.sleep(INTERVAL_SECONDS)

@@ -37,6 +37,7 @@ import httpx
 from app import registrar
 from app.db import get_conn, schema
 from app.doctor import anamnesis, dispatch, intake, telegram
+from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
@@ -197,8 +198,9 @@ def run_polling_loop() -> None:
     while True:
         try:
             updates = get_updates(offset)
-        except Exception:
+        except Exception as e:
             logger.exception("getUpdates failed, retrying in 5s")
+            alert_on_failure("doctor_poller", e)
             time.sleep(5)
             continue
 

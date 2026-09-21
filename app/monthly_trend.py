@@ -31,6 +31,8 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+from app.scheduler_alert import alert_on_failure
+
 logger = logging.getLogger(__name__)
 
 VL = timezone(timedelta(hours=10))
@@ -297,6 +299,7 @@ def run_scheduler() -> None:
         try:
             _sleep_until_first_of_month(MONTHLY_HOUR_VL)
             run_once()
-        except Exception:
+        except Exception as e:
             logger.exception("monthly_trend: run_once упал — повтор через сутки")
+            alert_on_failure("monthly_trend", e)
             time.sleep(3600)

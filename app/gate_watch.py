@@ -17,6 +17,7 @@ import time
 from app.dashboard import get_today_dashboard
 from app.db import get_conn
 from app.doctor import telegram
+from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ def run_scheduler() -> None:
     while True:
         try:
             check_once()
-        except Exception:
+        except Exception as e:
             logger.exception("gate_watch check_once упал — повтор через %ss", INTERVAL_SECONDS)
+            alert_on_failure("gate_watch", e)
         time.sleep(INTERVAL_SECONDS)

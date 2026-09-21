@@ -39,6 +39,7 @@ from app.dashboard import _dkey, _num
 from app.db import get_conn
 from app.doctor import telegram
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
+from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
@@ -1084,6 +1085,7 @@ def run_scheduler() -> None:
         try:
             _sleep_until(WEEKLY_HOUR_VL, 0, weekday=6)  # 6 = воскресенье (Python Monday=0)
             run_once()
-        except Exception:
+        except Exception as e:
             logger.exception("weekly_advisor: run_once упал — повтор через неделю")
+            alert_on_failure("weekly_advisor", e)
             time.sleep(3600)

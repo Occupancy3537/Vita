@@ -37,6 +37,7 @@ import httpx
 from app.dashboard import _num, _rows_as_dicts
 from app.db import get_conn
 from app.doctor import telegram
+from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
@@ -337,8 +338,9 @@ def run_daily_scheduler() -> None:
         try:
             _sleep_until(DAILY_HOUR_VL, DAILY_MINUTE_VL)
             run_daily()
-        except Exception:
+        except Exception as e:
             logger.exception("nutrition_reports run_daily упал — повтор завтра")
+            alert_on_failure("nutrition_reports_daily", e)
             time.sleep(3600)
 
 
@@ -348,6 +350,7 @@ def run_weekly_scheduler() -> None:
         try:
             _sleep_until(WEEKLY_HOUR_VL, 0, weekday=6)  # 6 = воскресенье (Python Monday=0)
             run_weekly()
-        except Exception:
+        except Exception as e:
             logger.exception("nutrition_reports run_weekly упал — повтор через неделю")
+            alert_on_failure("nutrition_reports_weekly", e)
             time.sleep(3600)

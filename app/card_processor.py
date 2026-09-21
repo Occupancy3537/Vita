@@ -15,6 +15,8 @@
 import logging
 import time
 
+from app.scheduler_alert import alert_on_failure
+
 logger = logging.getLogger(__name__)
 
 INTERVAL_SECONDS = 5 * 60
@@ -52,6 +54,7 @@ def run_scheduler() -> None:
     while True:
         try:
             run_once()
-        except Exception:
+        except Exception as e:
             logger.exception("card_processor: run_once упал целиком — повтор через обычный интервал")
+            alert_on_failure("card_processor", e)
         time.sleep(INTERVAL_SECONDS)

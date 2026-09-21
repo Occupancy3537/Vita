@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from app.scheduler_alert import alert_on_failure
+
 logger = logging.getLogger(__name__)
 
 VL = timezone(timedelta(hours=10))
@@ -119,6 +121,7 @@ def run_scheduler() -> None:
         try:
             _sleep_until_next_hour(HOURLY_MINUTE_VL)
             run_once()
-        except Exception:
+        except Exception as e:
             logger.exception("yandex_climate: run_once упал — повтор через час")
+            alert_on_failure("yandex_climate", e)
             time.sleep(3600)

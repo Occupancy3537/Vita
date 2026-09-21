@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from app.db import get_conn
 from app.doctor import telegram
 from app.memory import run_pre_archive_check
+from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ def run_scheduler() -> None:
                 nxt += timedelta(days=1)
             time.sleep(max(1.0, (nxt - now).total_seconds()))
             run_once()
-        except Exception:
+        except Exception as e:
             logger.exception("memory_archive_check run_once упал — повтор завтра")
+            alert_on_failure("memory_archive_check", e)
             time.sleep(3600)

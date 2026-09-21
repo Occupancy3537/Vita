@@ -34,6 +34,7 @@ import httpx
 
 from app import food_diary as fd
 from app.db import get_conn, schema
+from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
@@ -367,8 +368,9 @@ def run_polling_loop() -> None:
     while True:
         try:
             updates = get_updates(offset)
-        except Exception:
+        except Exception as e:
             logger.exception("food_diary_bot: getUpdates упал, повтор через 5с")
+            alert_on_failure("food_diary_bot_poller", e)
             time.sleep(5)
             continue
 
