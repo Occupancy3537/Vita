@@ -49,39 +49,6 @@ def test_check_load_gate_blocked_but_wrong_verdict_is_a_problem():
     assert "не про ходьбу/плавание" in problems[0]
 
 
-def test_check_n8n_active_all_present_is_clean(monkeypatch):
-    def fake_get(url, headers=None, timeout=None):
-        names = system_check.EXPECTED_ACTIVE_N8N
-        return _resp(url, status_code=200, json={"data": [{"name": n, "active": True} for n in names]})
-    monkeypatch.setattr(httpx, "get", fake_get)
-    problems, notes = [], []
-    system_check._check_n8n_active(problems, notes)
-    assert problems == []
-
-
-def test_check_n8n_active_missing_one_is_a_problem(monkeypatch):
-    missing_one = system_check.EXPECTED_ACTIVE_N8N[0]
-
-    def fake_get(url, headers=None, timeout=None):
-        names = [n for n in system_check.EXPECTED_ACTIVE_N8N if n != missing_one]
-        return _resp(url, status_code=200, json={"data": [{"name": n, "active": True} for n in names]})
-    monkeypatch.setattr(httpx, "get", fake_get)
-    problems, notes = [], []
-    system_check._check_n8n_active(problems, notes)
-    assert len(problems) == 1
-    assert missing_one in problems[0]
-
-
-def test_check_n8n_active_request_fails_is_a_note_not_a_problem(monkeypatch):
-    def fake_get(*a, **k):
-        raise httpx.ConnectError("сеть легла")
-    monkeypatch.setattr(httpx, "get", fake_get)
-    problems, notes = [], []
-    system_check._check_n8n_active(problems, notes)
-    assert problems == []
-    assert len(notes) == 1
-
-
 def test_missing_dates_reports_gap():
     cur = MagicMock()
     today = system_check._vl_now().date()
@@ -181,19 +148,30 @@ def test_check_anomaly_freshness_skips_when_daily_trends_empty():
     assert len(notes) == 1
 
 
+def test_check_garmin_ingest_failures_flags_recent_failures():
+    cur = MagicMock()
+    cur.fetchone.return_value = (3, "2026-09-20 04:00:00+00")
+    problems, notes = [], []
+    system_check._check_garmin_ingest_failures(cur, problems, notes)
+    assert len(problems) == 1
+    assert "garmin_ingest_log" in problems[0] and "3 failed" in problems[0]
+
+
+def test_check_garmin_ingest_failures_clean_when_zero():
+    cur = MagicMock()
+    cur.fetchone.return_value = (0, None)
+    problems, notes = [], []
+    system_check._check_garmin_ingest_failures(cur, problems, notes)
+    assert problems == [] and notes == []
+
+
 def test_build_message_all_clean_no_problems(monkeypatch):
     def fake_get(url, headers=None, timeout=None):
-        if "api/v1/workflows" in url:
-            return _resp(url, status_code=200, json={"data": [{"name": n, "active": True} for n in system_check.EXPECTED_ACTIVE_N8N]})
-        if "today-dashboard" in url:
+        if "dashboard/today" in url:
             return _resp(url, status_code=200, json={
                 "updated_at": system_check._vl_now().isoformat(),
                 "decision": {"gate": {"blocked": True}, "verdict": "ходьба и плавание"},
             })
-        # именно виджет-URL начинается с "dashboard" — "today-dashboard"/"bioage-dashboard"
-        # проверены выше, иначе оба тоже совпали бы с "dashboard?token" как подстрокой.
-        if url.startswith(system_check._N8N_BASE + "dashboard?token"):
-            return _resp(url, status_code=200, text="<!doctype html><html></html>")
         return _resp(url, status_code=200, json={"updated_at": system_check._vl_now().isoformat()})
     monkeypatch.setattr(httpx, "get", fake_get)
 
@@ -203,22 +181,21 @@ def test_build_message_all_clean_no_problems(monkeypatch):
 
 
 def test_build_message_surfaces_a_problem(monkeypatch):
+    """2026-09-21 (#38/#42): n8n больше не проверяется (его нет) — проблема
+    здесь генерируется реалистичным сценарием, который остался после чистки
+    (гейт нагрузки открыт, хотя today-dashboard отвечает нормально)."""
     def fake_get(url, headers=None, timeout=None):
-        if "api/v1/workflows" in url:
-            return _resp(url, status_code=200, json={"data": []})  # ничего не активно — верный сигнал проблемы
-        if "today-dashboard" in url:
+        if "dashboard/today" in url:
             return _resp(url, status_code=200, json={
                 "updated_at": system_check._vl_now().isoformat(),
-                "decision": {"gate": {"blocked": True}, "verdict": "ходьба и плавание"},
+                "decision": {"gate": {"blocked": False}, "verdict": "бег"},
             })
-        if url.startswith(system_check._N8N_BASE + "dashboard?token"):
-            return _resp(url, status_code=200, text="<!doctype html><html></html>")
         return _resp(url, status_code=200, json={"updated_at": system_check._vl_now().isoformat()})
     monkeypatch.setattr(httpx, "get", fake_get)
 
     msg = system_check.build_message()
     assert msg["has_problems"] is True
-    assert "НЕ АКТИВНЫ" in msg["message"]
+    assert "ГЕЙТ НАГРУЗКИ ОТКРЫТ" in msg["message"]
 
 
 def test_run_once_sends_telegram_message(monkeypatch):

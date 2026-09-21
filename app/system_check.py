@@ -46,22 +46,27 @@ VL = timezone(timedelta(hours=10))
 CHECK_HOUR_VL = 8
 CHECK_MINUTE_VL = 43
 
-_N8N_BASE = "http://n8n:443/webhook/"
-_N8N_API = "http://n8n:443/api/v1/"
-_N8N_API_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiNGE3MWNhZi03ZjVkLTQ1YjEtODE4MC03MTU4YTZkODA2OTciLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZGYwOTYwODUtNzM5Zi00NWI1LWFmNWQtZGI5YjIxMzgwM2U0IiwiaWF0IjoxNzg3NjE5Mzg0LCJleHAiOjE4MTkxMTYwMDB9.EB9Nla8jN5J7ZfXITC3okLsLlUQM5o9-uY7ZgTayHwk"
-)
-
-# (label, url, max_age_hours) — полный URL, не только path: экраны переезжают на
-# card-service по одному (bioage — 2026-09-19, #22), у каждого свой адрес после
-# переезда (localhost, а не путь у n8n) — 1:1 с n8n-версией только для тех, что
-# ещё не перенесены. (health-dashboard уже убран из проверки, 2026-09-16 —
-# экран «Здоровье» из card-service, у него отдельный вечноживой /dashboard/health
-# внутри самого card-service, тут отдельно не проверяем.)
+# 2026-09-21 (AGENT_SYNC #38/#42, независимый аудит ZCode): n8n больше не
+# существует вообще (Влад: «n8n вообще не нужен», контейнер удалён). Раньше
+# здесь были _check_dashboard_widget() (бил в n8n-вебхук /webhook/dashboard —
+# 502 каждое утро, ложное "⚠️ проблемы" на компонент, которого больше нет) и
+# _check_n8n_active() (n8n REST API + захардкоженный JWT-ключ n8n) — обе
+# функции и константы удалены целиком вместе с проверяемым объектом, не
+# заменены другими: сам n8n больше не часть системы, проверять нечего.
+#
+# (label, url) — полный URL: экраны переезжают на card-service по одному
+# (bioage — 2026-09-19, #22), у каждого свой адрес (localhost, не путь у
+# n8n). Раньше третьим элементом был max_age_hours — эти три эндпоинта
+# теперь считают ответ ЗАНОВО на каждый вызов (не кэш) и сами ставят
+# updated_at=now() в момент ответа, поэтому проверка "возраст < N часов"
+# структурно не может провалиться — убрана (была источником ложного "кэши
+# свежие" в тексте "всё ок", хотя проверялось только "эндпоинт вообще
+# ответил"). Реальная свежесть ДАННЫХ (не кэша) проверяется отдельно —
+# _check_gaps()/_check_anomaly_freshness() смотрят в сами таблицы Postgres.
 WEBHOOK_CHECKS = [
-    ("today-dashboard", "http://127.0.0.1:8080/dashboard/today?token=QpcRi1JgTF75uzOf4WrV", 4),
-    ("bioage-dashboard", "http://127.0.0.1:8080/dashboard/bioage?token=QpcRi1JgTF75uzOf4WrV", 27),
-    ("weekly-nutrients", "http://127.0.0.1:8080/dashboard/weekly-nutrition?token=QpcRi1JgTF75uzOf4WrV", 30),
+    ("today-dashboard", "http://127.0.0.1:8080/dashboard/today?token=QpcRi1JgTF75uzOf4WrV"),
+    ("bioage-dashboard", "http://127.0.0.1:8080/dashboard/bioage?token=QpcRi1JgTF75uzOf4WrV"),
+    ("weekly-nutrients", "http://127.0.0.1:8080/dashboard/weekly-nutrition?token=QpcRi1JgTF75uzOf4WrV"),
 ]
 # "recipes" убран отсюда 2026-09-20 (по прямому запросу Влада — "тратит токены
 # впустую"): воркфлоу «Вычисление дефицитов для рекомендации рецептов» ни разу
@@ -75,30 +80,10 @@ WEBHOOK_CHECKS = [
 # вызов заставил n8n пересобрать реестр вебхуков и снять его по-настоящему
 # (проверено: старый /webhook/recipes теперь 404).
 
-# Критичные воркфлоу — обновлено под текущую архитектуру (2026-09-20, #24/#25/#33):
-# убраны сознательно неактивные (Capitan/relay, старые Sub-Agent'ы, Anamnesis
-# Collector, health-dashboard cache, bioage-dashboard cache — на card-service
-# с #22, today-dashboard cache — на card-service с #24, Dashboard Cached
-# (today-nutrition) — на card-service с #25, Diet Quality Tagger — на card-service
-# с #30, Health Watchdog — на card-service с #31, Reports — на card-service с
-# #32, Weekly AI Advisor — на card-service с #33, закрывает группу 2 целиком) —
-# держать их в списке значило бы получать ложную тревогу каждое утро за то,
-# что уже и так правильно выключено.
-# НАХОДКА (2026-09-20, #33): "_System Check" сам оставался в этом списке с
-# момента своего же переноса в #21 — сам себя не вычеркнул при отключении в
-# n8n, то есть эта проверка ежедневно молча слала бы "🔴 НЕ АКТИВНЫ: _System
-# Check" с 19.09 (не проверял историю отправленных сообщений — увидел только
-# сейчас, сверяя список активных воркфлоу перед отключением Advisor). Убрано.
-# 2026-09-20 (#34): Anomaly_Detector/Correlations — на card-service вместе с
-# Collect_Biohacking_Data (app/anomaly_detector.py, app/biohacking_ingest.py),
-# группа 3 (1/2). Урок из "_System Check" учтён — убираю из списка сразу, тем
-# же коммитом, что и деактивацию, а не отдельным заходом позже.
-EXPECTED_ACTIVE_N8N = [
-    "_Error Handler",
-]
-# PhenoAge Calc — на card-service с 2026-09-21 (app/phenoage_calc.py, часть
-# "можно ли убрать n8n" — учли урок #33/#36, убрано этим же коммитом.
-# _Backup Alert — на card-service с 2026-09-20 (app/backup_alert.py, группа малых утилит).
+# EXPECTED_ACTIVE_N8N / _check_n8n_active() — удалены 2026-09-21 (#38/#42):
+# n8n больше не существует, проверять активные воркфлоу не у чего. История
+# этого списка (постепенное опустошение по мере переноса каждого воркфлоу
+# на card-service, #21-#37) — в git log этого файла и AGENT_SYNC.md.
 
 
 def _d10(v) -> str:
@@ -113,9 +98,17 @@ def _vl_now() -> datetime:
 
 def _check_webhooks(problems: list, notes: list) -> dict:
     """Возвращает ответ today-dashboard (нужен ниже для проверки гейта) —
-    та же экономия одного лишнего запроса, что была в оригинале."""
+    та же экономия одного лишнего запроса, что была в оригинале.
+
+    2026-09-21 (#38/#42): проверка возраста updated_at/computed_at УБРАНА —
+    эти три эндпоинта считают ответ заново на каждый вызов (не кэш) и сами
+    ставят метку времени в момент ответа, поэтому "возраст < порога"
+    структурно не мог провалиться никогда — ложная гарантия "кэши свежие"
+    в тексте отчёта. Реальная проверка (эндпоинт вообще отвечает, без
+    ошибки в теле) осталась; свежесть самих ДАННЫХ смотрят _check_gaps()/
+    _check_anomaly_freshness() напрямую в Postgres."""
     today_cache = None
-    for path, url, max_h in WEBHOOK_CHECKS:
+    for path, url in WEBHOOK_CHECKS:
         try:
             r = httpx.get(url, timeout=20.0)
             r.raise_for_status()
@@ -127,28 +120,7 @@ def _check_webhooks(problems: list, notes: list) -> dict:
             today_cache = res
         if isinstance(res, dict) and res.get("error"):
             problems.append(f"{path}: error={res['error']}")
-            continue
-        ua = res.get("updated_at") or res.get("computed_at") if isinstance(res, dict) else None
-        if ua and isinstance(ua, str) and len(ua) >= 11 and ua[10] == "T":
-            try:
-                age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(ua.replace("Z", "+00:00"))).total_seconds() / 3600
-                if age_h > max_h:
-                    problems.append(f"{path}: кэш устарел на {round(age_h)}ч (порог {max_h}ч)")
-            except ValueError:
-                problems.append(f"{path}: не смог разобрать метку времени {ua!r}")
-        else:
-            problems.append(f"{path}: ответ без метки времени (updated_at/computed_at)")
     return today_cache or {}
-
-
-def _check_dashboard_widget(problems: list) -> None:
-    try:
-        r = httpx.get(_N8N_BASE + "dashboard?token=wFSIRB6DO4l6ZrUSlJR5", timeout=20.0)
-        r.raise_for_status()
-        if "<!doctype" not in r.text.lower() and "<html" not in r.text.lower():
-            problems.append("dashboard (виджет): не отдаёт HTML")
-    except Exception as e:
-        problems.append(f"dashboard (виджет): не отвечает ({str(e)[:60]})")
 
 
 def _missing_dates(cur, table: str, date_col: str, days_back: int, notes: list, label: str) -> set:
@@ -283,7 +255,7 @@ def _check_load_gate(today_cache: dict, problems: list, notes: list) -> None:
     if gate.get("blocked") is not True:
         problems.append(
             f"🔴 ГЕЙТ НАГРУЗКИ ОТКРЫТ (blocked={gate.get('blocked')}, source={gate.get('source', '?')}). "
-            "При активной грыже L5/S1 это регрессия loadGate — проверь today_build.js / bc."
+            "При активной грыже L5/S1 это регрессия loadGate — проверь app/patient_gate.py::load_gate()."
         )
     else:
         verdict = str((today_cache.get("decision") or {}).get("verdict") or "")
@@ -291,17 +263,20 @@ def _check_load_gate(today_cache: dict, problems: list, notes: list) -> None:
             problems.append(f"гейт blocked, но verdict «{verdict}» не про ходьбу/плавание — проверь")
 
 
-def _check_n8n_active(problems: list, notes: list) -> None:
-    try:
-        r = httpx.get(_N8N_API + "workflows?limit=250", headers={"X-N8N-API-KEY": _N8N_API_KEY}, timeout=20.0)
-        r.raise_for_status()
-        data = r.json()
-        active_names = {w["name"] for w in data.get("data", []) if w.get("active")}
-        missing = [n for n in EXPECTED_ACTIVE_N8N if n not in active_names]
-        if missing:
-            problems.append("🔴 НЕ АКТИВНЫ критичные воркфлоу: " + ", ".join(missing))
-    except Exception as e:
-        notes.append(f"проверка active-воркфлоу не удалась ({str(e)[:50]}) — n8n API?")
+def _check_garmin_ingest_failures(cur, problems: list, notes: list) -> None:
+    """Аудит (ZCode, AGENT_SYNC #38): health.garmin_ingest_log (стейджинг сырого
+    Garmin-payload'а, премортем #7, app/biohacking_ingest.py) писал строки со
+    status='failed' при сбое разбора, но ничто не читало эту колонку — сбой
+    разбора мог копиться неделями незамеченным. Смотрим последние 3 дня."""
+    since = (_vl_now() - timedelta(days=3)).date().isoformat()
+    cur.execute(
+        "SELECT count(*), max(received_at) FROM health.garmin_ingest_log "
+        "WHERE status = 'failed' AND received_at >= %s", (since,),
+    )
+    row = cur.fetchone()
+    cnt = row[0] if row else 0
+    if cnt:
+        problems.append(f"health.garmin_ingest_log: {cnt} failed за последние 3 дня (последний {row[1]}) — разбор Garmin-payload'а падает")
 
 
 def build_message() -> dict:
@@ -312,14 +287,13 @@ def build_message() -> dict:
     ]
 
     today_cache = _check_webhooks(problems, notes)
-    _check_dashboard_widget(problems)
     with get_conn() as conn, conn.cursor() as cur:
         _check_gaps(cur, problems, notes)
         _check_pg_status(cur, problems)
         _check_numeric_garbage(cur, problems, notes)
         _check_anomaly_freshness(cur, problems, notes)
+        _check_garmin_ingest_failures(cur, problems, notes)
     _check_load_gate(today_cache, problems, notes)
-    _check_n8n_active(problems, notes)
 
     ts = _vl_now().strftime("%Y-%m-%d %H:%M")
     if problems:
@@ -330,9 +304,9 @@ def build_message() -> dict:
         msg = f"✅ Система в норме ({ts} ВЛ), но: " + "; ".join(notes) + "."
     else:
         msg = (
-            f"✅ Система в норме ({ts} ВЛ). Вебхуки живы, кэши свежие, Daily_Trends/day_sum/Meals "
-            "без дыр за 5 дней, числа в питании парсятся, anomaly_log свежий, гейт blocked (грыжа), "
-            "критичные воркфлоу active."
+            f"✅ Система в норме ({ts} ВЛ). Дашборд-эндпоинты отвечают без ошибок, "
+            "Daily_Trends/day_sum/Meals без дыр за 5 дней, числа в питании парсятся, "
+            "anomaly_log свежий, Garmin-ingest без сбоев за 3 дня, гейт blocked (грыжа)."
         )
     return {"message": msg, "has_problems": bool(problems), "problems": problems, "notes": notes}
 
