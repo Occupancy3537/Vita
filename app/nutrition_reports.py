@@ -36,7 +36,7 @@ import httpx
 
 from app.dashboard import _num, _rows_as_dicts
 from app.db import get_conn
-from app.doctor import telegram
+from app import nutrition_telegram as telegram  # 2026-09-21: отчёты о питании -> @vvk_gemini_bot, не бот доктора (см. app/nutrition_telegram.py)
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)

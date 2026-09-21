@@ -37,7 +37,7 @@ import httpx
 
 from app.dashboard import _dkey, _num
 from app.db import get_conn
-from app.doctor import telegram
+from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
 from app.scheduler_alert import alert_on_failure
 

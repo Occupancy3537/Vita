@@ -16,7 +16,11 @@ import time
 
 from app.dashboard import get_today_dashboard
 from app.db import get_conn
-from app.doctor import telegram
+# 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py).
+# У gate_watch нет n8n-предшественника (добавлен премортемом 2026-09-20,
+# см. модульный докстринг) — прямых исторических данных о боте нет, отнесён
+# к алертам по аналогии с остальными системными проверками.
+from app import hermes_telegram as telegram
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)

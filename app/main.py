@@ -52,7 +52,7 @@ from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
 from app.doctor import anamnesis as doctor_anamnesis
 from app.doctor import poller as doctor_poller
-from app.doctor import telegram as doctor_telegram
+from app import hermes_telegram
 from app.doctor.intake import handle_update
 from app.journal import write_journal
 from app.memory import get_context, get_object, index_entity, run_pre_archive_check
@@ -318,7 +318,7 @@ def backup_status_endpoint(req: BackupStatusRequest) -> dict:
     """Порт n8n `_Backup Alert` (webhook-часть) — пинг от nightly_backup.sh."""
     alert = backup_alert.handle_ping(req.token, req.result, req.detail, req.ts)
     if alert:
-        doctor_telegram.send_message(backup_alert.CHAT_ID, alert, parse_mode="HTML")
+        hermes_telegram.send_message(backup_alert.CHAT_ID, alert, parse_mode="HTML")
     return {"ok": True}
 
 

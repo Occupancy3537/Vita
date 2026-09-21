@@ -241,7 +241,7 @@ def build_telegram_text(period_month: str, trends: list[dict]) -> str:
 
 def run_once() -> None:
     from app.db import get_conn
-    from app.doctor import telegram
+    from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes (см. app/hermes_telegram.py)
 
     windows = define_month_windows()
 

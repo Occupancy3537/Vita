@@ -86,7 +86,7 @@ def check_and_notify(cur, wf: str, node: str, telegram_text: str, silent: bool =
 def run_notify(cur, wf: str, node: str, telegram_text: str, silent: bool, token: str) -> dict:
     result = check_and_notify(cur, wf, node, telegram_text, silent, token)
     if result["send"]:
-        from app.doctor import telegram
+        from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes (см. app/hermes_telegram.py)
         try:
             telegram.send_message(CHAT_ID, result["text"], parse_mode="HTML")
         except Exception:

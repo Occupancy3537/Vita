@@ -10,6 +10,13 @@
 # остальные секреты в этом списке — задать в шелле ДО запуска этого скрипта).
 # + ERR_DEDUP_TOKEN — /err-dedup, значение то же, что уже читают три ночных
 # cron-скрипта из backups/infra/.google_oauth.env (google_oauth_creds.js)
+# 2026-09-21 (по прямому запросу Влада): + HERMES_BOT_TOKEN (@Hermes_AI_vvk_bot) —
+# системные алерты (backup_alert/system_check/err_dedup/anomaly_detector/
+# memory_archive_check/monthly_trend/weekly_advisor/gate_watch) шли через
+# TELEGRAM_BOT_TOKEN (бот доктора) — регрессия миграции с n8n, где эти же
+# воркфлоу слали через отдельный credential "Hermes Agent" (см. app/hermes_telegram.py).
+# + NUTRITION_BOT_TOKEN (@vvk_gemini_bot) — отчёты о питании (app/nutrition_reports.py,
+# дневной+недельный), в n8n шли через credential "Отчет по питанию" (см. app/nutrition_telegram.py)
 # Волна 2 (B1): ANAMNESIS_SCHEDULER_ENABLED — анамнез-планировщик (ежедневно 11:00 VL)
 # Волна 3 (B2): REGISTRAR_MODEL / REGISTRAR_PDF_MODEL — vision-модели регистратора
 # лаб-документов (app/registrar.py; PDF идёт отдельной моделью — glm-5.3-flash не
@@ -89,6 +96,8 @@ cd "$(dirname "$0")"
 : "${DASHBOARD_TOKEN:?не задан — все /dashboard/* эндпоинты уйдут в fail-closed 403}"
 : "${WIDGET_TOKEN:?не задан — /widget/nutrition-diary уйдёт в fail-closed 403}"
 : "${ERR_DEDUP_TOKEN:?не задан — три ночных cron-скрипта не смогут слать алерты через /err-dedup}"
+: "${HERMES_BOT_TOKEN:?не задан — системные алерты не смогут уйти в @Hermes_AI_vvk_bot}"
+: "${NUTRITION_BOT_TOKEN:?не задан — отчёты о питании не смогут уйти в @vvk_gemini_bot}"
 
 sudo docker build -t card-service:latest .
 
@@ -135,6 +144,8 @@ sudo docker run -d \
   -e DASHBOARD_TOKEN="$DASHBOARD_TOKEN" \
   -e WIDGET_TOKEN="$WIDGET_TOKEN" \
   -e ERR_DEDUP_TOKEN="$ERR_DEDUP_TOKEN" \
+  -e HERMES_BOT_TOKEN="$HERMES_BOT_TOKEN" \
+  -e NUTRITION_BOT_TOKEN="$NUTRITION_BOT_TOKEN" \
   card-service:latest
 
 echo "card-service started. Проверка: curl http://127.0.0.1:8080/health"
