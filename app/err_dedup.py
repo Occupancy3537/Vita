@@ -16,13 +16,18 @@ card.err_dedup_state (та же природа состояния, что и tel
 пределах 60 минут; если сбои продолжаются пачкой и прошло >=55 минут —
 шлём отдельное «серия ошибок продолжается» вместо тишины."""
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 CHAT_ID = "8956401"
-EXPECTED_TOKEN = "8beNA4tqEdqhpjtUqCUM"
+# 2026-09-21 (#38/#45, аудит "секреты в коде"): значение вынесено в env
+# (ERR_DEDUP_TOKEN, run.sh) — те же три ночных cron-скрипта читают ТО ЖЕ
+# значение из backups/infra/.google_oauth.env (google_oauth_creds.js::
+# loadErrDedupToken()), больше не хардкожено ни здесь, ни там.
+EXPECTED_TOKEN = os.environ.get("ERR_DEDUP_TOKEN", "")
 SUPPRESS_MINUTES = 60
 NUDGE_AFTER_MINUTES = 55
 
@@ -44,7 +49,9 @@ def check_and_notify(cur, wf: str, node: str, telegram_text: str, silent: bool =
     (все три ночных cron-скрипта), разница не проявляется — но burst-логика
     рассчитана на частые повторные вызовы (retry/несколько ошибок подряд от
     одного воркфлоу), портирую как есть."""
-    if token != EXPECTED_TOKEN:
+    # fail-closed (тот же принцип, что DASHBOARD_TOKEN/WIDGET_TOKEN в main.py):
+    # пустой EXPECTED_TOKEN (ERR_DEDUP_TOKEN не задан) — тоже отказ, а не "токен не нужен".
+    if not EXPECTED_TOKEN or token != EXPECTED_TOKEN:
         return {"send": False, "text": "", "silent": True, "burst": 0}
 
     key = f"{wf}|{node}"

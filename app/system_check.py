@@ -30,6 +30,7 @@
   версии эта проверка была нужна ровно потому, что Sheets такого не гарантирует.
 """
 import logging
+import os
 import time
 from datetime import date, datetime, timedelta, timezone
 
@@ -54,7 +55,7 @@ CHECK_MINUTE_VL = 43
 # функции и константы удалены целиком вместе с проверяемым объектом, не
 # заменены другими: сам n8n больше не часть системы, проверять нечего.
 #
-# (label, url) — полный URL: экраны переезжают на card-service по одному
+# (label, path) — path без токена: экраны переезжают на card-service по одному
 # (bioage — 2026-09-19, #22), у каждого свой адрес (localhost, не путь у
 # n8n). Раньше третьим элементом был max_age_hours — эти три эндпоинта
 # теперь считают ответ ЗАНОВО на каждый вызов (не кэш) и сами ставят
@@ -63,10 +64,13 @@ CHECK_MINUTE_VL = 43
 # свежие" в тексте "всё ок", хотя проверялось только "эндпоинт вообще
 # ответил"). Реальная свежесть ДАННЫХ (не кэша) проверяется отдельно —
 # _check_gaps()/_check_anomaly_freshness() смотрят в сами таблицы Postgres.
+# 2026-09-21 (#38/#45, аудит "секреты в коде"): токен раньше был хардкожен
+# ЛИТЕРАЛОМ в каждом из трёх URL — теперь читается один раз из DASHBOARD_TOKEN
+# (тот же env, что уже проверяет сам /dashboard/*) и подставляется в _check_webhooks().
 WEBHOOK_CHECKS = [
-    ("today-dashboard", "http://127.0.0.1:8080/dashboard/today?token=QpcRi1JgTF75uzOf4WrV"),
-    ("bioage-dashboard", "http://127.0.0.1:8080/dashboard/bioage?token=QpcRi1JgTF75uzOf4WrV"),
-    ("weekly-nutrients", "http://127.0.0.1:8080/dashboard/weekly-nutrition?token=QpcRi1JgTF75uzOf4WrV"),
+    ("today-dashboard", "http://127.0.0.1:8080/dashboard/today"),
+    ("bioage-dashboard", "http://127.0.0.1:8080/dashboard/bioage"),
+    ("weekly-nutrients", "http://127.0.0.1:8080/dashboard/weekly-nutrition"),
 ]
 # "recipes" убран отсюда 2026-09-20 (по прямому запросу Влада — "тратит токены
 # впустую"): воркфлоу «Вычисление дефицитов для рекомендации рецептов» ни разу
@@ -108,7 +112,9 @@ def _check_webhooks(problems: list, notes: list) -> dict:
     ошибки в теле) осталась; свежесть самих ДАННЫХ смотрят _check_gaps()/
     _check_anomaly_freshness() напрямую в Postgres."""
     today_cache = None
-    for path, url in WEBHOOK_CHECKS:
+    dashboard_token = os.environ.get("DASHBOARD_TOKEN", "")
+    for path, base_url in WEBHOOK_CHECKS:
+        url = f"{base_url}?token={dashboard_token}"
         try:
             r = httpx.get(url, timeout=20.0)
             r.raise_for_status()

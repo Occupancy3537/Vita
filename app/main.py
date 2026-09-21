@@ -288,7 +288,12 @@ def action_ack_endpoint(req: ActionAckRequest) -> dict:
     return small_webhooks.action_ack(req.token, req.id, req.done)
 
 
-_WIDGET_TOKEN = "wFSIRB6DO4l6ZrUSlJR5"  # тот же токен, что был у n8n-воркфлоу "Страница наружу - Виджет"
+# 2026-09-21 (#38/#45, аудит ZCode "секреты в коде"): значение вынесено в env
+# (WIDGET_TOKEN, run.sh) — та же логика fail-closed, что у DASHBOARD_TOKEN
+# выше: пустой env -> всегда 403, а не "токен не нужен". Дефолт в run.sh
+# сохраняет тот же токен, что был у n8n-воркфлоу "Страница наружу - Виджет" —
+# поведение не меняется, меняется только откуда значение читается.
+_WIDGET_TOKEN = os.environ.get("WIDGET_TOKEN", "")
 
 
 @app.get("/widget/nutrition-diary", response_class=HTMLResponse)
@@ -296,7 +301,7 @@ def nutrition_diary_widget(token: str = Query(default="")) -> str:
     """Порт n8n «Страница наружу - Виджет» — статическая HTML-страница
     (клиентский JS сам зовёт /dashboard/today-nutrition). См. комментарий в
     app/small_webhooks.py про починенную ссылку на старый n8n-эндпоинт."""
-    if token != _WIDGET_TOKEN:
+    if not _WIDGET_TOKEN or token != _WIDGET_TOKEN:
         raise HTTPException(status_code=403, detail="forbidden")
     return small_webhooks.get_nutrition_widget_html()
 

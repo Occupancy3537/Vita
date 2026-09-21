@@ -5,6 +5,11 @@
 # (CAPITAN_RELAY_URL убран 2026-09-21, #38/#43 — "other" теперь идёт в /ingest
 # в процессе, не на внешний релей, см. app/doctor/poller.py::ingest_test_message)
 # Хотфикс 17.09 (ZCode): + DASHBOARD_TOKEN — без него /dashboard/* отдаёт 403 fail-closed
+# 2026-09-21 (#38/#45): + WIDGET_TOKEN — /widget/nutrition-diary, тот же fail-closed
+# паттерн (значение раньше жило в коде main.py, теперь только в окружении, как и
+# остальные секреты в этом списке — задать в шелле ДО запуска этого скрипта).
+# + ERR_DEDUP_TOKEN — /err-dedup, значение то же, что уже читают три ночных
+# cron-скрипта из backups/infra/.google_oauth.env (google_oauth_creds.js)
 # Волна 2 (B1): ANAMNESIS_SCHEDULER_ENABLED — анамнез-планировщик (ежедневно 11:00 VL)
 # Волна 3 (B2): REGISTRAR_MODEL / REGISTRAR_PDF_MODEL — vision-модели регистратора
 # лаб-документов (app/registrar.py; PDF идёт отдельной моделью — glm-5.3-flash не
@@ -107,6 +112,8 @@ sudo docker run -d \
   -e REGISTRAR_PDF_MODEL="${REGISTRAR_PDF_MODEL:-google/gemini-3.1-flash-lite}" \
   -e REGISTRAR_HEALTH_SCHEMA="${REGISTRAR_HEALTH_SCHEMA:-health}" \
   -e DASHBOARD_TOKEN="$DASHBOARD_TOKEN" \
+  -e WIDGET_TOKEN="$WIDGET_TOKEN" \
+  -e ERR_DEDUP_TOKEN="$ERR_DEDUP_TOKEN" \
   card-service:latest
 
 echo "card-service started. Проверка: curl http://127.0.0.1:8080/health"
