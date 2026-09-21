@@ -99,6 +99,35 @@ def test_build_upsert_sql_no_set_clause_crash_when_only_date():
     assert "SET _synced_at=now()" in query
 
 
+def test_build_upsert_sql_escapes_percent_in_column_name():
+    """Реальный инцидент 2026-09-21: "Влажность_avg_%" — единственная колонка
+    в KNOWN_COLS с буквальным % в имени — ломала psycopg (client-side %s-
+    биндинг сканирует ВЕСЬ текст запроса на %s/%b/%t, включая внутри кавычек:
+    'only %s, %b, %t are allowed, got %"'). Заблокировала весь ночной сбор
+    Garmin на день, пока не нашли. Запрос должен содержать %% (экранированный
+    %), не голый %."""
+    row = {"Дата": "2026-09-21", "Влажность_avg_%": 55}
+    query, params = bi.build_upsert_sql(row)
+    assert '"Влажность_avg_%%"' in query  # экранировано для psycopg
+    assert '"Влажность_avg_%"' not in query  # не голый % — именно он и падал
+    assert "55" in params
+
+
+def test_build_upsert_sql_percent_column_actually_executes_in_postgres():
+    """То же самое, но не текстовая проверка — реальный psycopg.execute()
+    против настоящей health.daily_trends (query жёстко на неё ссылается,
+    схема не параметризована). Юнит-тест выше ловит форму строки, но не сам
+    факт, что psycopg согласится её выполнить — а именно это упало в проде.
+    psycopg-соединение не в autocommit (умолчание psycopg3) — conn.rollback()
+    откатывает INSERT до конца теста, боевая строка "Дата"=2026-09-21 не
+    остаётся."""
+    row = {"Дата": "2026-09-21", "Влажность_avg_%": "55"}
+    query, params = bi.build_upsert_sql(row)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(query, params)  # не должно бросить psycopg.ProgrammingError
+        conn.rollback()
+
+
 # --- build_daily_trends_row --------------------------------------------------
 
 def _base_garmin(**overrides) -> dict:

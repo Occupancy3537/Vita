@@ -502,6 +502,15 @@ def build_upsert_sql(row: dict) -> tuple[str, list]:
     placeholders = ", ".join("%s::date" if k == "Дата" else "%s" for k in keys)
     set_sql = ", ".join(f"{qi(k)}=EXCLUDED.{qi(k)}" for k in keys if k != "Дата")
     set_sql = (set_sql + ", " if set_sql else "") + "_synced_at=now()"
+    # 2026-09-21 (инцидент, найдено при восстановлении данных за 21.09): один
+    # из KNOWN_COLS — "Влажность_avg_%" — содержит буквальный %. psycopg в
+    # client-side %s-биндинге сканирует ВЕСЬ текст запроса на предмет %s/%b/%t,
+    # не глядя, внутри ли он кавычек — литеральный % в имени колонки (даже
+    # корректно экранированной через "") ломает разбор ("got '%\"'"). Экранируем
+    # % -> %% ТОЛЬКО в собранных из идентификаторов кусках (cols_sql/set_sql) —
+    # сам placeholders собран из фиксированных %s-токенов, трогать не нужно.
+    cols_sql = cols_sql.replace("%", "%%")
+    set_sql = set_sql.replace("%", "%%")
     query = f'INSERT INTO health.daily_trends ({cols_sql}) VALUES ({placeholders}) ON CONFLICT ("Дата") DO UPDATE SET {set_sql}'
     # Все колонки, кроме "Дата", в health.daily_trends — TEXT (наследие Sheets;
     # см. \d health.daily_trends), и оригинальный JS ("Build DT PG") тоже
