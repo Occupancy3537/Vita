@@ -66,8 +66,29 @@
 # чувствительные данные, чем ячейки таблицы). RESCUETIME_API_KEY раньше
 # лежал открытым текстом в параметрах n8n-ноды — вынесен в переменную
 # окружения (гигиена, не поведенческое отличие).
-set -e
+# 2026-09-21 (#38/#46, аудит ZCode): set -e без -u пропускал незаданную
+# переменную молча — `-e CARD_PG_PASSWORD=""` собирает контейнер, /health
+# отдаёт 200, а сбой (пустой пароль БД, пустой токен бота и т.п.) всплывает
+# только там, где переменная реально используется — часто не сразу и не
+# очевидно откуда. `${VAR:?...}` ниже ловит и незаданную, и пустую (не
+# только незаданную, как дал бы один set -u) — до сборки образа, с понятным
+# сообщением какая именно переменная пуста.
+set -euo pipefail
 cd "$(dirname "$0")"
+
+: "${CARD_PG_PASSWORD:?не задан — пароль card_service в Postgres}"
+: "${OPENROUTER_API_KEY:?не задан — без него доктор/советник/регистратор молча не отвечают}"
+: "${TELEGRAM_BOT_TOKEN:?не задан — бот доктора не сможет поллить Telegram}"
+: "${FOOD_DIARY_BOT_TOKEN:?не задан — бот дневника питания не сможет поллить Telegram}"
+: "${YANDEX_IOT_TOKEN:?не задан — сбор климата (Get Yandex Climate_2) не сможет авторизоваться}"
+: "${CARD_GOOGLE_CLIENT_ID:?не задан — общий OAuth-клиент Sheets/Calendar}"
+: "${CARD_GOOGLE_CLIENT_SECRET:?не задан — общий OAuth-клиент Sheets/Calendar}"
+: "${CARD_GOOGLE_SHEETS_REFRESH_TOKEN:?не задан — Sheets-дубль Meals/Daily_Trends/дневного климата отвалится молча}"
+: "${CARD_GOOGLE_CALENDAR_REFRESH_TOKEN:?не задан — Meds from Calendar не сможет читать календарь}"
+: "${RESCUETIME_API_KEY:?не задан — Anomaly_Detector/Collect_Biohacking_Data потеряют этот источник}"
+: "${DASHBOARD_TOKEN:?не задан — все /dashboard/* эндпоинты уйдут в fail-closed 403}"
+: "${WIDGET_TOKEN:?не задан — /widget/nutrition-diary уйдёт в fail-closed 403}"
+: "${ERR_DEDUP_TOKEN:?не задан — три ночных cron-скрипта не смогут слать алерты через /err-dedup}"
 
 sudo docker build -t card-service:latest .
 
