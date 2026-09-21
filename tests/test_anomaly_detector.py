@@ -192,6 +192,26 @@ def test_build_weekly_digest_excludes_days_outside_window():
     assert d["total_anomalies"] == 0  # 01.08 вне 7-дневного окна до 06.09
 
 
+# --- mark_daily_check_ran -----------------------------------------------------
+
+def test_mark_daily_check_ran_writes_state():
+    """2026-09-22: отдельная отметка о прогоне (не health.anomaly_log — та
+    пишется только при находках) — без неё ложный алерт system_check.py
+    после любой 'чистой' серии дней (см. докстринг mark_daily_check_ran)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        ad.mark_daily_check_ran(cur, "2020-01-15")
+        conn.commit()
+        cur.execute("SELECT last_day_checked FROM card.anomaly_detector_state WHERE id = 1")
+        assert str(cur.fetchone()[0]) == "2020-01-15"
+
+        ad.mark_daily_check_ran(cur, "2020-01-16")  # upsert, не вторая строка
+        conn.commit()
+        cur.execute("SELECT count(*), max(last_day_checked) FROM card.anomaly_detector_state")
+        count, last = cur.fetchone()
+        assert count == 1
+        assert str(last) == "2020-01-16"
+
+
 # --- run_daily_check / run_weekly_digest (оркестрация, всё внешнее замокано) --
 
 def test_run_daily_check_no_anomalies_sends_nothing(monkeypatch):
@@ -200,6 +220,20 @@ def test_run_daily_check_no_anomalies_sends_nothing(monkeypatch):
     monkeypatch.setattr(ad.telegram, "send_message", lambda *a: sent.append(a))
     ad.run_daily_check()
     assert sent == []
+
+
+def test_run_daily_check_clean_day_still_marks_state(monkeypatch):
+    """Регрессия 2026-09-22: 'аномалий нет' — законный итог, но детектор
+    ДОЛЖЕН отметиться как проверивший этот день, иначе system_check.py не
+    отличит 'чисто' от 'вообще не запускался'."""
+    rows = _rows(date.today(), [10, 10, 10, 10])
+    latest_date = rows[-1]["Дата"]
+    monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: (rows, METRICS))
+    monkeypatch.setattr(ad.telegram, "send_message", lambda *a: (_ for _ in ()).throw(AssertionError("не должен слать")))
+    ad.run_daily_check()
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT last_day_checked FROM card.anomaly_detector_state WHERE id = 1")
+        assert str(cur.fetchone()[0]) == latest_date
 
 
 def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch):

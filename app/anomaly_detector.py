@@ -294,6 +294,22 @@ def _mark_alerted(cur, day: str, label: str) -> None:
     )
 
 
+def mark_daily_check_ran(cur, day: str) -> None:
+    """2026-09-22 (реальный ложный алерт system_check.py, найдено по репорту
+    Влада): отмечает, что дневная проверка РЕАЛЬНО исполнилась для этого дня —
+    независимо от того, нашла ли она аномалии. write_anomaly_log() ниже
+    пишет строку в health.anomaly_log ТОЛЬКО когда есть находки — без этой
+    отдельной отметки нельзя отличить "аномалий не было" (законно ничего не
+    записано) от "детектор вообще не запускался". card.anomaly_detector_state,
+    не health.* — это операционное состояние процесса, не медданные."""
+    cur.execute(
+        "INSERT INTO card.anomaly_detector_state (id, last_run_at, last_day_checked) "
+        "VALUES (1, now(), %s::date) "
+        "ON CONFLICT (id) DO UPDATE SET last_run_at = now(), last_day_checked = EXCLUDED.last_day_checked",
+        (day,),
+    )
+
+
 def write_anomaly_log(cur, day: str, anomalies: list[dict]) -> None:
     """health.anomaly_log — то же, что "Anomaly_log (Postgres)" в оригинале.
     Пишется НЕЗАВИСИМО от Telegram (см. докстринг модуля — в оригинале
@@ -326,6 +342,10 @@ def run_daily_check() -> None:
 
     days = detect_anomalies(daily_rows, metrics)
     latest = next((d for d in days if d["is_latest"]), None)
+    if latest:
+        with get_conn() as conn, conn.cursor() as cur:
+            mark_daily_check_ran(cur, latest["date"])
+            conn.commit()
     if not latest or not latest["has_anomalies"]:
         return
 

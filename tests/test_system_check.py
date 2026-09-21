@@ -120,23 +120,40 @@ def test_check_anomaly_freshness_ok_when_same_day():
 
 
 def test_check_anomaly_freshness_flags_when_stale():
+    """2026-09-22: сверяем не max(anomaly_log.date) (пишется только при
+    находках — 'чистая' серия дней давала ложный алерт), а отдельную отметку
+    card.anomaly_detector_state.last_day_checked, которую детектор пишет
+    КАЖДЫЙ прогон, вне зависимости от находок."""
     cur = MagicMock()
     today = system_check._vl_now().date()
     cur.fetchone.side_effect = [(today,), (today - timedelta(days=3),)]
     problems, notes = [], []
     system_check._check_anomaly_freshness(cur, problems, notes)
     assert len(problems) == 1
-    assert "отстаёт" in problems[0]
+    assert "отставание" in problems[0]
 
 
-def test_check_anomaly_freshness_flags_when_never_written():
+def test_check_anomaly_freshness_flags_when_never_checked():
     cur = MagicMock()
     today = system_check._vl_now().date()
     cur.fetchone.side_effect = [(today,), (None,)]
     problems, notes = [], []
     system_check._check_anomaly_freshness(cur, problems, notes)
     assert len(problems) == 1
-    assert "вообще не пишет" in problems[0]
+    assert "вообще не запускался" in problems[0]
+
+
+def test_check_anomaly_freshness_clean_day_is_not_a_problem():
+    """Регрессия 2026-09-22: детектор запускался вчера, ничего не нашёл (не
+    записал в anomaly_log — это по конструкции), но ОТМЕТИЛСЯ как проверивший
+    вчерашний день. daily_trends сегодня уже есть (день закончился, синк
+    прошёл) — отставание в 1 день, это норма (расписания), не проблема."""
+    cur = MagicMock()
+    today = system_check._vl_now().date()
+    cur.fetchone.side_effect = [(today,), (today - timedelta(days=1),)]
+    problems, notes = [], []
+    system_check._check_anomaly_freshness(cur, problems, notes)
+    assert problems == []
 
 
 def test_check_anomaly_freshness_skips_when_daily_trends_empty():

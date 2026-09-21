@@ -227,26 +227,35 @@ def _check_numeric_garbage(cur, problems: list, notes: list) -> None:
 def _check_anomaly_freshness(cur, problems: list, notes: list) -> None:
     """Anomaly_Detector — на card-service с #34, три независимых пути запуска
     (после ингеста + два расписания), поэтому «тихо перестал работать» не
-    выглядело бы как ошибка нигде — просто health.anomaly_log перестал бы
-    расти. Сверяем: если у daily_trends есть свежая дата, у anomaly_log
-    должна быть запись на неё же (или на день раньше — таймингом расписаний)."""
+    выглядело бы как ошибка нигде.
+
+    2026-09-22 (реальный ложный алерт, найден по репорту Влада): раньше
+    сверяли max(daily_trends."Дата") с max(health.anomaly_log.date) — но
+    write_anomaly_log() пишет строку ТОЛЬКО когда есть находки
+    (run_daily_check(): `if not latest["has_anomalies"]: return` раньше
+    записи). После любой серии "чистых" дней (аномалий не было — это законный
+    исход, не сбой) max(anomaly_log.date) естественно отстаёт, и проверка
+    кричала "детектор не запускался?", хотя он запускался и корректно ничего
+    не нашёл. Теперь сверяем с card.anomaly_detector_state.last_day_checked —
+    отдельной отметкой, которую run_daily_check() пишет КАЖДЫЙ раз, вне
+    зависимости от находок (см. app/anomaly_detector.py::mark_daily_check_ran)."""
     cur.execute('SELECT max("Дата") FROM health.daily_trends')
     row = cur.fetchone()
     latest_trend = row[0] if row else None
     if latest_trend is None:
         notes.append("anomaly_log: daily_trends пуст, проверка свежести пропущена")
         return
-    cur.execute("SELECT max(date) FROM health.anomaly_log")
+    cur.execute("SELECT last_day_checked FROM card.anomaly_detector_state WHERE id = 1")
     row = cur.fetchone()
-    latest_anomaly = row[0] if row else None
-    if latest_anomaly is None:
-        problems.append("🔴 health.anomaly_log пуст, хотя daily_trends не пуст — детектор аномалий вообще не пишет")
+    last_checked = row[0] if row else None
+    if last_checked is None:
+        problems.append("🔴 card.anomaly_detector_state пуст, хотя daily_trends не пуст — детектор аномалий вообще не запускался")
         return
-    gap_days = (latest_trend - latest_anomaly).days
+    gap_days = (latest_trend - last_checked).days
     if gap_days > 1:
         problems.append(
-            f"health.anomaly_log отстаёт от daily_trends на {gap_days} дн. "
-            f"(последняя запись {latest_anomaly}, а Daily_Trends уже {latest_trend}) — детектор аномалий не запускался?"
+            f"детектор аномалий последний раз проверял {last_checked}, а Daily_Trends уже {latest_trend} "
+            f"(отставание {gap_days} дн.) — не запускается?"
         )
 
 
@@ -312,7 +321,7 @@ def build_message() -> dict:
         msg = (
             f"✅ Система в норме ({ts} ВЛ). Дашборд-эндпоинты отвечают без ошибок, "
             "Daily_Trends/day_sum/Meals без дыр за 5 дней, числа в питании парсятся, "
-            "anomaly_log свежий, Garmin-ingest без сбоев за 3 дня, гейт blocked (грыжа)."
+            "детектор аномалий проверял недавно, Garmin-ingest без сбоев за 3 дня, гейт blocked (грыжа)."
         )
     return {"message": msg, "has_problems": bool(problems), "problems": problems, "notes": notes}
 
