@@ -83,6 +83,11 @@ import app.weekly_advisor as weekly_advisor
 import app.anomaly_detector as anomaly_detector
 import app.meds_from_calendar as meds_from_calendar
 import app.monthly_trend as monthly_trend
+import app.food_diary_bot as food_diary_bot
+import app.card_processor as card_processor
+import app.phenoage_calc as phenoage_calc
+import app.yandex_climate as yandex_climate
+import app.err_dedup as err_dedup
 from app.biohacking_ingest import BiohackingPayload, process_ingest
 from app.write_path import process as process_source
 
@@ -119,6 +124,19 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     ("MEDS_FROM_CALENDAR_ENABLED", lambda: meds_from_calendar.run_scheduler(), "meds-from-calendar-scheduler"),
     # 2026-09-21 (группа 1, закрывает её целиком): Monthly_Trend_Wellness.
     ("MONTHLY_TREND_ENABLED", lambda: monthly_trend.run_scheduler(), "monthly-trend-scheduler"),
+    # 2026-09-21: Food diary_v5 — свой бот (vlad_health), свой polling-цикл,
+    # независимый от доктора (Hermes Agent). Решение Влада: опрос, не вебхук.
+    ("FOOD_DIARY_BOT_ENABLED", lambda: food_diary_bot.run_polling_loop(), "food-diary-bot-poller"),
+    # 2026-09-21: находка при проверке "можно ли убрать n8n" — card-service
+    # собственную очередь /process крутил n8n (Card Processor, опрос раз в
+    # 5 мин), не сам. Реальный архитектурный пробел, не просто перенос фичи.
+    ("CARD_PROCESSOR_ENABLED", lambda: card_processor.run_scheduler(), "card-processor-scheduler"),
+    # 2026-09-21: последние два реальных воркфлоу n8n, найденные при проверке
+    # "можно ли убрать n8n" — PhenoAge Calc (раз в неделю) и Get Yandex
+    # Climate_2 (раз в час). После этого в n8n остаётся только инфраструктурная
+    # обвязка (_Error Handler/_Err Dedup/backup), не бизнес-логика.
+    ("PHENOAGE_CALC_ENABLED", lambda: phenoage_calc.run_scheduler(), "phenoage-calc-scheduler"),
+    ("YANDEX_CLIMATE_ENABLED", lambda: yandex_climate.run_scheduler(), "yandex-climate-scheduler"),
 ]
 
 
@@ -297,6 +315,28 @@ def backup_status_endpoint(req: BackupStatusRequest) -> dict:
     if alert:
         doctor_telegram.send_message(backup_alert.CHAT_ID, alert, parse_mode="HTML")
     return {"ok": True}
+
+
+class ErrDedupRequest(BaseModel):
+    wf: str = "?"
+    node: str = "?"
+    telegram: str = ""
+    silent: bool = False
+    token: str = ""
+
+
+@app.post("/err-dedup")
+def err_dedup_endpoint(req: ErrDedupRequest) -> dict:
+    """Порт n8n `_Err Dedup` — последний живой n8n-webhook, ещё нужный трём
+    ночным cron-скриптам (pg_to_sheets_mirror.js/pg_sheets_diff_check.js/
+    sheets_to_pg_mirror.js), см. app/err_dedup.py. Без токена (сверяется
+    внутри check_and_notify) эндпоинт возвращает {send: False} молча —
+    тот же fail-closed эффект, что был у n8n-версии."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            result = err_dedup.run_notify(cur, req.wf, req.node, req.telegram, req.silent, req.token)
+            conn.commit()
+    return result
 
 
 @app.post("/ingest", response_model=IngestResponse)

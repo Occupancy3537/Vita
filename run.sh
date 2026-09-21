@@ -36,6 +36,21 @@
 # Calendar-credential, что и группа 3 (1/2).
 # 2026-09-21: MONTHLY_TREND_ENABLED — app/monthly_trend.py (1-е число месяца,
 # 10:00 VL), порт n8n Monthly_Trend_Wellness — закрывает группу 1 целиком.
+# 2026-09-21: FOOD_DIARY_BOT_ENABLED + FOOD_DIARY_BOT_TOKEN — порт n8n
+# Food diary_v5 (последний воркфлоу миграции). Свой бот "vlad_health"
+# (credential 8CKBKo8CXTaLD3YI в n8n), СВОЙ long-polling цикл — по решению
+# Влада опрос, не вебхук, тот же принцип, что у доктора (Hermes Agent),
+# просто другой токен/поток. Sheets-дубль записи Meals оставлен навсегда
+# (решение Влада), не только на переходный период.
+# 2026-09-21: CARD_PROCESSOR_ENABLED — при проверке "можно ли убрать n8n"
+# нашли, что собственная очередь /process card-service крутилась n8n-
+# воркфлоу Card Processor (опрос раз в 5 мин) — реальный архитектурный
+# пробел (если бы n8n остановился, врач тихо переставал бы обрабатывать
+# сообщения), не просто перенос фичи. app/card_processor.py.
+# 2026-09-21: PHENOAGE_CALC_ENABLED (раз в неделю, вс 09:00 VL) и
+# YANDEX_CLIMATE_ENABLED + YANDEX_IOT_TOKEN (раз в час) — последние два
+# реальных бизнес-воркфлоу n8n, найденные и перенесённые в том же заходе.
+# После них в n8n остаётся только инфраструктурная обвязка.
 # 2026-09-20: ANOMALY_DETECTOR_ENABLED + CARD_GOOGLE_*/RESCUETIME_API_KEY —
 # группа 3 (1/2, вместе с Collect_Biohacking_Data -> POST /ingest/biohacking,
 # см. app/biohacking_ingest.py). CARD_GOOGLE_CLIENT_ID/SECRET общие для
@@ -75,6 +90,12 @@ sudo docker run -d \
   -e ANOMALY_DETECTOR_ENABLED=1 \
   -e MEDS_FROM_CALENDAR_ENABLED=1 \
   -e MONTHLY_TREND_ENABLED=1 \
+  -e FOOD_DIARY_BOT_ENABLED=1 \
+  -e FOOD_DIARY_BOT_TOKEN="$FOOD_DIARY_BOT_TOKEN" \
+  -e CARD_PROCESSOR_ENABLED=1 \
+  -e PHENOAGE_CALC_ENABLED=1 \
+  -e YANDEX_CLIMATE_ENABLED=1 \
+  -e YANDEX_IOT_TOKEN="$YANDEX_IOT_TOKEN" \
   -e CARD_GOOGLE_CLIENT_ID="$CARD_GOOGLE_CLIENT_ID" \
   -e CARD_GOOGLE_CLIENT_SECRET="$CARD_GOOGLE_CLIENT_SECRET" \
   -e CARD_GOOGLE_SHEETS_REFRESH_TOKEN="$CARD_GOOGLE_SHEETS_REFRESH_TOKEN" \
