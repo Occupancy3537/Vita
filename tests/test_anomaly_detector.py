@@ -194,7 +194,29 @@ def test_build_weekly_digest_excludes_days_outside_window():
 
 # --- mark_daily_check_ran -----------------------------------------------------
 
-def test_mark_daily_check_ran_writes_state():
+@pytest.fixture()
+def _preserve_anomaly_detector_state():
+    """card.anomaly_detector_state — singleton (id=1), читает его настоящий
+    прод (system_check._check_anomaly_freshness сверяется с ним каждое утро) —
+    тест обязан вернуть исходное значение, а не оставить тестовую дату
+    (тот же урок, что и инцидент с health.anomaly_log в этом же файле)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT last_run_at, last_day_checked FROM card.anomaly_detector_state WHERE id = 1")
+        original = cur.fetchone()
+    yield
+    with get_conn() as conn, conn.cursor() as cur:
+        if original:
+            cur.execute(
+                "INSERT INTO card.anomaly_detector_state (id, last_run_at, last_day_checked) VALUES (1, %s, %s) "
+                "ON CONFLICT (id) DO UPDATE SET last_run_at = EXCLUDED.last_run_at, last_day_checked = EXCLUDED.last_day_checked",
+                original,
+            )
+        else:
+            cur.execute("DELETE FROM card.anomaly_detector_state WHERE id = 1")
+        conn.commit()
+
+
+def test_mark_daily_check_ran_writes_state(_preserve_anomaly_detector_state):
     """2026-09-22: отдельная отметка о прогоне (не health.anomaly_log — та
     пишется только при находках) — без неё ложный алерт system_check.py
     после любой 'чистой' серии дней (см. докстринг mark_daily_check_ran)."""
@@ -222,7 +244,7 @@ def test_run_daily_check_no_anomalies_sends_nothing(monkeypatch):
     assert sent == []
 
 
-def test_run_daily_check_clean_day_still_marks_state(monkeypatch):
+def test_run_daily_check_clean_day_still_marks_state(monkeypatch, _preserve_anomaly_detector_state):
     """Регрессия 2026-09-22: 'аномалий нет' — законный итог, но детектор
     ДОЛЖЕН отметиться как проверивший этот день, иначе system_check.py не
     отличит 'чисто' от 'вообще не запускался'."""
@@ -236,17 +258,34 @@ def test_run_daily_check_clean_day_still_marks_state(monkeypatch):
         assert str(cur.fetchone()[0]) == latest_date
 
 
-def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch):
+def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch, _preserve_anomaly_detector_state):
     # даты должны быть БЛИЗКИ к реальному "сегодня" — _prune_alerted() чистит
     # дедуп-записи старше ANOMALY_ALERT_KEEP_DAYS по РЕАЛЬНОМУ wall-clock now(),
     # что в проде всегда верно (latest = вчера/сегодня), но с искусственно
     # старыми тестовыми датами прунинг стёр бы дедуп-запись раньше времени.
+    #
+    # ИНЦИДЕНТ 2026-09-21/22 (найдено по репорту Влада): latest_date здесь —
+    # РЕАЛЬНОЕ "сегодня", то есть тот же день, за который в проде вполне может
+    # уже лежать настоящая находка (ровно это и случилось — полный прогон
+    # тестов в тот день, когда для health.anomaly_log была живая запись 21.09,
+    # съел её безусловным DELETE в finally). Теперь finally восстанавливает
+    # то, что было ДО теста, а не просто чистит за собой в предположении, что
+    # "там ничего не было".
     base = date.today() - timedelta(days=10)
     rows = _rows(base, [9, 10, 11, 10, 9, 11, 10, 9, 10, 11, 30])
     latest_date = rows[-1]["Дата"]
     monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: (rows, METRICS))
     sent = []
     monkeypatch.setattr(ad.telegram, "send_message", lambda *a: sent.append(a))
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT anomaly_count, strong_count, raw_anomalies, created_at FROM health.anomaly_log WHERE date = %s",
+            (latest_date,),
+        )
+        preexisting_log = cur.fetchone()
+        cur.execute("SELECT key, alert_date FROM health.anomaly_alerted WHERE key LIKE %s", (f"{latest_date}%",))
+        preexisting_alerted = cur.fetchall()
 
     try:
         ad.run_daily_check()
@@ -260,6 +299,17 @@ def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch):
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM health.anomaly_alerted WHERE key LIKE %s", (f"{latest_date}%",))
             cur.execute("DELETE FROM health.anomaly_log WHERE date = %s", (latest_date,))
+            if preexisting_log:
+                cur.execute(
+                    "INSERT INTO health.anomaly_log (date, anomaly_count, strong_count, raw_anomalies, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (latest_date, *preexisting_log),
+                )
+            for key, alert_date in preexisting_alerted:
+                cur.execute(
+                    "INSERT INTO health.anomaly_alerted (key, alert_date) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+                    (key, alert_date),
+                )
             conn.commit()
 
 
