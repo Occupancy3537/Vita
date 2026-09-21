@@ -94,8 +94,9 @@ WEBHOOK_CHECKS = [
 # же коммитом, что и деактивацию, а не отдельным заходом позже.
 EXPECTED_ACTIVE_N8N = [
     "_Error Handler",
-    "PhenoAge Calc",
 ]
+# PhenoAge Calc — на card-service с 2026-09-21 (app/phenoage_calc.py, часть
+# "можно ли убрать n8n" — учли урок #33/#36, убрано этим же коммитом.
 # _Backup Alert — на card-service с 2026-09-20 (app/backup_alert.py, группа малых утилит).
 
 
