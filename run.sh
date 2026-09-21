@@ -1,7 +1,9 @@
 #!/bin/bash
 # card-service — Phase 0. Публично не торчит: порт только на 127.0.0.1, сеть pgnet
 # (та же, что у pg и n8n — см. backups/infra/pg_run.sh в основном репозитории).
-# Волна 1 (A3, 2026-09-17): TELEGRAM_POLLING_ENABLED и CAPITAN_RELAY_URL закреплены
+# Волна 1 (A3, 2026-09-17): TELEGRAM_POLLING_ENABLED закреплён
+# (CAPITAN_RELAY_URL убран 2026-09-21, #38/#43 — "other" теперь идёт в /ingest
+# в процессе, не на внешний релей, см. app/doctor/poller.py::ingest_test_message)
 # Хотфикс 17.09 (ZCode): + DASHBOARD_TOKEN — без него /dashboard/* отдаёт 403 fail-closed
 # Волна 2 (B1): ANAMNESIS_SCHEDULER_ENABLED — анамнез-планировщик (ежедневно 11:00 VL)
 # Волна 3 (B2): REGISTRAR_MODEL / REGISTRAR_PDF_MODEL — vision-модели регистратора
@@ -105,7 +107,6 @@ sudo docker run -d \
   -e REGISTRAR_PDF_MODEL="${REGISTRAR_PDF_MODEL:-google/gemini-3.1-flash-lite}" \
   -e REGISTRAR_HEALTH_SCHEMA="${REGISTRAR_HEALTH_SCHEMA:-health}" \
   -e DASHBOARD_TOKEN="$DASHBOARD_TOKEN" \
-  -e CAPITAN_RELAY_URL="${CAPITAN_RELAY_URL:-http://n8n:443/webhook/doctor-relay-c8f3a9}" \
   card-service:latest
 
 echo "card-service started. Проверка: curl http://127.0.0.1:8080/health"

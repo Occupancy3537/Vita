@@ -2,21 +2,22 @@
 Long polling Telegram (план §3.2 шаг 2, 2026-09-16): card-service забирает
 приём апдейтов себе полностью — по решению Влада n8n больше не видит Telegram
 первым ни разу. dispatch.route() решает "доктору или нет"; докторские апдейты
-обрабатываются прямо здесь (intake.handle_update, тот же код, что раньше
-дёргал HTTP-хоп из Capitan — теперь вызывается напрямую, без сети); остальные
-пересылаются на внутренний вебхук Capitan сырым Telegram-update — регистратор/
-анамнез продолжают работать без единой строчки изменений в их собственной
-логике.
+обрабатываются прямо здесь (intake.handle_update); "registrar"/"anamnesis" —
+тоже в этом же процессе (registrar.handle_update/anamnesis.handle_reply).
 
-Фото/документ пересылаются как multipart/form-data (поле "update" — JSON
-апдейта строкой, поле "data" — скачанный файл), а не просто JSON: у старого
-`Telegram Trigger` в Capitan было `additionalFields.download: true` —
-автоскачивание файла в n8n-binary при живом вебхуке от Telegram. Раз Telegram
-больше не стучится в n8n напрямую, этот шаг теперь должен сделать кто-то —
-card-service (уже умеет, app.doctor.telegram.download_file — Phase 1) скачивает
-сам и передаёт файл вместе с апдейтом; n8n Webhook-нода разбирает
-multipart/form-data нативно (json.body.* — текстовые поля, binary[key] —
-файлы), Capitan получает то же самое, что раньше давало автоскачивание.
+"other" (2026-09-21, AGENT_SYNC #38/#43 — независимый аудит ZCode, реальная
+находка «тихая потеря данных»): раньше пересылалось на внутренний вебхук
+n8n-Capitan (forward_to_capitan, снесено этим коммитом вместе с
+CAPITAN_RELAY_URL/_extract_file_id). С момента отключения n8n это ВСЕГДА
+падало (404/connection refused) — Владу уходило «⚠️ Доставка отключена
+(Capitan выключен)», а сообщение реально терялось: TEST-классифицированный
+текст («запиши холестерин 5.5») просто исчезал, хотя рабочий путь для него
+уже был построен и простаивал — тот же /ingest, что использует garminbot,
+плюс card_processor, который разбирает очередь каждые 5 минут. Мост снесён,
+не починен: ingest_test_message() зовёт ingest() в процессе напрямую (без
+HTTP-круга на себя же, тот же принцип, что и остальные внутренние вызовы
+этой сессии). Фото/документ сюда не попадают вообще — dispatch.route()
+отправляет их в "registrar" раньше, чем доходит до LLM-классификатора.
 
 ВАЖНО: пока polling запущен, у бота НЕ должно быть зарегистрированного
 Telegram-webhook (иначе getUpdates отвечает 409) — disable_telegram_webhook()
@@ -24,12 +25,11 @@ Telegram-webhook (иначе getUpdates отвечает 409) — disable_telegr
 
 Волна 1 (A3, 2026-09-17): (1) guard _safe_process вокруг обработки одного
 апдейта — одно непредвиденное исключение больше не убивает поток приёма до
-рестарта контейнера; (2) при ошибке пересылки в Capitan (включая 404 —
-роутер выключен по решению Влада) Владу уходит видимое «НЕ сохранено» вместо
-тихой потери, не чаще 1 сообщения в 6 ч (анти-спам).
+рестарта контейнера; (2) при сбое сохранения (см. ingest_test_message выше)
+Владу уходит видимое «НЕ сохранено» вместо тихой потери, не чаще 1 сообщения
+в 6 ч (анти-спам).
 """
 import logging
-import os
 import time
 
 import httpx
@@ -42,7 +42,6 @@ from app.scheduler_alert import alert_on_failure
 logger = logging.getLogger(__name__)
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}"
-CAPITAN_RELAY_URL = os.environ.get("CAPITAN_RELAY_URL", "")
 POLL_TIMEOUT = 30
 
 # A3: видимая потеря вместо тихой. Влад (тот же доктор-бот), анти-спам 6 ч.
@@ -91,19 +90,6 @@ def get_updates(offset: int, timeout: float = POLL_TIMEOUT) -> list[dict]:
     return data["result"]
 
 
-def _extract_file_id(update: dict) -> tuple[str, str] | tuple[None, None]:
-    """Возвращает (file_id, filename) для крупнейшей фото-версии или документа,
-    или (None, None), если во апдейте нет вложения."""
-    msg = update.get("message") or {}
-    if msg.get("photo"):
-        largest = msg["photo"][-1]  # Telegram отдаёт по возрастанию размера
-        return largest["file_id"], f"{largest['file_id']}.jpg"
-    if msg.get("document"):
-        doc = msg["document"]
-        return doc["file_id"], doc.get("file_name") or doc["file_id"]
-    return None, None
-
-
 def _loss_summary(update: dict) -> str:
     """Первые 60 символов текста (включая caption фото), либо тип вложения."""
     msg = update.get("message") or {}
@@ -129,7 +115,7 @@ def _notify_owner_lost(update: dict) -> None:
     try:
         telegram.send_message(
             OWNER_CHAT_ID,
-            f"⚠️ Доставка сообщения отключена (Capitan выключен) — НЕ сохранено: {_loss_summary(update)}",
+            f"⚠️ Не удалось сохранить сообщение — НЕ сохранено: {_loss_summary(update)}",
         )
         logger.error("owner notified about LOST update %s (relay unavailable)", update.get("update_id"))
     except Exception:
@@ -137,24 +123,26 @@ def _notify_owner_lost(update: dict) -> None:
             "failed to notify owner about lost update %s (cooldown still consumed)", update.get("update_id"))
 
 
-def forward_to_capitan(update: dict) -> None:
-    if not CAPITAN_RELAY_URL:
-        logger.error("CAPITAN_RELAY_URL не задан — апдейт %s потерян", update.get("update_id"))
+def ingest_test_message(update: dict) -> None:
+    """"other" из dispatch.route() — сегодня это ВСЕГДА TEST-классифицированный
+    текст (фото/документ уже отфильтрованы в "registrar" раньше, до LLM).
+    Сохраняет тот же путь, что garminbot и любой другой источник: /ingest
+    (дедуп по hash, идемпотентно) -> card.source_message -> card_processor
+    разбирает очередь каждые 5 минут -> write_path.process(). Раньше это
+    пересылалось в n8n-Capitan и терялось (см. докстринг модуля)."""
+    msg = update.get("message") or {}
+    text = (msg.get("text") or msg.get("caption") or "").strip()
+    if not text:
+        logger.error("ingest_test_message: апдейт %s без текста — нечего сохранять", update.get("update_id"))
         _notify_owner_lost(update)
         return
-    import json
-    file_id, filename = _extract_file_id(update)
+    from app.main import IngestRequest, ingest  # ленивый импорт — app.main сама импортирует этот модуль
     try:
-        if file_id:
-            content = telegram.download_file(file_id)
-            files = {"data": (filename, content)}
-            data = {"update": json.dumps(update, ensure_ascii=False)}
-            resp = httpx.post(CAPITAN_RELAY_URL, data=data, files=files, timeout=20)
-        else:
-            resp = httpx.post(CAPITAN_RELAY_URL, data={"update": json.dumps(update, ensure_ascii=False)}, timeout=10)
-        resp.raise_for_status()
+        result = ingest(IngestRequest(channel="telegram", raw_text=text, person_id="self"))
+        logger.info("ingest_test_message: апдейт %s сохранён как %s (status=%s, dup=%s)",
+                    update.get("update_id"), result.id, result.status, result.duplicate)
     except Exception:
-        logger.exception("failed to forward update %s to Capitan", update.get("update_id"))
+        logger.exception("ingest_test_message: не удалось сохранить апдейт %s", update.get("update_id"))
         _notify_owner_lost(update)
 
 
@@ -162,7 +150,7 @@ def process_one(update: dict) -> None:
     try:
         destination = dispatch.route(update)
     except Exception:
-        logger.exception("dispatch.route failed for update %s — forwarding to Capitan as fallback",
+        logger.exception("dispatch.route failed for update %s — falling back to ingest as TEST",
                           update.get("update_id"))
         destination = "other"
     if destination == "doctor":
@@ -174,7 +162,7 @@ def process_one(update: dict) -> None:
         # раньше уходили в выключенный Capitan (тихая потеря).
         registrar.handle_update(update)
     else:
-        forward_to_capitan(update)
+        ingest_test_message(update)
 
 
 def _safe_process(update: dict) -> None:

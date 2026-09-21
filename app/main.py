@@ -202,10 +202,10 @@ def dashboard_today_live(token: str = Query(default="")) -> dict:
 @app.get("/dashboard/health")
 def dashboard_health(token: str = Query(default="")) -> dict:
     """Экран «Здоровье» — порт n8n `health-dashboard (cache)` / Build Health
-    JSON, целиком на живых данных (см. app/dashboard.py). Единственный
-    оставшийся мост в n8n — временный, только для 4 полей, которые физически
-    нельзя посчитать без прямого доступа к Google Sheets (аномалии/корреляции/
-    рекомендации), браузер до него не достаёт вообще."""
+    JSON, целиком на живых данных (см. app/dashboard.py). 2026-09-21 (#38/#43):
+    докстринг про "мост в n8n для аномалий/корреляций/рекомендаций" устарел —
+    все три давно читаются из Postgres (health.anomaly_log/recommendations_log),
+    n8n тут больше ни при чём вообще."""
     _check_dashboard_token(token)
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -216,8 +216,8 @@ def dashboard_health(token: str = Query(default="")) -> dict:
 def dashboard_bioage(token: str = Query(default="")) -> dict:
     """Экран «Био-возраст» — порт n8n `bioage-dashboard (cache)` / Build Bioage
     JSON (2026-09-19). Формула PhenoAge не дублируется — берётся готовой из
-    health.phenoage_log (считает отдельный воркфлоу PhenoAge Calc, ещё не
-    портирован). Ни одной зависимости от n8n/Sheets — все источники в Postgres."""
+    health.phenoage_log (считает app/phenoage_calc.py, порт с 2026-09-21).
+    Ни одной зависимости от n8n/Sheets — все источники в Postgres."""
     _check_dashboard_token(token)
     with get_conn() as conn:
         with conn.cursor() as cur:
