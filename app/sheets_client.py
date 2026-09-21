@@ -163,3 +163,39 @@ def get_calendar_events(calendar_id: str, time_min: str, time_max: str) -> list[
     )
     resp.raise_for_status()
     return resp.json().get("items", [])
+
+
+def find_row_by_column(spreadsheet_id: str, sheet_title: str, column: str, value: str, kind: str = "sheets") -> Optional[int]:
+    """Порт "find row" (googleSheets lookup by column) — возвращает 0-based
+    индекс СТРОКИ ДАННЫХ (без шапки, как ожидает delete_row) или None."""
+    all_values = get_values(spreadsheet_id, sheet_title, kind=kind)
+    if not all_values:
+        return None
+    header = all_values[0]
+    try:
+        col_idx = header.index(column)
+    except ValueError:
+        return None
+    target = str(value)
+    for i, r in enumerate(all_values[1:]):
+        if len(r) > col_idx and str(r[col_idx]) == target:
+            return i
+    return None
+
+
+def delete_row(spreadsheet_id: str, sheet_gid: int, data_row_index: int, kind: str = "sheets") -> None:
+    """Порт "del" (googleSheets delete by row_number) — batchUpdate
+    deleteDimension. `data_row_index` — 0-based индекс СТРОКИ ДАННЫХ (как
+    возвращает find_row_by_column), +1 внутри для учёта шапки."""
+    token = _get_access_token(kind)
+    sheet_row = data_row_index + 1  # +1 за шапку; deleteDimension индексы 0-based от начала листа
+    resp = httpx.post(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"requests": [{"deleteDimension": {"range": {
+            "sheetId": sheet_gid, "dimension": "ROWS",
+            "startIndex": sheet_row, "endIndex": sheet_row + 1,
+        }}}]},
+        timeout=20.0,
+    )
+    resp.raise_for_status()
