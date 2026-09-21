@@ -147,6 +147,18 @@ def ingest_test_message(update: dict) -> None:
 
 
 def process_one(update: dict) -> None:
+    # 2026-09-22 (внешний аудит, K5 — КРИТИЧНО): ничего в поллере/диспетчере/
+    # интейке не проверяло, что сообщение реально от Влада — любой, кто нашёл
+    # бота, обрабатывался как пациент, получал ответ доктора с полным досье
+    # Влада в контексте (context.build_dossier — глобальный, person_id="self",
+    # не привязан к конкретному chat_id отправителя). Первая же строка теперь
+    # отсекает чужие chat_id ДО dispatch/intake — не только до записи в карту,
+    # но и до траты денег на LLM-классификатор на чужое сообщение.
+    chat_id = str(((update.get("message") or {}).get("chat") or {}).get("id", ""))
+    if chat_id and chat_id != OWNER_CHAT_ID:
+        logger.warning("process_one: апдейт %s от чужого chat_id=%s — игнорирую",
+                        update.get("update_id"), chat_id)
+        return
     try:
         destination = dispatch.route(update)
     except Exception:

@@ -8,6 +8,40 @@ from app import food_diary_bot as bot
 from app.db import get_conn
 
 
+# --- handle_update chat_id guard (2026-09-22, внешний аудит K5) -------------
+
+def test_handle_update_ignores_foreign_chat_id_message(monkeypatch):
+    calls = []
+    monkeypatch.setattr(bot, "handle_message", lambda message: calls.append(message))
+    monkeypatch.setattr(bot, "handle_callback", lambda cq: calls.append(cq))
+
+    update = {"update_id": 1, "message": {"chat": {"id": 999999}, "text": "чужое сообщение"}}
+    bot.handle_update(update)
+
+    assert calls == []
+
+
+def test_handle_update_ignores_foreign_chat_id_callback(monkeypatch):
+    calls = []
+    monkeypatch.setattr(bot, "handle_callback", lambda cq: calls.append(cq))
+
+    update = {"update_id": 2, "callback_query": {"id": "cbq", "data": "confirm|1",
+                                                  "message": {"chat": {"id": 999999}, "message_id": 1}}}
+    bot.handle_update(update)
+
+    assert calls == []
+
+
+def test_handle_update_accepts_owner_chat_id(monkeypatch):
+    calls = []
+    monkeypatch.setattr(bot, "handle_message", lambda message: calls.append(message))
+
+    update = {"update_id": 3, "message": {"chat": {"id": 8956401}, "text": "омлет"}}
+    bot.handle_update(update)
+
+    assert len(calls) == 1
+
+
 # --- handle_callback ---------------------------------------------------------
 
 def test_handle_callback_confirm_edits_message(monkeypatch):

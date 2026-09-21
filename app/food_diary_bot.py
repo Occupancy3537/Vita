@@ -43,6 +43,7 @@ _API_BASE = "https://api.telegram.org/bot{token}/{method}"
 _FILE_BASE = "https://api.telegram.org/file/bot{token}/{file_path}"
 POLL_TIMEOUT = 30
 POLL_STATE_ID = "food_diary"
+OWNER_CHAT_ID = "8956401"  # 2026-09-22 (внешний аудит, K5): единственный, чьи сообщения обрабатываем
 
 NUTRITION_SHEET_ID = "1NCiBHlbl-nx99kRe8uaqpsAdVV_i6MTw6Bl43LMbCkU"
 MEALS_SHEET_TITLE = "Meals"
@@ -340,7 +341,22 @@ def handle_message(message: dict) -> None:
         logger.info("food_diary_bot: сообщение не распознано ни в один тип, пропускаю")
 
 
+def _chat_id_of(update: dict) -> str:
+    if fd.is_callback(update):
+        return str((((update.get("callback_query") or {}).get("message") or {}).get("chat") or {}).get("id", ""))
+    return str(((update.get("message") or {}).get("chat") or {}).get("id", ""))
+
+
 def handle_update(update: dict) -> None:
+    # 2026-09-22 (внешний аудит, K5 — КРИТИЧНО): ничего здесь не проверяло
+    # отправителя — любой, кто нашёл бота "vlad_health", писал бы себе в
+    # health.meals как в дневник питания Влада. Отсекаем чужой chat_id
+    # до классификации/записи.
+    chat_id = _chat_id_of(update)
+    if chat_id and chat_id != OWNER_CHAT_ID:
+        logger.warning("food_diary_bot: апдейт %s от чужого chat_id=%s — игнорирую",
+                        update.get("update_id"), chat_id)
+        return
     if fd.is_callback(update):
         handle_callback(update["callback_query"])
     elif update.get("message"):

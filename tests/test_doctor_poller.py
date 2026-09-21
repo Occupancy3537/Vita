@@ -28,6 +28,31 @@ def test_offset_roundtrip():
         assert poller._get_last_offset(cur) == 42
 
 
+def test_process_one_ignores_foreign_chat_id(monkeypatch):
+    """2026-09-22 (внешний аудит, K5 — КРИТИЧНО): чужой chat_id не должен
+    доходить ни до dispatch, ни до intake — иначе кто угодно, нашедший бота,
+    обрабатывался бы как пациент с полным досье Влада в контексте."""
+    calls = {}
+    monkeypatch.setattr(dispatch, "route", lambda update: calls.setdefault("routed", True))
+    monkeypatch.setattr(intake, "handle_update", lambda update: calls.setdefault("update", update))
+
+    update = {"update_id": 1, "message": {"chat": {"id": 999999}, "text": "чужое сообщение"}}
+    poller.process_one(update)
+
+    assert calls == {}
+
+
+def test_process_one_accepts_owner_chat_id(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(dispatch, "route", lambda update: "doctor")
+    monkeypatch.setattr(intake, "handle_update", lambda update: calls.setdefault("update", update))
+
+    update = {"update_id": 2, "message": {"chat": {"id": 8956401}, "text": "болит голова"}}
+    poller.process_one(update)
+
+    assert calls.get("update") == update
+
+
 def test_process_one_doctor_calls_handle_update_directly(monkeypatch):
     calls = {}
     monkeypatch.setattr(dispatch, "route", lambda update: "doctor")
