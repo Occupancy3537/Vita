@@ -89,6 +89,7 @@ def test_parse_filters_load_action_when_restriction_active():
     ctx = {
         "window": {"to": "2026-09-20"}, "restrictions_unknown": False,
         "active_restrictions": [{"contra_load": "бег, прыжки", "status": "active", "allowed": "ходьба"}],
+        "load_gate": {"blocked": True, "allowed": "ходьба", "degraded": False},
     }
     raw = _raw([
         {"title": "Силовая на ноги", "type": "load_high", "why": "прогресс"},
@@ -102,7 +103,8 @@ def test_parse_filters_load_action_when_restriction_active():
 
 
 def test_parse_restrictions_unknown_drops_unknown_type_actions():
-    ctx = {"window": {"to": "2026-09-20"}, "restrictions_unknown": True, "active_restrictions": []}
+    ctx = {"window": {"to": "2026-09-20"}, "restrictions_unknown": True, "active_restrictions": [],
+           "load_gate": {"blocked": True, "degraded": True, "allowed": "ходьба"}}
     raw = _raw([{"title": "Что-то неясное", "type": "totally_bogus", "why": "..."}])
     row = wa.parse_advisor_response(raw, ctx, [], None)
     assert row["actions"] == []

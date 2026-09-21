@@ -38,7 +38,7 @@ import httpx
 from app.dashboard import _dkey, _num
 from app.db import get_conn
 from app.doctor import telegram
-from app.patient_gate import profile_hernia_active, profile_swim_allowed
+from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
 
 logger = logging.getLogger(__name__)
 
@@ -495,7 +495,16 @@ def build_context(src: dict) -> dict:
             "allowed": "ходьба, плавание" if profile_swim_allowed(prof_oda) else "ходьба",
             "source": "User_Profile", "degraded": pstate_empty or None,
         })
-    restrictions_unknown = pstate_empty and not active_restrictions
+    # 2026-09-21 (AGENT_SYNC #38/#39): гейт-РЕШЕНИЕ (блокировать нагрузку да/нет)
+    # берётся из единой app.patient_gate.load_gate() — той же функции, что и
+    # dashboard.py. Раньше этот модуль считал его сам через active_restrictions
+    # и расходился с dashboard на входе «активная запись без Contra_Load +
+    # грыжа в профиле» (dashboard блокировал, советник — нет, см. разбор в
+    # patient_gate.load_gate()). active_restrictions выше остаётся как есть —
+    # это контекст для LLM (нужны и contra_food/contra_other, не только load),
+    # а не источник самого решения о блокировке.
+    gate = load_gate(pstate, profile)
+    restrictions_unknown = bool(gate.get("degraded"))
 
     # ---- анамнез ----
     anam_answered = [a for a in anam if a.get("Q_ID") and str(a.get("Status")) == "answered" and str(a.get("Answer") or "").strip()]
@@ -551,6 +560,7 @@ def build_context(src: dict) -> dict:
         "investigations": investigations,
         "active_restrictions": active_restrictions,
         "restrictions_unknown": restrictions_unknown,
+        "load_gate": gate,
         "medical_record_recent": recent_notes,
         "medical_history_key": key_history,
         "medications": medications,
@@ -735,17 +745,19 @@ def parse_advisor_response(raw_text: str, ctx: dict, targets: list[dict], prev_w
                        + " — поле обнулено, действие сохранено без него. Проверь промпт/список допустимых значений.")
 
     # ---- фильтр Patient_State ----
-    restr_unknown = bool(ctx.get("restrictions_unknown"))
-    load_restr = [r for r in (ctx.get("active_restrictions") or [])
-                  if str(r.get("contra_load") or "").strip() and str(r.get("status") or r.get("Status") or "active").lower() != "resolved"]
+    # 2026-09-21 (AGENT_SYNC #38/#39): решение "блокировать нагрузку" берётся
+    # из ctx["load_gate"] (единая app.patient_gate.load_gate(), общая с
+    # dashboard.py) вместо независимого пересчёта из active_restrictions —
+    # именно расхождение этого пересчёта с dashboard было найдено аудитом.
+    gate = ctx.get("load_gate") or {}
+    restr_unknown = bool(gate.get("degraded"))
 
     blocked = []
-    if restr_unknown or load_restr:
-        allowed_raw = " ".join(str(r.get("allowed") or "") for r in load_restr).lower()
+    if gate.get("blocked"):
+        allowed_raw = str(gate.get("allowed") or "").lower()
         allow_walk = (not restr_unknown) and bool(re.search(r"ходьб|walk|прогул", allowed_raw))
         allow_swim = (not restr_unknown) and bool(re.search(r"плаван|бассейн|swim", allowed_raw))
-        allowed_list = "ходьба" if restr_unknown else (
-            "; ".join(r.get("allowed") for r in load_restr if r.get("allowed")) or "ходьба, плавание")
+        allowed_list = "ходьба" if restr_unknown else (gate.get("allowed") or "ходьба, плавание")
         kept = []
         for a in actions:
             t = a["type"]
