@@ -70,6 +70,7 @@ import httpx
 
 from app.db import get_conn
 from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
+from app import run_log
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -459,6 +460,7 @@ def run_daily_scheduler() -> None:
         try:
             _sleep_until(DAILY_HOUR_VL, DAILY_MINUTE_VL)
             run_daily_check()
+            run_log.mark_run("anomaly_detector_daily")
         except Exception as e:
             logger.exception("anomaly_detector: run_daily_check упал — повтор завтра")
             alert_on_failure("anomaly_detector_daily", e)
@@ -471,6 +473,7 @@ def run_weekly_scheduler() -> None:
         try:
             _sleep_until(WEEKLY_HOUR_VL, 0, weekday=6)  # 6 = воскресенье (Python Monday=0)
             run_weekly_digest()
+            run_log.mark_run("anomaly_detector_weekly")
         except Exception as e:
             logger.exception("anomaly_detector: run_weekly_digest упал — повтор через неделю")
             alert_on_failure("anomaly_detector_weekly", e)

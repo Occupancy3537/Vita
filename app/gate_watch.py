@@ -21,6 +21,7 @@ from app.db import get_conn
 # см. модульный докстринг) — прямых исторических данных о боте нет, отнесён
 # к алертам по аналогии с остальными системными проверками.
 from app import hermes_telegram as telegram
+from app import run_log
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ def run_scheduler() -> None:
     while True:
         try:
             check_once()
+            run_log.mark_run("gate_watch")
         except Exception as e:
             logger.exception("gate_watch check_once упал — повтор через %ss", INTERVAL_SECONDS)
             alert_on_failure("gate_watch", e)

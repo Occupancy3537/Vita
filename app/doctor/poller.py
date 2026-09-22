@@ -37,6 +37,7 @@ import httpx
 from app import registrar
 from app.db import get_conn, schema
 from app.doctor import anamnesis, dispatch, intake, telegram
+from app import run_log
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,7 @@ def run_polling_loop() -> None:
             time.sleep(5)
             continue
 
+        run_log.mark_run("doctor_poller", min_interval_seconds=300)
         for update in updates:
             _safe_process(update)
             offset = update["update_id"] + 1

@@ -38,6 +38,7 @@ from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _num, _rows_as_dicts
 from app.db import get_conn
 from app import nutrition_telegram as telegram  # 2026-09-21: отчёты о питании -> @vvk_gemini_bot, не бот доктора (см. app/nutrition_telegram.py)
+from app import run_log
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -339,6 +340,7 @@ def run_daily_scheduler() -> None:
         try:
             _sleep_until(DAILY_HOUR_VL, DAILY_MINUTE_VL)
             run_daily()
+            run_log.mark_run("nutrition_reports_daily")
         except Exception as e:
             logger.exception("nutrition_reports run_daily упал — повтор завтра")
             alert_on_failure("nutrition_reports_daily", e)
@@ -351,6 +353,7 @@ def run_weekly_scheduler() -> None:
         try:
             _sleep_until(WEEKLY_HOUR_VL, 0, weekday=6)  # 6 = воскресенье (Python Monday=0)
             run_weekly()
+            run_log.mark_run("nutrition_reports_weekly")
         except Exception as e:
             logger.exception("nutrition_reports run_weekly упал — повтор через неделю")
             alert_on_failure("nutrition_reports_weekly", e)

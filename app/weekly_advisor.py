@@ -40,6 +40,7 @@ from app.dashboard import _dkey, _num
 from app.db import get_conn
 from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
+from app import run_log
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -1086,6 +1087,7 @@ def run_scheduler() -> None:
         try:
             _sleep_until(WEEKLY_HOUR_VL, 0, weekday=6)  # 6 = воскресенье (Python Monday=0)
             run_once()
+            run_log.mark_run("weekly_advisor")
         except Exception as e:
             logger.exception("weekly_advisor: run_once упал — повтор через неделю")
             alert_on_failure("weekly_advisor", e)

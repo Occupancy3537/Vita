@@ -79,6 +79,19 @@ with get_conn() as _conn, _conn.cursor() as _cur:
         f"INSERT INTO {schema()}.people (id, name, birth_year) VALUES ('self', 'тест', 1982) "
         "ON CONFLICT (id) DO NOTHING"
     )
+    # Страница «Настройки» (2026-09-22): журнал прогонов циклов + метрики хоста
+    # (DDL = pg_schema_status_page.sql). DDL в card_test — чтобы юниты не писали
+    # в боевые card.*/health.* (тест backup_alert уже показал цену такой ошибки).
+    _cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schema()}.scheduler_run_log (
+          name text PRIMARY KEY, last_ok_at timestamptz,
+          last_error text, last_error_at timestamptz)
+    """)
+    _cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schema()}.host_metrics (
+          ts timestamptz PRIMARY KEY, load1 real, load5 real, load15 real,
+          mem_used_mb int, swap_used_mb int)
+    """)
     _conn.commit()
 
 
@@ -89,6 +102,7 @@ TABLES_TO_CLEAN = [
     "rf_event", "rf_session", "dialog_turn", "agent_step",
     "visits", "results",  # двойники health.* для дуал-райта регистратора
     "symptom_log", "doctor_notes", "investigations", "lab_plan",  # двойники health.* для commit.py
+    "scheduler_run_log", "host_metrics",  # статус-страница (run_log/host_metrics)
 ]
 
 

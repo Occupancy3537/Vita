@@ -42,6 +42,7 @@ import httpx
 from app.ai_models import DEFAULT_MODEL
 from app.db import get_conn
 from app.doctor import telegram
+from app import run_log
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -559,6 +560,7 @@ def run_scheduler() -> None:
                 nxt += timedelta(days=1)
             time.sleep(max(1.0, (nxt - now).total_seconds()))
             run_once()
+            run_log.mark_run("health_watchdog")
         except Exception as e:
             logger.exception("health_watchdog run_once упал — повтор завтра")
             alert_on_failure("health_watchdog", e)

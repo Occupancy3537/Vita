@@ -43,6 +43,7 @@ import httpx
 
 from app import food_diary as fd
 from app.db import get_conn, schema
+from app import run_log
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -401,6 +402,7 @@ def run_polling_loop() -> None:
             time.sleep(5)
             continue
 
+        run_log.mark_run("food_diary_bot_poller", min_interval_seconds=300)
         for update in updates:
             _safe_process(update)
             offset = update["update_id"] + 1

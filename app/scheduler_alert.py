@@ -21,6 +21,7 @@ errorWorkflow (_Error Handler → Telegram + Error_Log на любой сбой)
 """
 import logging
 
+from app import run_log
 from app.db import get_conn
 from app.err_dedup import EXPECTED_TOKEN, run_notify
 
@@ -32,7 +33,13 @@ def alert_on_failure(source: str, exc: BaseException) -> None:
     падении фонового цикла `source`. Сама никогда не бросает исключение —
     вызывается из except-блока, вторичный сбой здесь не должен маскировать
     исходный ни ронять сам планировщик (он должен дожить до следующего
-    time.sleep/повтора)."""
+    time.sleep/повтора).
+
+    2026-09-22 (страница «Настройки»): дополнительно пишет ошибку в
+    card.scheduler_run_log (app/run_log.py) — алерт живёт 60-минутным дедупом
+    и уходит в Telegram, а журнал хранит последнюю ошибку до следующего сбоя
+    и читается страницей /dashboard/system-status."""
+    run_log.mark_error(source, exc)
     text = f"🔴 {source} упал: {exc}"[:800]
     try:
         with get_conn() as conn, conn.cursor() as cur:

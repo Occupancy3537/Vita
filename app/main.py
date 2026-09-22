@@ -94,6 +94,8 @@ import app.food_diary_bot as food_diary_bot
 import app.card_processor as card_processor
 import app.phenoage_calc as phenoage_calc
 import app.yandex_climate as yandex_climate
+import app.host_metrics as host_metrics
+import app.system_status as system_status
 import app.err_dedup as err_dedup
 from app.biohacking_ingest import BiohackingPayload, process_ingest
 from app.write_path import process as process_source
@@ -146,6 +148,9 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # обвязка (_Error Handler/_Err Dedup/backup), не бизнес-логика.
     ("PHENOAGE_CALC_ENABLED", lambda: phenoage_calc.run_scheduler(), "phenoage-calc-scheduler"),
     ("YANDEX_CLIMATE_ENABLED", lambda: yandex_climate.run_scheduler(), "yandex-climate-scheduler"),
+    # 2026-09-22 (страница «Настройки»): коллектор хостовых метрик (load/память/
+    # swap раз в 5 минут) — из истории считается «пик за сутки» для страницы.
+    ("HOST_METRICS_ENABLED", lambda: host_metrics.run_scheduler(), "host-metrics-scheduler"),
 ]
 
 
@@ -271,6 +276,18 @@ def dashboard_weekly_nutrition(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return get_weekly_nutrition(cur)
+
+
+@app.get("/dashboard/system-status")
+def dashboard_system_status(token: str = Query(default="")) -> dict:
+    """Экран «Настройки» (2026-09-22): состояние системы одним ответом —
+    деньги LLM, память/процессор/пик, прогоны фоновых циклов, свежесть данных,
+    ночные процессы, модели/секреты(факт наличия)/гейт. Сборка — app/system_status.py,
+    каждая секция независима (degraded, но не падает целиком)."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return system_status.build(cur)
 
 
 # --- малые утилиты (2026-09-20, группа малых воркфлоу) ---------------------
