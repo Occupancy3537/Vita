@@ -86,6 +86,16 @@ def check_and_notify(cur, wf: str, node: str, telegram_text: str, silent: bool =
 
 def run_notify(cur, wf: str, node: str, telegram_text: str, silent: bool, token: str) -> dict:
     result = check_and_notify(cur, wf, node, telegram_text, silent, token)
+    # 2026-09-23 (Шаг 1 «петли самоулучшения», см. app/issue_log.py): один
+    # хук здесь покрывает и alert_on_failure (фоновые циклы), и три ночных
+    # cron-скрипта (/err-dedup) — единая точка входа для обоих. Пишем
+    # НЕЗАВИСИМО от дедупа/токена: неверный токен уже отсёкся выше
+    # (result["send"]=False из-за fail-closed в check_and_notify до всякой
+    # записи в err_dedup_state) — но при валидном токене находка считается,
+    # даже когда Telegram-уведомление подавлено окном дедупа.
+    if token == EXPECTED_TOKEN and EXPECTED_TOKEN:
+        from app import issue_log
+        issue_log.record_issue(cur, f"errdedup:{wf}:{node}", source=wf, summary=telegram_text or f"{wf}/{node}")
     if result["send"]:
         from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes (см. app/hermes_telegram.py)
         try:
