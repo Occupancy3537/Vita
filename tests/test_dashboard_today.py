@@ -7,7 +7,9 @@ recommendations_log/phenoage_log/patient_state/action_log/user_profile — об�
 from fastapi.testclient import TestClient
 
 from app.dashboard import (
+    _ALCOHOL_TRACE_THRESHOLD_G,
     _action_id,
+    _alcohol_effective_g,
     _hhmm,
     _load_gate,
     _parse_actions,
@@ -85,6 +87,27 @@ def test_load_gate_hernia_in_remission_not_blocked():
     pstate = [{"Status": "done", "Contra_Load": ""}]
     gate = _load_gate(pstate, {"ОДА и неврология": "грыжа L5/S1, полное восстановление"})
     assert gate["blocked"] is False
+
+
+# --- _alcohol_effective_g (2026-09-22, по запросу Влада: кефир — не "выпил") --
+
+def test_alcohol_effective_g_trace_amount_is_zero():
+    """0.3 г из стакана кефира — ровно кейс, из-за которого попросили порог."""
+    assert _alcohol_effective_g(0.3) == 0
+
+
+def test_alcohol_effective_g_at_threshold_is_zero():
+    assert _alcohol_effective_g(_ALCOHOL_TRACE_THRESHOLD_G) == 0
+
+
+def test_alcohol_effective_g_above_threshold_passes_through():
+    assert _alcohol_effective_g(_ALCOHOL_TRACE_THRESHOLD_G + 0.1) == _ALCOHOL_TRACE_THRESHOLD_G + 0.1
+    assert _alcohol_effective_g(14) == 14  # банка пива — должно учитываться полностью
+
+
+def test_alcohol_effective_g_none_or_zero_is_zero():
+    assert _alcohol_effective_g(None) == 0
+    assert _alcohol_effective_g(0) == 0
 
 
 # --- _parse_actions -----------------------------------------------------------

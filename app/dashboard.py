@@ -704,6 +704,21 @@ _BUDGET_KEYS = ["Насыщенные жиры", "Добавленный сах�
 _SLEEP_MIN_OK, _SLEEP_MAX_OK = 420, 540
 _CRP_SENS, _MCV_SENS, _CRP_REF = 1.041, 0.292, 1.5
 _STEPS_TARGET_DAILY = 10000  # общепринятая суточная норма (Han 2023), не персональная база — см. TODO в JS-оригинале
+# 2026-09-22 (по прямому запросу Влада): следовые количества спирта из
+# ферментированных продуктов (кефир, квас, кимчи и т.п. — обычно <1 г на
+# порцию) не должны учитываться как «выпил» ни в источнике дня для
+# биовозраста, ни в стрике «без алкоголя». 1 г — ниже типичной порции
+# кефира/кваса, но заметно ниже даже маленькой порции реального алкоголя
+# (бокал вина ~12 г, банка пива ~14 г) — граница, а не научная константа,
+# можно поправить, если понадобится другое значение.
+_ALCOHOL_TRACE_THRESHOLD_G = 1.0
+
+
+def _alcohol_effective_g(raw_g) -> float:
+    """Следовые количества (<= _ALCOHOL_TRACE_THRESHOLD_G) не считаются как
+    "выпил" — ни в источнике дня для биовозраста, ни в стрике "без алкоголя"."""
+    raw_g = raw_g or 0
+    return raw_g if raw_g > _ALCOHOL_TRACE_THRESHOLD_G else 0
 
 
 def _rows_as_dicts(cur) -> list[dict]:
@@ -968,7 +983,10 @@ def get_today_dashboard(cur) -> dict:
     alcohol_streak_days = 0
     for r in reversed(rows[:-1]):
         g = _num(r.get("Алкоголь_гр"))
-        if g is None or g > 0:
+        # Следовые количества (кефир и т.п.) не считаются как "выпил" —
+        # тот же порог, что и в источнике дня для биовозраста, см.
+        # _ALCOHOL_TRACE_THRESHOLD_G.
+        if g is None or g > _ALCOHOL_TRACE_THRESHOLD_G:
             break
         alcohol_streak_days += 1
     if alcohol_streak_days > 0:
@@ -1064,7 +1082,13 @@ def get_today_dashboard(cur) -> dict:
 
     sleep_min_today = _num(last.get("Чистый_сон_мин"))
     steps_today = _num(last.get("Шаги_за_вчера"))
-    alcohol_g_today = _num(last.get("Алкоголь_гр")) or 0
+    # "Алкоголь_гр" — это сумма по Meals ЗА ВЧЕРА (см. biohacking_ingest.py
+    # "питание за вчера"), тот же паттерн, что и "Шаги_за_вчера" — оба поля
+    # физически лежат в СЕГОДНЯШНЕЙ строке daily_trends, но описывают
+    # предыдущий день. Название переменной оставлено как есть (совпадает со
+    # "steps_today" рядом), подпись ниже — "вчера", по факту данных.
+    # Порог следовых количеств (кефир и т.п.) — см. _ALCOHOL_TRACE_THRESHOLD_G.
+    alcohol_g_today = _alcohol_effective_g(_num(last.get("Алкоголь_гр")) or 0)
     fiber_b = next((b for b in budget if b["label"] == "Клетчатка"), None)
     sat_fat_b = next((b for b in budget if b["label"] == "Насыщенные жиры"), None)
     sugar_b = next((b for b in budget if b["label"] == "Добавленный сахар"), None)
@@ -1101,7 +1125,7 @@ def get_today_dashboard(cur) -> dict:
     mcv_shift_fl = (0.30 * (alcohol_g_today / 40) / 100) * 88
     years = (mcv_shift_fl * _MCV_SENS) / (90 / 7)
     affects.append({
-        "what": f"{alcohol_g_today} г алкоголя сегодня" if alcohol_g_today > 0 else "без алкоголя сегодня",
+        "what": f"{alcohol_g_today} г алкоголя вчера" if alcohol_g_today > 0 else "без алкоголя вчера",
         "how": "Алкоголь линейно повышает MCV — причинная связь (менделевская рандомизация, UK Biobank). Эффект накапливается за ~90 дней оборота эритроцитов. Источник: Thompson 2021.",
         "markers": ["mcv"], "direction": "up" if years > 0.00002 else "neutral",
         "weight": "moderate" if alcohol_g_today > 0 else "unknown", "est_years": _round4(years),
