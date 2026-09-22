@@ -15,7 +15,8 @@ person_id везде 'self'. Fail-safe осознанный: любая проб
 """
 import logging
 import os
-from datetime import date, datetime, timezone
+import time
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -74,3 +75,59 @@ def local_day(ts: datetime, person_id: str = SELF_PERSON_ID) -> date:
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
     return ts.astimezone(person_tz(person_id)).date()
+
+
+# --- расписания в зоне человека (Фаза 3 плана TIME_AND_MULTIUSER) -----------
+
+def next_occurrence(hour: int, minute: int = 0, *, weekday: Optional[int] = None,
+                    day_of_month: Optional[int] = None,
+                    person_id: str = SELF_PERSON_ID,
+                    now: Optional[datetime] = None,
+                    tz: Optional[ZoneInfo] = None) -> datetime:
+    """Ближайший момент hour:minute в зоне человека (aware). Чистая функция —
+    вся арифметика расписаний живёт здесь (тестируется без сна):
+    - без weekday/day_of_month — ежедневно;
+    - weekday=6 — ближайшее воскресенье (0=Пн, как в Python);
+    - day_of_month=1 — ближайшее 1-е число месяца.
+    """
+    tz = tz or person_tz(person_id)
+    now = (now or datetime.now(timezone.utc)).astimezone(tz)
+    nxt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+    if day_of_month is not None:
+        if not (now.day == day_of_month and now < nxt):
+            year, month = now.year, now.month + 1
+            if month > 12:
+                year, month = year + 1, 1
+            nxt = nxt.replace(year=year, month=month, day=day_of_month)
+        return nxt
+
+    if weekday is not None:
+        nxt = nxt + timedelta(days=(weekday - nxt.weekday()) % 7)
+        if nxt <= now:
+            nxt = nxt + timedelta(days=7)
+        return nxt
+
+    if nxt <= now:
+        nxt = nxt + timedelta(days=1)
+    return nxt
+
+
+def sleep_until_local(hour: int, minute: int = 0, *, weekday: Optional[int] = None,
+                      day_of_month: Optional[int] = None,
+                      person_id: str = SELF_PERSON_ID,
+                      chunk_seconds: float = 600.0) -> None:
+    """Спать до ближайшего hour:minute ПО ЧАСАМ ЧЕЛОВЕКА (Фаза 3: расписания
+    следуют за путешественником). Спит кусками по chunk_seconds и пересчитывает
+    цель — смена зоны (/tz) подхватывается в пределах куска, а не «со
+    следующего срабатывания». Машинные расписания (бэкап, docker prune) сюда
+    не переводятся — они про сервер, не про суточный ритм человека."""
+    while True:
+        nxt = next_occurrence(hour, minute, weekday=weekday, day_of_month=day_of_month,
+                              person_id=person_id)
+        remaining = (nxt - datetime.now(timezone.utc)).total_seconds()
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, chunk_seconds))
+        if remaining <= chunk_seconds:
+            return

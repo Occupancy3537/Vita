@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.db import get_conn, schema
 from app.doctor import telegram
-from app import run_log
+from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -175,11 +175,7 @@ def run_scheduler() -> None:
     logger.info("anamnesis scheduler: старт")
     while True:
         try:
-            now = datetime.now(VL)
-            nxt = now.replace(hour=ASK_HOUR_VL, minute=0, second=0, microsecond=0)
-            if nxt <= now:
-                nxt += timedelta(days=1)
-            time.sleep(max(1.0, (nxt - now).total_seconds()))
+            timeutil.sleep_until_local(ASK_HOUR_VL)  # Фаза 3: час — по поясу человека
             ask_daily()
             run_log.mark_run("anamnesis")
         except Exception as e:

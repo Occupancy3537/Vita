@@ -40,7 +40,7 @@ from app.dashboard import _dkey, _num
 from app.db import get_conn
 from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
-from app import run_log
+from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -1071,14 +1071,9 @@ def run_once() -> None:
 
 
 def _sleep_until(hour: int, minute: int = 0, weekday: Optional[int] = None) -> None:
-    now = datetime.now(VL)
-    nxt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if weekday is not None:
-        days_ahead = (weekday - nxt.weekday()) % 7
-        nxt += timedelta(days=days_ahead)
-    if nxt <= now:
-        nxt += timedelta(days=7 if weekday is not None else 1)
-    time.sleep(max(1.0, (nxt - now).total_seconds()))
+    """Фаза 3 (2026-09-22): сон до часа ПО ПОЯСУ ЧЕЛОВЕКА (timeutil), кусками
+    по 10 минут — переключение /tz подхватывается без ожидания следующего дня."""
+    timeutil.sleep_until_local(hour, minute, weekday=weekday)
 
 
 def run_scheduler() -> None:

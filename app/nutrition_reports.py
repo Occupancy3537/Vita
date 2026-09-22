@@ -38,7 +38,7 @@ from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _num, _rows_as_dicts
 from app.db import get_conn
 from app import nutrition_telegram as telegram  # 2026-09-21: отчёты о питании -> @vvk_gemini_bot, не бот доктора (см. app/nutrition_telegram.py)
-from app import run_log
+from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -324,14 +324,9 @@ def call_model(prompt: str, max_tokens: int, reasoning_tokens: int, temperature:
 
 
 def _sleep_until(hour: int, minute: int = 0, weekday: Optional[int] = None) -> None:
-    now = datetime.now(VL)
-    nxt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if weekday is not None:
-        days_ahead = (weekday - nxt.weekday()) % 7
-        nxt += timedelta(days=days_ahead)
-    if nxt <= now:
-        nxt += timedelta(days=7 if weekday is not None else 1)
-    time.sleep(max(1.0, (nxt - now).total_seconds()))
+    """Фаза 3 (2026-09-22): сон до часа ПО ПОЯСУ ЧЕЛОВЕКА (timeutil), кусками
+    по 10 минут — переключение /tz подхватывается без ожидания следующего дня."""
+    timeutil.sleep_until_local(hour, minute, weekday=weekday)
 
 
 def run_daily_scheduler() -> None:

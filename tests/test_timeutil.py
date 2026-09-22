@@ -5,7 +5,7 @@
 ключевые свойства: дефолтная зона при любой проблеме (fail-safe) и «день» в
 зоне человека, а не в UTC (раньше CURRENT_DATE в SQL давал вчерашнюю дату до
 10:00 по Владивостоку — живое доказательство в AGENT_SYNC #57)."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from app import timeutil
@@ -40,3 +40,59 @@ def test_local_day_uses_person_zone_not_utc():
 
 def test_local_day_naive_treated_as_utc():
     assert timeutil.local_day(datetime(2026, 9, 22, 14, 30)) == date(2026, 9, 23)
+
+
+# --- Фаза 3: расписания в зоне человека (next_occurrence / sleep_until_local) ---
+
+def test_next_occurrence_daily_before_and_after_target_hour():
+    tz = ZoneInfo("Asia/Vladivostok")
+    # 22.09 10:00 VL (00:00 UTC) — сегодняшние 11:00 ещё впереди
+    assert timeutil.next_occurrence(11, 0, tz=tz,
+                                    now=datetime(2026, 9, 22, 0, 0, tzinfo=timezone.utc)) \
+        == datetime(2026, 9, 22, 11, 0, tzinfo=tz)
+    # 22.09 19:00 VL (09:00 UTC) — уже позже цели, значит завтра
+    assert timeutil.next_occurrence(11, 0, tz=tz,
+                                    now=datetime(2026, 9, 22, 9, 0, tzinfo=timezone.utc)) \
+        == datetime(2026, 9, 23, 11, 0, tzinfo=tz)
+
+
+def test_next_occurrence_weekly_sunday():
+    tz = ZoneInfo("Asia/Vladivostok")
+    base = datetime(2026, 9, 22, 2, 0, tzinfo=timezone.utc).astimezone(tz)
+    nxt = timeutil.next_occurrence(20, 0, weekday=6, tz=tz, now=base)
+    assert nxt.weekday() == 6 and nxt > base
+    # в найденное воскресенье утром — цель сегодня 20:00
+    sunday_morning = nxt.replace(hour=0, minute=0)
+    assert timeutil.next_occurrence(20, 0, weekday=6, tz=tz, now=sunday_morning) \
+        == sunday_morning.replace(hour=20)
+    # а в 21:00 того же воскресенья — уже следующая неделя
+    assert timeutil.next_occurrence(20, 0, weekday=6, tz=tz, now=sunday_morning.replace(hour=21)) \
+        == sunday_morning.replace(hour=20) + timedelta(days=7)
+
+
+def test_next_occurrence_first_of_month():
+    tz = ZoneInfo("Asia/Vladivostok")
+    # 22.09 12:00 VL → ближайшее 1-е число 10:00
+    assert timeutil.next_occurrence(10, 0, day_of_month=1, tz=tz,
+                                    now=datetime(2026, 9, 22, 2, 0, tzinfo=timezone.utc)) \
+        == datetime(2026, 10, 1, 10, 0, tzinfo=tz)
+    # 1-е число 09:00 VL — цель сегодня в 10:00
+    assert timeutil.next_occurrence(10, 0, day_of_month=1, tz=tz,
+                                    now=datetime(2026, 9, 30, 23, 0, tzinfo=timezone.utc)) \
+        == datetime(2026, 10, 1, 10, 0, tzinfo=tz)
+
+
+def test_sleep_until_local_chunks_and_recomputes(monkeypatch):
+    """Сон кусками: после длинного куска цель пересчитывается (смена зоны /tz
+    подхватывается), короткий остаток досыпается одним куском и выход."""
+    calls = []
+
+    def fake_next(*a, **k):
+        delta = 1800 if not calls else 1
+        return datetime.now(timezone.utc) + timedelta(seconds=delta)
+
+    monkeypatch.setattr(timeutil, "next_occurrence", fake_next)
+    monkeypatch.setattr(timeutil.time, "sleep", lambda s: calls.append(round(s)))
+    timeutil.sleep_until_local(11, 0)
+    assert calls == [600, 1]
+

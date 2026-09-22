@@ -34,7 +34,7 @@ import time
 
 import httpx
 
-from app import registrar
+from app import registrar, timeutil
 from app.db import get_conn, schema
 from app.doctor import anamnesis, dispatch, intake, telegram
 from app import run_log
@@ -174,8 +174,56 @@ def process_one(update: dict) -> None:
         # Волна 3 (B2): фото/документ лабораторий — разбор в card-service,
         # раньше уходили в выключенный Capitan (тихая потеря).
         registrar.handle_update(update)
+    elif destination == "tz_command":
+        _handle_tz_command(update)
     else:
         ingest_test_message(update)
+
+
+def _handle_tz_command(update: dict) -> None:
+    """Детерминированная команда /tz (Фаза 3 плана TIME_AND_MULTIUSER, 2026-09-22):
+    показать или сменить часовой пояс человека. Не идёт ни в LLM-классификатор,
+    ни в доктора; чужие чаты уже отсечены K5-фильтром в process_one, поэтому
+    ответ всегда уходит владельцу."""
+    from app import people
+    msg = update.get("message") or {}
+    chat_id = str((msg.get("chat") or {}).get("id") or OWNER_CHAT_ID)
+    text = (msg.get("text") or "").strip()
+    arg = text[len("/tz"):].strip().lower()
+    try:
+        if not arg or arg in ("?", "статус", "status"):
+            cur_tz = str(timeutil.person_tz())
+            p = people.get_person() or {}
+            home = p.get("home_tz") or "?"
+            now = timeutil.now_local().strftime("%H:%M")
+            lines = [f"🕐 Часовой пояс: <b>{cur_tz}</b> (сейчас {now})"]
+            if cur_tz != home:
+                lines.append(f"Домашний: {home}. Вернуть: /tz home")
+            else:
+                lines.append("Это домашний пояс. Сменить: /tz Bangkok")
+                lines.append("Примеры: " + ", ".join(people.TZ_EXAMPLES[:4]))
+            telegram.send_message(chat_id, "\n".join(lines), parse_mode="HTML")
+            return
+        if arg in ("home", "домой", "дома", "сброс", "reset"):
+            key = people.reset_current_tz()
+            now = timeutil.now_local().strftime("%H:%M")
+            telegram.send_message(chat_id, f"🏠 Вернул домашний пояс: <b>{key}</b> ({now}). "
+                                           "«Сегодня» и расписания — по нему.", parse_mode="HTML")
+            return
+        key = people.set_current_tz(arg)
+        now = timeutil.now_local().strftime("%H:%M")
+        telegram.send_message(
+            chat_id,
+            f"✅ Часовой пояс переключён: <b>{key}</b> (сейчас там {now}).\n"
+            "«Сегодня» и расписания циклов теперь считаются по нему. "
+            "Вернуть домашний: /tz home",
+            parse_mode="HTML",
+        )
+    except ValueError as e:
+        telegram.send_message(chat_id, f"Не понял зону: {e}\nПримеры: " + ", ".join(people.TZ_EXAMPLES))
+    except Exception:
+        logger.exception("tz-команда: не удалось обработать %r", text)
+        telegram.send_message(chat_id, "Техническая заминка с переключением пояса, попробуй ещё раз.")
 
 
 def _safe_process(update: dict) -> None:

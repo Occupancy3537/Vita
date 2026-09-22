@@ -239,3 +239,52 @@ def test_notify_owner_send_failure_never_raises(monkeypatch, caplog):
     monkeypatch.setattr(poller.telegram, "send_message", boom)
     poller._notify_owner_lost({"update_id": 50, "message": {"text": "x"}})  # не бросает
     poller._last_loss_notify_ts = 0.0
+
+
+# --- Фаза 3: команда /tz (часовой пояс) --------------------------------------
+
+def test_route_tz_command_is_deterministic():
+    """«/tz ...» уходит в отдельную ветку — без LLM-классификатора (тест не
+    ходит в OpenRouter, ответ детерминированный)."""
+    from app.doctor import dispatch
+    update = {"update_id": 900, "message": {"chat": {"id": 8956401}, "text": "/tz Asia/Bangkok"}}
+    assert dispatch.route(update) == "tz_command"
+
+
+def test_process_one_tz_command_calls_handler(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(poller, "_handle_tz_command", lambda u: calls.setdefault("tz", u))
+    poller.process_one({"update_id": 901, "message": {"chat": {"id": 8956401}, "text": "/tz Bangkok"}})
+    assert "tz" in calls
+
+
+def test_handle_tz_command_set_status_reset(monkeypatch):
+    """Полный круг: смена зоны → статус → мусорный ввод отклонён → домой.
+    Зона меняется в card_test (people-двойник conftest), восстанавливаем после."""
+    sent = []
+    monkeypatch.setattr(poller.telegram, "send_message",
+                        lambda chat_id, text, **kw: sent.append(text))
+    from app import people
+    saved = people.get_person()["current_tz"]
+
+    def upd(text):
+        return {"update_id": 902, "message": {"chat": {"id": 8956401}, "text": text}}
+
+    try:
+        poller._handle_tz_command(upd("/tz Bangkok"))
+        assert people.get_person()["current_tz"] == "Asia/Bangkok"
+        assert "переключён" in sent[-1]
+
+        poller._handle_tz_command(upd("/tz"))
+        assert "Часовой пояс" in sent[-1] and "Asia/Bangkok" in sent[-1]
+
+        poller._handle_tz_command(upd("/tz not-a-zone!!"))
+        assert people.get_person()["current_tz"] == "Asia/Bangkok"  # мусор не применяется
+        assert "Не понял" in sent[-1]
+
+        poller._handle_tz_command(upd("/tz home"))
+        assert people.get_person()["current_tz"] == saved
+    finally:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(f"UPDATE {schema()}.people SET current_tz = %s WHERE id = 'self'", (saved,))
+            conn.commit()

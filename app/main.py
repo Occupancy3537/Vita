@@ -95,6 +95,7 @@ import app.card_processor as card_processor
 import app.phenoage_calc as phenoage_calc
 import app.yandex_climate as yandex_climate
 import app.host_metrics as host_metrics
+import app.people as people
 import app.system_status as system_status
 import app.err_dedup as err_dedup
 from app.biohacking_ingest import BiohackingPayload, process_ingest
@@ -250,7 +251,15 @@ def dashboard_today(token: str = Query(default="")) -> dict:
     _check_dashboard_token(token)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            return get_today_dashboard(cur)
+            out = get_today_dashboard(cur)
+    # Фаза 3 (2026-09-22): признак «не дома» для дашборда («сегодня · Bangkok»).
+    # Отдельным блоком: сбой чтения пояса не должен ронять экран «Сегодня».
+    try:
+        if isinstance(out.get("decision"), dict):
+            out["decision"]["tz"] = system_status.timezone_block()
+    except Exception:
+        logger.exception("dashboard_today: не удалось добавить блок часового пояса")
+    return out
 
 
 @app.get("/dashboard/today-nutrition")
@@ -282,12 +291,34 @@ def dashboard_weekly_nutrition(token: str = Query(default="")) -> dict:
 def dashboard_system_status(token: str = Query(default="")) -> dict:
     """Экран «Настройки» (2026-09-22): состояние системы одним ответом —
     деньги LLM, память/процессор/пик, прогоны фоновых циклов, свежесть данных,
-    ночные процессы, модели/секреты(факт наличия)/гейт. Сборка — app/system_status.py,
-    каждая секция независима (degraded, но не падает целиком)."""
+    ночные процессы, модели/секреты(факт наличия)/гейт, часовой пояс. Сборка —
+    app/system_status.py, каждая секция независима (degraded, но не падает)."""
     _check_dashboard_token(token)
     with get_conn() as conn:
         with conn.cursor() as cur:
             return system_status.build(cur)
+
+
+class SetTimezoneRequest(BaseModel):
+    token: str = ""
+    tz: str = ""
+    home: bool = False
+
+
+@app.post("/dashboard/system-status/timezone")
+def dashboard_set_timezone(req: SetTimezoneRequest) -> dict:
+    """Смена текущего часового пояса (Фаза 3 плана TIME_AND_MULTIUSER, 2026-09-22):
+    кнопка/поле на странице «Настройки». Та же токен-модель, что у остальных
+    /dashboard/* (fail-closed); home=true — вернуть домашнюю зону."""
+    _check_dashboard_token(req.token)
+    try:
+        if req.home:
+            people.reset_current_tz()
+        else:
+            people.set_current_tz(req.tz)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"ok": True, **system_status.timezone_block()}
 
 
 # --- малые утилиты (2026-09-20, группа малых воркфлоу) ---------------------

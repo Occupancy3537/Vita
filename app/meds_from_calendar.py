@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from app import run_log
+from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -92,11 +92,8 @@ def run_once() -> None:
 
 
 def _sleep_until(hour: int, minute: int = 0) -> None:
-    now = datetime.now(VL)
-    nxt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if nxt <= now:
-        nxt += timedelta(days=1)
-    time.sleep(max(1.0, (nxt - now).total_seconds()))
+    """Фаза 3 (2026-09-22): сон до часа ПО ПОЯСУ ЧЕЛОВЕКА (timeutil)."""
+    timeutil.sleep_until_local(hour, minute)
 
 
 def run_scheduler() -> None:

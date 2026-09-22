@@ -38,7 +38,7 @@ import httpx
 
 from app.db import get_conn
 from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
-from app import run_log
+from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -339,11 +339,7 @@ def run_scheduler() -> None:
     logger.info("system_check scheduler: старт")
     while True:
         try:
-            now = _vl_now()
-            nxt = now.replace(hour=CHECK_HOUR_VL, minute=CHECK_MINUTE_VL, second=0, microsecond=0)
-            if nxt <= now:
-                nxt += timedelta(days=1)
-            time.sleep(max(1.0, (nxt - now).total_seconds()))
+            timeutil.sleep_until_local(CHECK_HOUR_VL, CHECK_MINUTE_VL)  # Фаза 3: по поясу человека
             run_once()
             run_log.mark_run("system_check")
         except Exception as e:

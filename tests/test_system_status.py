@@ -62,6 +62,19 @@ def test_section_failure_is_degraded_not_crash(monkeypatch):
     assert out["loops"] and out["config"]
 
 
+def test_build_includes_timezone_block(monkeypatch):
+    """Фаза 3: блок часового пояса в ответе страницы (текущая/домашняя зона)."""
+    monkeypatch.setattr(system_status, "_freshness", lambda cur: [])
+    monkeypatch.setattr(system_status, "_nightly", lambda cur: [])
+    with get_conn() as conn, conn.cursor() as cur:
+        out = system_status.build(cur)
+    tz = out["timezone"]
+    assert tz and tz["current_tz"] and tz["home_tz"]
+    assert tz["is_travelling"] in (True, False)
+    assert len(tz["local_time"]) == 5      # HH:MM
+    assert isinstance(tz["examples"], list) and tz["examples"]
+
+
 def test_fmt_moment_utc_and_dates(monkeypatch):
     from datetime import date, datetime, timezone
     name, age = system_status._fmt_moment(datetime.now(timezone.utc))

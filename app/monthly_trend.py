@@ -31,7 +31,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from app import run_log
+from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -284,14 +284,8 @@ def run_once() -> None:
 
 
 def _sleep_until_first_of_month(hour: int) -> None:
-    now = datetime.now(VL)
-    if now.day == 1 and now.hour < hour:
-        nxt = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-    else:
-        # следующее 1-е число следующего месяца
-        year, month = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
-        nxt = now.replace(year=year, month=month, day=1, hour=hour, minute=0, second=0, microsecond=0)
-    time.sleep(max(1.0, (nxt - now).total_seconds()))
+    """Фаза 3 (2026-09-22): сон до 1-го числа ПО ПОЯСУ ЧЕЛОВЕКА (timeutil)."""
+    timeutil.sleep_until_local(hour, day_of_month=1)
 
 
 def run_scheduler() -> None:

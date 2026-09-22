@@ -329,6 +329,23 @@ def _config(cur) -> dict:
             "gate": gate}
 
 
+def timezone_block() -> dict:
+    """Часовой пояс человека (Фаза 3): текущая/домашняя зона, «не дома», местное
+    время. Используется и страницей «Настройки», и инъекцией в /dashboard/today
+    («сегодня · Bangkok»)."""
+    from app import people
+    p = people.get_person() or {}
+    home = p.get("home_tz") or timeutil.DEFAULT_TZ
+    cur = str(timeutil.person_tz())
+    return {
+        "home_tz": home,
+        "current_tz": cur,
+        "is_travelling": cur != home,
+        "local_time": timeutil.now_local().strftime("%H:%M"),
+        "examples": people.TZ_EXAMPLES,
+    }
+
+
 def build(cur) -> dict:
     """Собрать ответ страницы. cur — курсор активного соединения."""
     money = _sec("money", lambda: _money(cur), None)
@@ -339,6 +356,7 @@ def build(cur) -> dict:
     nightly = _sec("nightly", lambda: _nightly(cur), [])
     config = _sec("config", lambda: _config(cur), {"models": [], "secrets_ok": 0,
                                                    "secrets_total": len(SECRET_NAMES), "gate": None})
+    timezone = _sec("timezone", timezone_block, None)
     local_now = timeutil.now_local()
     return {
         "ts": local_now.strftime("%d.%m %H:%M") + " VL",
@@ -349,4 +367,5 @@ def build(cur) -> dict:
         "freshness": freshness,
         "nightly": nightly,
         "config": config,
+        "timezone": timezone,
     }
