@@ -6,8 +6,9 @@ pg_sheets_diff_check.js, sheets_to_pg_mirror.js) запускаются НАПР
 n8n-вебхук `/webhook/err-dedup` для дедуплицированного алерта в Telegram —
 единственная оставшаяся причина, по которой n8n ещё нельзя было выключить
 полностью. Порт — эндпоинт `/err-dedup` здесь же в card-service, скрипты
-просто меняют port 5678 -> 8080 и path /webhook/err-dedup -> /err-dedup, ни
-токен (8beNA4tqEdqhpjtUqCUM), ни тело запроса не меняются.
+просто меняют port 5678 -> 8080 и path /webhook/err-dedup -> /err-dedup, тело
+запроса не меняется (токен — см. ERR_DEDUP_TOKEN ниже, значение только в env,
+не здесь; ротирован 2026-09-22 после внешнего аудита, см. AGENT_SYNC.md).
 
 Дедуп-состояние (было $getWorkflowStaticData('global').seen{}, персистентно
 между production-прогонами активного n8n-воркфлоу) — здесь в

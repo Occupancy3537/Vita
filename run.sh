@@ -98,6 +98,8 @@ cd "$(dirname "$0")"
 : "${ERR_DEDUP_TOKEN:?не задан — три ночных cron-скрипта не смогут слать алерты через /err-dedup}"
 : "${HERMES_BOT_TOKEN:?не задан — системные алерты не смогут уйти в @Hermes_AI_vvk_bot}"
 : "${NUTRITION_BOT_TOKEN:?не задан — отчёты о питании не смогут уйти в @vvk_gemini_bot}"
+: "${ACTION_ACK_TOKEN:?не задан — кнопки 'сделал' на дашборде уйдут в fail-closed forbidden}"
+: "${BACKUP_STATUS_TOKEN:?не задан — пинг ночного бэкапа не сможет обновить состояние}"
 
 sudo docker build -t card-service:latest .
 
@@ -146,6 +148,8 @@ sudo docker run -d \
   -e ERR_DEDUP_TOKEN="$ERR_DEDUP_TOKEN" \
   -e HERMES_BOT_TOKEN="$HERMES_BOT_TOKEN" \
   -e NUTRITION_BOT_TOKEN="$NUTRITION_BOT_TOKEN" \
+  -e ACTION_ACK_TOKEN="$ACTION_ACK_TOKEN" \
+  -e BACKUP_STATUS_TOKEN="$BACKUP_STATUS_TOKEN" \
   card-service:latest
 
 echo "card-service started. Проверка: curl http://127.0.0.1:8080/health"

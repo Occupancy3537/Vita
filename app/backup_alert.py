@@ -12,6 +12,7 @@
 процесса: переживает рестарт card-service, как и $getWorkflowStaticData
 переживал рестарт n8n."""
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -27,7 +28,10 @@ CHAT_ID = "8956401"
 # разошлось с реальным triggerAtHour: 9, оставлено n8n как есть, не мой баг,
 # просто беру настоящее значение параметра, не текст лейбла).
 CHECK_HOUR_UTC = 9
-WEBHOOK_TOKEN = "4bu6zMq9CxzhxA1b4WcB"
+# 2026-09-22 (внешний аудит, K3 — КРИТИЧНО): значение раньше было литералом
+# здесь И в backups/infra/nightly_backup.sh — вынесено в env
+# (BACKUP_STATUS_TOKEN, run.sh) и ротировано (засветилось внешнему аудиту).
+WEBHOOK_TOKEN = os.environ.get("BACKUP_STATUS_TOKEN", "")
 STALE_AFTER_HOURS = 26
 
 
@@ -51,8 +55,9 @@ def _store_state(cur, result: str, detail: str, stamp: str) -> None:
 
 def handle_ping(token: str, result: str, detail: str, stamp: str) -> str:
     """Порт ветки src === 'webhook' из Assess. Возвращает текст алерта ('' —
-    без алерта). Fail-closed на токен, как и в оригинале."""
-    if token != WEBHOOK_TOKEN:
+    без алерта). Fail-closed на токен, как и в оригинале — пустой
+    WEBHOOK_TOKEN (переменная не задана) тоже отказ, не "токен не нужен"."""
+    if not WEBHOOK_TOKEN or token != WEBHOOK_TOKEN:
         return ""
     with get_conn() as conn, conn.cursor() as cur:
         _store_state(cur, result, detail, stamp)

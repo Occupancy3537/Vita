@@ -4,6 +4,7 @@ n8n-воркфлоу, сгруппированы в одном файле тол
 каждая слишком мала для своего модуля (тот же принцип, что уже применялся
 негласно к app/gate_watch.py — маленький сфокусированный модуль на функцию,
 здесь просто несколько функций такого размера в одном файле)."""
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -36,11 +37,15 @@ def check_breakfast(cur) -> dict:
 # sheets_to_pg_mirror.js, так что отметка "сделал" могла не доехать до
 # дашборда почти сутки. Теперь пишет напрямую в Postgres — тот же canonical-
 # источник, что читает get_today_dashboard(). Sheets больше не участвует.
-_ACTION_ACK_TOKEN = "iNBjTz5lRFgfhkWYZ8bG"
+# 2026-09-22 (внешний аудит, K3 — КРИТИЧНО): значение раньше было литералом
+# здесь — вынесено в env (ACTION_ACK_TOKEN, run.sh) и ротировано (засветилось
+# внешнему аудиту). Синхронизировано со значением, зашитым client-side в
+# /var/www/d-.../{index,v4}.html (ACK_TOKEN) — оба места правятся вместе.
+_ACTION_ACK_TOKEN = os.environ.get("ACTION_ACK_TOKEN", "")
 
 
 def action_ack(token: str, action_id: str, done) -> dict:
-    if token != _ACTION_ACK_TOKEN:
+    if not _ACTION_ACK_TOKEN or token != _ACTION_ACK_TOKEN:
         return {"ok": False, "error": "forbidden"}
     action_id = str(action_id or "").strip()
     if not action_id:
