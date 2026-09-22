@@ -49,3 +49,29 @@ def test_alert_on_failure_never_raises_when_db_unavailable(monkeypatch):
         raise RuntimeError("no db")
     monkeypatch.setattr(sa, "get_conn", _boom)
     sa.alert_on_failure("test-scheduler-alert-source", ValueError("x"))  # не должно бросить
+
+
+# --- alert_on_sustained_failure (2026-09-23, по запросу Влада: не шуметь на --
+# единичный сетевой обрыв long-polling, который retry-цикл сам переживает) --
+
+def test_alert_on_sustained_failure_below_threshold_is_silent(monkeypatch):
+    calls = []
+    monkeypatch.setattr(sa, "alert_on_failure", lambda src, exc: calls.append((src, exc)))
+    sa.alert_on_sustained_failure("test-scheduler-alert-source", ValueError("blip"), consecutive_failures=1)
+    sa.alert_on_sustained_failure("test-scheduler-alert-source", ValueError("blip"), consecutive_failures=2)
+    assert calls == []  # ниже порога (по умолчанию 3) — ни разу не позвал alert_on_failure
+
+
+def test_alert_on_sustained_failure_at_threshold_fires(monkeypatch):
+    calls = []
+    monkeypatch.setattr(sa, "alert_on_failure", lambda src, exc: calls.append((src, exc)))
+    sa.alert_on_sustained_failure("test-scheduler-alert-source", ValueError("сеть совсем легла"), consecutive_failures=3)
+    assert len(calls) == 1
+    assert calls[0][0] == "test-scheduler-alert-source"
+
+
+def test_alert_on_sustained_failure_custom_threshold(monkeypatch):
+    calls = []
+    monkeypatch.setattr(sa, "alert_on_failure", lambda src, exc: calls.append((src, exc)))
+    sa.alert_on_sustained_failure("x", ValueError("y"), consecutive_failures=1, threshold=1)
+    assert len(calls) == 1  # порог=1 — алертит с первого раза, как раньше alert_on_failure

@@ -47,3 +47,22 @@ def alert_on_failure(source: str, exc: BaseException) -> None:
             conn.commit()
     except Exception:
         logger.exception("scheduler_alert: не удалось отправить алерт про %s", source)
+
+
+def alert_on_sustained_failure(source: str, exc: BaseException, consecutive_failures: int, threshold: int = 3) -> None:
+    """Как alert_on_failure(), но только когда сбои идут ПОДРЯД `threshold` раз
+    и больше (2026-09-23, по прямому запросу Влада: «система должна сама
+    отлавливать ошибки, которые ничего не сломают» — единичный сетевой обрыв
+    long-polling ("[Errno 104] Connection reset by peer" и подобные) НИЧЕГО
+    не ломает: retry-цикл сам переживает его за секунды, ничего не потеряно.
+    До этой функции КАЖДЫЙ такой обрыв всё равно шёл полным alert_on_failure —
+    Telegram-алерт (пока не подавлен 60-мин дедупом), запись в
+    card.scheduler_run_log (видна на «Настройках»), запись в card.issue_log
+    (Шаг 1 «петли самоулучшения») — три источника шума на то, что само
+    прошло за 5 секунд. Ниже порога — ни один из этих трёх следов не
+    появляется вообще, поднимать шум стоит, только когда сбои реально не
+    проходят сами."""
+    if consecutive_failures < threshold:
+        logger.info("%s: сбой %s/%s подряд (%s) — транзиентно, не алерчу", source, consecutive_failures, threshold, exc)
+        return
+    alert_on_failure(source, exc)

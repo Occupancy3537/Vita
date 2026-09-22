@@ -46,7 +46,7 @@ from app import food_diary as fd
 from app.db import get_conn, schema
 from app import run_log
 from app import timeutil
-from app.scheduler_alert import alert_on_failure
+from app.scheduler_alert import alert_on_sustained_failure
 
 logger = logging.getLogger(__name__)
 
@@ -399,14 +399,22 @@ def run_polling_loop() -> None:
         offset = _get_last_offset(cur)
     logger.info("food_diary_bot polling loop starting from offset %s", offset)
 
+    # 2026-09-23 (по запросу Влада — «сама отлавливает ошибки, которые ничего
+    # не сломают»): единичный обрыв long-polling переживается retry'ем ниже
+    # за 5с сам — алертить на КАЖДЫЙ такой обрыв было чистым шумом. См.
+    # app/scheduler_alert.py::alert_on_sustained_failure и app/doctor/
+    # poller.py (тот же фикс, тот же день, тот же класс шума).
+    consecutive_failures = 0
     while True:
         try:
             updates = get_updates(offset)
         except Exception as e:
+            consecutive_failures += 1
             logger.exception("food_diary_bot: getUpdates упал, повтор через 5с")
-            alert_on_failure("food_diary_bot_poller", e)
+            alert_on_sustained_failure("food_diary_bot_poller", e, consecutive_failures)
             time.sleep(5)
             continue
+        consecutive_failures = 0
 
         run_log.mark_run("food_diary_bot_poller", min_interval_seconds=300)
         for update in updates:

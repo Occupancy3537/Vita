@@ -38,7 +38,7 @@ import httpx
 
 from app.db import get_conn
 from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
-from app import run_log, system_status, timeutil
+from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -295,22 +295,6 @@ def _check_garmin_ingest_failures(cur, problems: list, notes: list) -> None:
         problems.append(f"health.garmin_ingest_log: {cnt} failed за последние 3 дня (последний {row[1]}) — разбор Garmin-payload'а падает")
 
 
-def _check_system_status_backlog(problems: list, notes: list) -> None:
-    """2026-09-23 (Шаг 3 «петли самоулучшения продукта» — Влад: «есть проверка
-    ошибок и логи, но пока я не скажу исправить, никто не исправляет»):
-    те же проблемы, что видны на странице «Настройки» (card.issue_log +
-    хост/циклы/ночные процессы/свежесть, см. app/system_status.py::
-    compute_problems) — не ждут, пока Влад откроет страницу сам, а
-    толкаются в это же утреннее сообщение. Fail-safe: сбой сборки
-    system_status не должен ронять остальную часть утренней проверки."""
-    try:
-        with get_conn() as conn, conn.cursor() as cur:
-            status = system_status.build(cur)
-        problems.extend(system_status.compute_problems(status))
-    except Exception:
-        notes.append("бэклог/статус системы (Настройки) не проверен — сбой сборки")
-
-
 def build_message() -> dict:
     problems: list = []
     notes: list = [
@@ -326,7 +310,6 @@ def build_message() -> dict:
         _check_anomaly_freshness(cur, problems, notes)
         _check_garmin_ingest_failures(cur, problems, notes)
     _check_load_gate(today_cache, problems, notes)
-    _check_system_status_backlog(problems, notes)
 
     ts = _vl_now().strftime("%Y-%m-%d %H:%M")
     if problems:
