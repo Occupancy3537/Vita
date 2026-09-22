@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from app import system_check
+from app import system_check, system_status
 
 
 def _resp(url="http://test/", **kwargs):
@@ -191,6 +191,12 @@ def test_build_message_all_clean_no_problems(monkeypatch):
             })
         return _resp(url, status_code=200, json={"updated_at": system_check._vl_now().isoformat()})
     monkeypatch.setattr(httpx, "get", fake_get)
+    # 2026-09-23 (Шаг 3 «петли самоулучшения»): build_message() теперь зовёт
+    # system_status.build(), которая читает live health.* (freshness/nightly)
+    # напрямую, без схемы card_test — тот же принцип изоляции, что уже
+    # применяет test_system_status.py к своим тестам build().
+    monkeypatch.setattr(system_status, "_freshness", lambda cur: [])
+    monkeypatch.setattr(system_status, "_nightly", lambda cur: [])
 
     msg = system_check.build_message()
     assert msg["has_problems"] is False

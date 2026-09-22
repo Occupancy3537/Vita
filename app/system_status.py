@@ -421,3 +421,63 @@ def build(cur) -> dict:
         "config": config,
         "timezone": timezone,
     }
+
+
+def _ago_text(h: Optional[float]) -> str:
+    """Порт ago() из settings.html (JS) — для дэйли-дайджеста (app/system_check.py),
+    не только для страницы."""
+    if h is None:
+        return "ещё не отмечался"
+    if h < 1:
+        return "меньше часа назад"
+    if h < 48:
+        return str(round(h, 1)).replace(".", ",") + " ч назад"
+    return str(round(h / 24)) + " дн назад"
+
+
+def compute_problems(status: dict) -> list[str]:
+    """Порт computeProblems() из settings.html (JS) — та же логика, что уже
+    поднимает проблемы в вердикт страницы «Настройки», здесь используется
+    для push-дайджеста (2026-09-23, Шаг 3 «петли самоулучшения»: Влад — «есть
+    проверка ошибок и логи, но пока я не скажу исправить, никто не
+    исправляет» — раньше эти находки видел только тот, кто сам открыл
+    страницу; теперь толкаются в то же утреннее сообщение, что и
+    app/system_check.py, само по себе). ВАЖНО: логика сознательно продублирована
+    на двух языках (JS для страницы по запросу, Python для дайджеста по
+    расписанию) — контракт полей `status` (см. build()) общий, при правке
+    условия/порога в одном месте обнови и другое."""
+    out: list[str] = []
+    h, peak = status.get("host"), status.get("peak24")
+    if h and h.get("now_pct", 0) >= 85:
+        out.append(f"процессор занят {h['now_pct']}% — что-то тяжёлое зависло")
+    if h and peak and h.get("cores") and peak.get("load", 0) / h["cores"] * 100 > 100:
+        out.append(f"пик нагрузки за сутки {round(peak['load'] / h['cores'] * 100)}% "
+                   f"(в {peak.get('at')}) — ядер не хватало")
+    for p in status.get("nightly") or []:
+        if p.get("st") == "bad":
+            out.append(f"{p['n']}: {p['v']}")
+    err_loops = [l for l in (status.get("loops") or [])
+                 if l.get("last_error") and l.get("last_error_h") is not None and l["last_error_h"] <= 48]
+    for l in err_loops[:2]:
+        out.append(f"сбой: {l['n']} ({_ago_text(l['last_error_h'])})")
+    stale = [f for f in (status.get("freshness") or []) if not f.get("ok")]
+    if stale:
+        out.append("данные отстали: " + ", ".join(f["n"] for f in stale))
+    warn_nightly = [p for p in (status.get("nightly") or []) if p.get("st") == "warn"]
+    if warn_nightly:
+        out.append("ночью внимание: " + ", ".join(p["n"] for p in warn_nightly))
+    open_issues = status.get("issues") or []
+    crit_issues = [i for i in open_issues if i.get("severity") == "critical"]
+    for i in crit_issues:
+        out.append(f"бэклог ({i['source']}): {i['summary']}")
+    # 2026-09-23: err_dedup.run_notify() пока пишет ВСЁ как severity="important"
+    # (см. app/err_dedup.py) — ничто сегодня не становится "critical" само,
+    # только вручную. Без этой строки дайджест молчал бы про бэклог целиком,
+    # пока кто-то не проставит критичность руками — противоречит самой цели
+    # Шага 3 (не ждать, пока Влад заметит сам).
+    non_crit = len(open_issues) - len(crit_issues)
+    if non_crit:
+        out.append(f"в бэклоге ещё {non_crit} открытых находок(и) не критичных — см. Настройки")
+    if not h:
+        out.append("метрики машины недоступны")
+    return out
