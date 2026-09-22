@@ -1,6 +1,12 @@
 """app/backup_alert.py — порт n8n `_Backup Alert` (2026-09-20). health.
-backup_alert_state — реальная прод-таблица (1 строка-синглтон), сбрасываем
-до/после каждого теста, тот же принцип, что test_gate_watch.py."""
+backup_alert_state — реальная прод-таблица (1 строка-синглтон).
+
+2026-09-22 (найдено при наполнении страницы настроек): фикстура раньше
+УДАЛЯЛА боевую строку до/после каждого теста — каждый прогон pytest стирал
+реальное состояние последнего пинга бэкапа (тот же класс, что инцидент с
+health.anomaly_log, #54), из-за чего check_stale() после каждого прогона
+тестов честно решал, что «пинга не было никогда», и слал бы ложный алерт.
+Теперь строка СОХРАНЯЕТСЯ и восстанавливается, а не удаляется."""
 import pytest
 from datetime import datetime, timedelta, timezone
 
@@ -9,13 +15,21 @@ from app.db import get_conn
 
 
 @pytest.fixture(autouse=True)
-def reset_state():
+def preserve_state():
     with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT ts, result, detail, stamp FROM health.backup_alert_state WHERE id = 1")
+        saved = cur.fetchone()
         cur.execute("DELETE FROM health.backup_alert_state WHERE id = 1")
         conn.commit()
     yield
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM health.backup_alert_state WHERE id = 1")
+        if saved is not None:
+            cur.execute(
+                "INSERT INTO health.backup_alert_state (id, ts, result, detail, stamp) "
+                "VALUES (1, %s, %s, %s, %s)",
+                saved,
+            )
         conn.commit()
 
 
