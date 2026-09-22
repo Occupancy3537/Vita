@@ -162,6 +162,63 @@ def test_parse_json_from_ai_raises_on_malformed_json():
         fd.parse_json_from_ai("{not valid json}")
 
 
+# --- normalize_food_group_tags (2026-09-22, слито из app/diet_tagger.py) -----
+# Раньше это была отдельная разборка ОТДЕЛЬНОГО, до 15 мин позже сделанного
+# LLM-вызова (diet_tagger.parse_tags, удалён). Теперь та же нормализация
+# применяется к dict, который уже вернул parse_json_from_ai() в ОДНОМ ответе
+# вместе с нутриентами — по запросу Влада: один вызов на приём пищи.
+
+def test_normalize_food_group_tags_valid_response():
+    parsed = {"NOVA": 2, "veg_g": 50, "fruit_g": 0, "wholegrain_g": 30,
+              "legume_nut_g": 0, "redmeat_g": 0, "ssb_ml": 0, "pufa_g": 5, "plants": "морковь, лук"}
+    tags = fd.normalize_food_group_tags(parsed)
+    assert tags["NOVA"] == 2
+    assert tags["veg_g"] == 50.0
+    assert tags["ПНЖ"] == 5.0  # LLM-ключ pufa_g -> колонка ПНЖ
+    assert tags["plants"] == "морковь, лук"
+
+
+def test_normalize_food_group_tags_clamps_nova_to_1_4():
+    assert fd.normalize_food_group_tags({"NOVA": 9})["NOVA"] == 4
+    assert fd.normalize_food_group_tags({"NOVA": -3})["NOVA"] == 1
+
+
+def test_normalize_food_group_tags_nova_missing_or_zero_falls_back_to_1():
+    assert fd.normalize_food_group_tags({})["NOVA"] == 1
+    assert fd.normalize_food_group_tags({"NOVA": 0})["NOVA"] == 1
+
+
+def test_normalize_food_group_tags_missing_numeric_fields_default_to_zero():
+    tags = fd.normalize_food_group_tags({"NOVA": 1})
+    assert tags["veg_g"] == 0.0
+    assert tags["ПНЖ"] == 0.0
+    assert tags["plants"] == ""
+
+
+def test_normalize_food_group_tags_plants_truncated_to_300_chars():
+    long_plants = "растение, " * 50
+    tags = fd.normalize_food_group_tags({"NOVA": 1, "plants": long_plants})
+    assert len(tags["plants"]) <= 300
+
+
+def test_normalize_food_group_tags_rounds_to_one_decimal():
+    tags = fd.normalize_food_group_tags({"NOVA": 1, "veg_g": 33.333})
+    assert tags["veg_g"] == 33.3
+
+
+def test_parse_and_normalize_single_ai_response_covers_both_nutrients_and_food_group():
+    """Инвариант слияния: один ответ модели -> и нутриенты, и классификация
+    качества рациона, без второго LLM-вызова."""
+    raw = ('```json\n{"Meal_description": "Гречка с курицей, 300г", "Calories": 450, '
+           '"Proteins": 35, "NOVA": 1, "veg_g": 0, "plants": "гречка"}\n```')
+    parsed = fd.parse_json_from_ai(raw)
+    parsed.update(fd.normalize_food_group_tags(parsed))
+    assert parsed["Calories"] == 450
+    assert parsed["NOVA"] == 1
+    assert parsed["plants"] == "гречка"
+    assert parsed["ПНЖ"] == 0.0
+
+
 # --- статистика day/week -----------------------------------------------------
 
 def _meal(user, date_str, cal, prot, carb, fat):
@@ -280,3 +337,19 @@ def test_delete_meal_nonexistent_id_no_crash():
     with get_conn() as conn, conn.cursor() as cur:
         fd.delete_meal(cur, "does-not-exist-12345")
         conn.commit()
+
+
+def test_insert_meal_writes_food_group_columns_from_same_insert():
+    """2026-09-22: NOVA/veg_g/... раньше дописывались ОТДЕЛЬНЫМ UPDATE'ом
+    (diet_tagger, до 15 мин позже) — теперь тем же INSERT, что нутриенты."""
+    nutrients = _nutrients("500")
+    nutrients.update(fd.normalize_food_group_tags(
+        {"NOVA": 3, "veg_g": 20, "pufa_g": 1.5, "plants": "лук, морковь"}))
+    with get_conn() as conn, conn.cursor() as cur:
+        fd.insert_meal(cur, TEST_ENTRY_ID, "Влад Васюк", "2026-09-21T12:00:00+10:00", nutrients)
+        conn.commit()
+        cur.execute('SELECT "NOVA", "veg_g", "ПНЖ", "plants" FROM health.meals WHERE "Entry_ID" = %s', (TEST_ENTRY_ID,))
+        # text-колонки: psycopg передаёт Python int/float как есть, Postgres сам
+        # кастует в text (20.0 -> '20', как и остальные нутриенты в этой функции,
+        # не str()-принудительно, как раньше делал отдельный diet_tagger.write_tags).
+        assert cur.fetchone() == ("3", "20", "1.5", "лук, морковь")

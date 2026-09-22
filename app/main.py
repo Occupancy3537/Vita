@@ -84,7 +84,6 @@ import app.gate_watch as gate_watch
 import app.memory_archive_check as memory_archive_check
 import app.backup_alert as backup_alert
 import app.small_webhooks as small_webhooks
-import app.diet_tagger as diet_tagger
 import app.health_watchdog as health_watchdog
 import app.nutrition_reports as nutrition_reports
 import app.weekly_advisor as weekly_advisor
@@ -118,7 +117,9 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     ("GATE_WATCH_ENABLED", lambda: gate_watch.run_scheduler(), "gate-watch-scheduler"),
     ("SMALL_ALERTS_ENABLED", lambda: memory_archive_check.run_scheduler(), "memory-archive-check-scheduler"),
     ("SMALL_ALERTS_ENABLED", lambda: backup_alert.run_scheduler(), "backup-alert-scheduler"),
-    ("DIET_TAGGER_ENABLED", lambda: diet_tagger.run_scheduler(), "diet-tagger-scheduler"),
+    # 2026-09-22: DIET_TAGGER_ENABLED/app.diet_tagger удалён — по запросу Влада
+    # слит в app/food_diary.py (одна LLM-классификация в момент записи блюда,
+    # не отдельный проход раз в 15 мин), см. докстринг food_diary.py.
     ("HEALTH_WATCHDOG_ENABLED", lambda: health_watchdog.run_scheduler(), "health-watchdog-scheduler"),
     ("NUTRITION_REPORTS_ENABLED", lambda: nutrition_reports.run_daily_scheduler(), "nutrition-daily-report-scheduler"),
     ("NUTRITION_REPORTS_ENABLED", lambda: nutrition_reports.run_weekly_scheduler(), "nutrition-weekly-report-scheduler"),

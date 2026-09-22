@@ -84,8 +84,8 @@ KNOWN_COLS = [
     "Garmin_устройство",
 ]
 
-# app.nutrition_reports.py / diet_tagger.py уже используют _js_round для того же
-# самого JS Math.round-vs-Python-round расхождения (round-half-up vs banker's
+# app.nutrition_reports.py / app.food_diary.py уже используют _js_round для того
+# же самого JS Math.round-vs-Python-round расхождения (round-half-up vs banker's
 # rounding) — здесь используется тот же приём, инлайн (модуль не импортирует
 # dashboard.py, чтобы не тянуть его LLM/дашборд-зависимости ради одной функции).
 def _js_round1(x: Optional[float]) -> Optional[float]:

@@ -34,8 +34,9 @@
 # 2026-09-20: SMALL_ALERTS_ENABLED — планировщики app/memory_archive_check.py
 # (ежедневно 08:00 VL) и app/backup_alert.py (ежедневно 09:00 UTC) — порты
 # n8n _Memory Pre-Archive Check и _Backup Alert.
-# 2026-09-20: DIET_TAGGER_ENABLED — app/diet_tagger.py (каждые 15 мин), порт
-# n8n Diet Quality Tagger. Первый порт группы 2 с реальным LLM-вызовом.
+# 2026-09-22: DIET_TAGGER_ENABLED/app/diet_tagger.py удалён — по запросу
+# Влада слит в app/food_diary.py: NOVA/veg_g/... теперь классифицируются в
+# том же LLM-вызове, что и нутриенты, а не отдельным проходом раз в 15 мин.
 # 2026-09-20: HEALTH_WATCHDOG_ENABLED — app/health_watchdog.py (ежедневно
 # 09:00 VL), порт n8n Health Watchdog.
 # 2026-09-20: NUTRITION_REPORTS_ENABLED — app/nutrition_reports.py (ежедневно
@@ -122,7 +123,6 @@ sudo docker run -d \
   -e SYSTEM_CHECK_ENABLED=1 \
   -e GATE_WATCH_ENABLED=1 \
   -e SMALL_ALERTS_ENABLED=1 \
-  -e DIET_TAGGER_ENABLED=1 \
   -e HEALTH_WATCHDOG_ENABLED=1 \
   -e NUTRITION_REPORTS_ENABLED=1 \
   -e WEEKLY_ADVISOR_ENABLED=1 \

@@ -22,7 +22,16 @@ id='food_diary' — отдельная строка от доктора, id='sin
 приоритета classify_message() (reply > command > фото+текст > текст > фото)
 вместо независимых условий n8n Switch — оставлено как реализовано; дубль-
 запись в health.meals в Google Sheets (Nutrition!Meals) — оставлена
-навсегда, не только на переходный период."""
+навсегда, не только на переходный период.
+
+2026-09-22 (по запросу Влада): call_text_llm/call_photo_llm теперь оба
+используют fd.MODEL (единая google/gemini-3.1-flash-lite — GLM 5.3 Flash
+из питания убран целиком), и оба места, где раньше стоял голый
+fd.parse_json_from_ai(raw), сразу дозаполняют NOVA/veg_g/.../plants через
+fd.normalize_food_group_tags() — это то, что раньше делал ОТДЕЛЬНЫЙ,
+запускавшийся до 15 минут спустя app/diet_tagger.py (удалён при слиянии,
+см. докстринг app/food_diary.py). Побочный эффект: _sync_to_sheet() теперь
+дублирует и эти поля в Sheets — раньше туда попадали только нутриенты."""
 import base64
 import logging
 import os
@@ -144,7 +153,7 @@ def call_text_llm(user_prompt: str, timeout: float = 30.0) -> str:
             fd.OPENROUTER_URL,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
-                "model": fd.MODEL_TEXT, "temperature": 0.2, "max_tokens": 3000,
+                "model": fd.MODEL, "temperature": 0.2, "max_tokens": 3000,
                 "provider": {"order": fd.PROVIDER_ORDER, "allow_fallbacks": True},
                 "reasoning": {"effort": "low"},
                 "messages": [{"role": "system", "content": fd.SYSTEM_PROMPT}, {"role": "user", "content": user_prompt}],
@@ -168,7 +177,7 @@ def call_photo_llm(user_prompt: str, image_bytes: bytes, timeout: float = 30.0) 
             fd.OPENROUTER_URL,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
-                "model": fd.MODEL_PHOTO, "temperature": 0.2, "max_tokens": 3000,
+                "model": fd.MODEL, "temperature": 0.2, "max_tokens": 3000,
                 "provider": {"order": fd.PROVIDER_ORDER, "allow_fallbacks": True},
                 "messages": [
                     {"role": "system", "content": fd.SYSTEM_PROMPT},
@@ -288,6 +297,7 @@ def _handle_new_entry(message: dict, msg_type: str) -> None:
         send_message(message["chat"]["id"], "⚠️ Не смог распознать блюдо — модель не ответила. Попробуй ещё раз.")
         return
     parsed = fd.parse_json_from_ai(raw)
+    parsed.update(fd.normalize_food_group_tags(parsed))
 
     entry_id = str(message["message_id"])
     user_id = fd.telegram_user_id(message.get("from") or {})
@@ -311,6 +321,7 @@ def _handle_edit_reply(message: dict) -> None:
         send_message(message["chat"]["id"], "⚠️ Не смог пересчитать правку — модель не ответила. Попробуй ещё раз.")
         return
     parsed = fd.parse_json_from_ai(raw)
+    parsed.update(fd.normalize_food_group_tags(parsed))
 
     # Порт "Только Обновление"/PG: финальный Entry_ID — из ТОГО ЖЕ текста, но
     # нестрогим регэкспом (не обязательно квадратные скобки), независимо от
