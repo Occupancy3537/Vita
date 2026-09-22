@@ -9,16 +9,21 @@ Telegram update -> IncomingMessage (план §3.2, §3.9). `parse_update` — �
 L3 короткое замыкание, ответ без модели. Всё остальное идёт в агентный цикл
 (loop.py, Phase 4) — реальный разбор, не заглушка.
 """
+import logging
 import re
+import time
 from typing import Optional
 
 from psycopg.errors import UniqueViolation
 
+from app import hermes_telegram
 from app.db import get_conn
 from app.doctor import commit, gate, loop, render, telegram
 from app.doctor.commit import CommitError
 from app.doctor.contract import IncomingMessage
 from app.doctor.dialog import already_processed, write_turn
+
+logger = logging.getLogger(__name__)
 
 _SYM_TAG_RE = re.compile(r"#SYM:([A-Za-z0-9_-]+)")
 
@@ -91,6 +96,42 @@ def _fallback_text(msg: IncomingMessage) -> str:
     return msg.text or f"[{msg.kind}]"
 
 
+# F1 (внешний аудит логики, 2026-09-22): эмердженси-ответ уходил одним вызовом
+# Telegram — сбой отправки (сеть/429/бот заблокирован) означал, что пациент
+# НИКОГДА не увидит «вызовите скорую», а слою B (slow_gate_followup) вообще не
+# давали шанса запуститься. Теперь: 3 попытки ботом доктора с паузой, затем
+# фолбэк через Hermes-бот — независимая доставка в тот же чат (chat_id личного
+# чата совпадает для всех ботов, оба принадлежат Владу).
+EMERGENCY_SEND_ATTEMPTS = 3
+EMERGENCY_RETRY_DELAY_SECONDS = 1.5
+
+
+def _deliver_emergency(msg: IncomingMessage, reply_text: str) -> bool:
+    """Доставка эмердженси-ответа с ретраями и фолбэком. Никогда не бросает:
+    сбой доставки не должен ронять обработку — эпизод и rf_event к этому
+    моменту уже записаны в карту (gate.handle_emergency), теряется только
+    уведомление пациенту, и об этом громко пишем в лог."""
+    for attempt in range(1, EMERGENCY_SEND_ATTEMPTS + 1):
+        try:
+            telegram.send_message(msg.chat_id, reply_text, reply_to_message_id=msg.message_id)
+            return True
+        except Exception:
+            logger.exception("intake: попытка %d/%d доставить эмердженси ботом доктора не удалась",
+                             attempt, EMERGENCY_SEND_ATTEMPTS)
+            if attempt < EMERGENCY_SEND_ATTEMPTS:
+                time.sleep(EMERGENCY_RETRY_DELAY_SECONDS * attempt)
+    try:
+        hermes_telegram.send_message(msg.chat_id, reply_text)
+        logger.warning("intake: эмердженси доставлен фолбэком через Hermes-бот "
+                       "(бот доктора не смог; update=%s, chat=%s)", msg.update_id, msg.chat_id)
+        return True
+    except Exception:
+        logger.critical("intake: эмердженси НЕ доставлен ни одним ботом (update=%s, chat=%s) — "
+                        "эпизод в карте записан, пациент не уведомлён",
+                        msg.update_id, msg.chat_id)
+        return False
+
+
 def handle_update(update: dict) -> None:
     msg = parse_update(update)
     if msg is None:
@@ -125,7 +166,8 @@ def handle_update(update: dict) -> None:
         # Короткое замыкание: модель не вызывается вообще. Слой B всё равно
         # считается — ПОСЛЕ ответа, дописывает ту же сессию, если у него
         # найдётся что добавить (никогда не задерживает эмердженси, §3.7).
-        telegram.send_message(msg.chat_id, emergency_reply, reply_to_message_id=msg.message_id)
+        # F1: доставка — с ретраями и фолбэком через Hermes, см. _deliver_emergency.
+        _deliver_emergency(msg, emergency_reply)
         gate.slow_gate_followup(text)
         return
 

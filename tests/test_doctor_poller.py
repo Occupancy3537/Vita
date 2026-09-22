@@ -172,12 +172,27 @@ def notify_capture(monkeypatch):
 
 
 def test_safe_process_swallows_exception_and_continues(monkeypatch):
-    """Guard: исключение в process_one глотается с logger.exception, не бросается наружу."""
+    """Guard: исключение в process_one глотается с logger.exception, не бросается наружу.
+    F1 (внешний аудит логики, 2026-09-22): потеря апдейта дополнительно уходит
+    алертом владельцу через alert_on_failure — здесь мок, чтобы не слать в Telegram."""
+    alerts = []
+
     def boom(update):
         raise RuntimeError("unexpected")
 
     monkeypatch.setattr(poller, "process_one", boom)
+    monkeypatch.setattr(poller, "alert_on_failure", lambda src, exc: alerts.append((src, exc)))
     poller._safe_process({"update_id": 10, "message": {"text": "x"}})  # не бросает
+    assert alerts and alerts[0][0] == "doctor_update"
+
+
+def test_safe_process_no_alert_when_processing_succeeds(monkeypatch):
+    """Штатная обработка — алерта нет (иначе получим шум на каждый апдейт)."""
+    alerts = []
+    monkeypatch.setattr(poller, "alert_on_failure", lambda src, exc: alerts.append((src, exc)))
+    monkeypatch.setattr(poller, "process_one", lambda u: None)
+    poller._safe_process({"update_id": 12})
+    assert alerts == []
 
 
 def test_safe_process_passes_update_through(monkeypatch):

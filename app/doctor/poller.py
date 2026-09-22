@@ -181,12 +181,18 @@ def _safe_process(update: dict) -> None:
     """Guard (A3): одно непредвиденное исключение в обработке апдейта не должно
     убивать поток приёма сообщений до рестарта контейнера. Логируем и идём дальше;
     offset ниже по циклу всё равно сдвинется — т.е. апдейт потерян ВИДИМО (в логах),
-    но приём продолжается."""
+    но приём продолжается.
+
+    F1 (внешний аудит логики, 2026-09-22): «видимо в логах» на практике означало
+    «не видно никак» — логи проактивно никто не читает. Теперь потеря сообщения
+    дополнительно уходит алертом владельцу — тем же каналом и с тем же дедупом
+    (60 мин), что падения фоновых циклов: alert_on_failure."""
     try:
         process_one(update)
-    except Exception:
+    except Exception as e:
         logger.exception("unhandled error while processing update %s — update lost, polling continues",
                           update.get("update_id"))
+        alert_on_failure("doctor_update", e)
 
 
 def run_polling_loop() -> None:

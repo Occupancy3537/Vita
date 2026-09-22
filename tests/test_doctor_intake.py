@@ -6,7 +6,7 @@ gate.slow_gate_followup после ответа) и агентный цикл (l
 Telegram, ни к OpenRouter (единственный тест с настоящим вызовом LLM в проекте —
 test_extraction_live.py, остальные мокают, см. её докстринг)."""
 from app.db import get_conn
-from app.doctor import gate, loop, telegram as telegram_module
+from app.doctor import gate, intake as intake_module, loop, telegram as telegram_module
 from app.doctor.contract import TurnResult
 from app.doctor.dialog import recent_turns
 from app.doctor.intake import handle_update, parse_update
@@ -180,3 +180,79 @@ def test_handle_update_l3_short_circuits_before_placeholder(monkeypatch):
     assert turns[1]["role"] == "assistant"
     assert turns[1]["rf_level"] == "L3"
     assert turns[1]["wrote_anything"] is True
+
+
+# --- F1 (внешний аудит логики, 2026-09-22): эмердженси-доставка с ретраями ---
+
+def _emergency_msg(text="грудь давит, отдаёт в левую руку, одышка", chat_id=777, update_id=500):
+    return parse_update(_text_update(update_id=update_id, chat_id=chat_id, text=text))
+
+
+def test_emergency_delivery_retries_then_succeeds(monkeypatch):
+    """Две попытки ботом доктора падают — третья доставляет; Hermes не нужен."""
+    attempts = {"n": 0}
+    sent = []
+
+    def flaky(chat_id, text, reply_to_message_id=None, parse_mode=None):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise RuntimeError("telegram 429")
+        sent.append((chat_id, text))
+        return 42
+
+    hermes_calls = []
+    monkeypatch.setattr(telegram_module, "send_message", flaky)
+    monkeypatch.setattr(intake_module, "EMERGENCY_RETRY_DELAY_SECONDS", 0)
+    monkeypatch.setattr(intake_module.hermes_telegram, "send_message",
+                        lambda *a, **k: hermes_calls.append(a))
+
+    assert intake_module._deliver_emergency(_emergency_msg(), "🚨 ответ") is True
+    assert attempts["n"] == 3
+    assert sent == [("777", "🚨 ответ")]
+    assert hermes_calls == []  # успех ботом доктора — фолбэк не нужен
+
+
+def test_emergency_delivery_falls_back_to_hermes(monkeypatch):
+    """Все попытки бота доктора падают — фолбэк Hermes-ботом в тот же чат."""
+    def doctor_boom(chat_id, text, reply_to_message_id=None, parse_mode=None):
+        raise RuntimeError("bot blocked")
+
+    hermes_sent = []
+    monkeypatch.setattr(telegram_module, "send_message", doctor_boom)
+    monkeypatch.setattr(intake_module, "EMERGENCY_RETRY_DELAY_SECONDS", 0)
+    monkeypatch.setattr(intake_module.hermes_telegram, "send_message",
+                        lambda chat_id, text, *a, **k: hermes_sent.append((chat_id, text)))
+
+    assert intake_module._deliver_emergency(_emergency_msg(update_id=501), "🚨 ответ") is True
+    assert hermes_sent == [("777", "🚨 ответ")]
+
+
+def test_emergency_delivery_total_failure_never_raises(monkeypatch):
+    """Оба канала недоступны — False и никакого исключения (обработку ронять нельзя)."""
+    def boom(*a, **k):
+        raise RuntimeError("telegram down")
+
+    monkeypatch.setattr(telegram_module, "send_message", boom)
+    monkeypatch.setattr(intake_module.hermes_telegram, "send_message", boom)
+    monkeypatch.setattr(intake_module, "EMERGENCY_RETRY_DELAY_SECONDS", 0)
+
+    assert intake_module._deliver_emergency(_emergency_msg(update_id=502), "🚨 ответ") is False
+
+
+def test_handle_update_l3_delivery_failure_still_runs_layer_b(monkeypatch):
+    """F1: даже когда ни один канал не доставил эмердженси, слой B всё равно
+    считается (дописывает rf_event в ту же сессию) — раньше сбой отправки
+    обрывал handle_update до slow_gate_followup."""
+    def boom(*a, **k):
+        raise RuntimeError("telegram down")
+
+    layer_b_calls = []
+    monkeypatch.setattr(telegram_module, "send_message", boom)
+    monkeypatch.setattr(intake_module.hermes_telegram, "send_message", boom)
+    monkeypatch.setattr(intake_module, "EMERGENCY_RETRY_DELAY_SECONDS", 0)
+    monkeypatch.setattr(gate, "slow_gate_followup", lambda text, source_id=None: layer_b_calls.append(text))
+
+    handle_update(_text_update(update_id=600, chat_id=888,
+                                text="грудь давит, отдаёт в левую руку, одышка"))
+
+    assert layer_b_calls == ["грудь давит, отдаёт в левую руку, одышка"]

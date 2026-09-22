@@ -75,9 +75,13 @@ def test_process_closes_episode_on_negation():
         assert cur.fetchone() == ("resolved", "user")
 
 
-def test_process_flags_red_flag_independent_of_llm():
+def test_process_flags_red_flag_independent_of_llm(monkeypatch):
     """Слой A срабатывает по сырому тексту ДО извлечения — даже если LLM решит,
-    что содержания нет, красный флаг не теряется."""
+    что содержания нет, красный флаг не теряется. F2 (2026-09-22): алерт
+    владельцу мокаем — юнит-тест не должен слать реальный Telegram."""
+    import app.write_path as wp
+    monkeypatch.setattr(wp.hermes_telegram, "send_message", lambda *a, **k: None)
+
     src_id = _ingest("грудь давит, отдаёт в левую руку, одышка")
     with patch("app.write_path.extract", return_value=_mock_extract(no_medical=True)):
         result = process(src_id)
@@ -91,3 +95,88 @@ def test_process_flags_bracelet_intersection():
         result = process(src_id)
     assert "allergy:novocaine_anaphylaxis" in result["flags"]["bracelet_hits"]
     assert any("браслетом" in q for q in result["questions"])
+
+
+# --- F4 (внешний аудит логики, 2026-09-22): закрывающая реплика без открытого эпизода ---
+
+def test_process_closure_without_open_episode_is_noop():
+    """«Прошло» по теме, которой в карте нет (или уже закрытой), НЕ создаёт
+    новый открытый эпизод — раньше создавало (инверсия смысла)."""
+    src = _ingest("голова уже не болит, всё прошло")
+    with patch("app.write_path.extract", return_value=_mock_extract([Draft(symptom_key="headache", closure=True)])):
+        r = process(src)
+
+    assert r["written"][0]["action"] == "skipped_closing_without_open_episode"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {schema()}.episode WHERE symptom_key = 'headache'")
+        assert cur.fetchone()[0] == 0
+        cur.execute(f"SELECT count(*) FROM {schema()}.fact WHERE metric_key = 'symptom:headache'")
+        assert cur.fetchone()[0] == 0
+
+
+def test_process_negation_without_open_episode_is_noop():
+    """То же для negation («симптома нет») — ветка та же, что у closure."""
+    src = _ingest("головной боли нет")
+    with patch("app.write_path.extract", return_value=_mock_extract([Draft(symptom_key="headache", negation=True)])):
+        r = process(src)
+
+    assert r["written"][0]["action"] == "skipped_closing_without_open_episode"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {schema()}.episode WHERE symptom_key = 'headache'")
+        assert cur.fetchone()[0] == 0
+
+
+def test_process_closure_closes_existing_open_episode():
+    """closure (без negation) тоже закрывает открытый эпизод — раньше поле
+    Draft.closure игнорировалось вовсе, закрытие работало только через negation."""
+    src1 = _ingest("болит голова")
+    with patch("app.write_path.extract", return_value=_mock_extract([Draft(symptom_key="headache")])):
+        r1 = process(src1)
+    ep_id = r1["written"][0]["episode_id"]
+
+    src2 = _ingest("тема закрыта, всё прошло")
+    with patch("app.write_path.extract", return_value=_mock_extract([Draft(symptom_key="headache", closure=True)])):
+        r2 = process(src2)
+
+    assert r2["written"][0]["action"] == "closed_episode"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT status, closure_source FROM {schema()}.episode WHERE id = %s", (ep_id,))
+        assert cur.fetchone() == ("resolved", "user")
+
+
+# --- F2 (внешний аудит логики, 2026-09-22): красный флаг на TEST-пути -> алерт ---
+
+def test_process_alerts_owner_on_red_flag_test_path(monkeypatch):
+    """Красный флаг, найденный на TEST-пути, раньше уходил только в
+    card.extraction.flags_json без потребителя — теперь алерт владельцу."""
+    import app.write_path as wp
+    alerts = []
+    monkeypatch.setattr(wp.hermes_telegram, "send_message",
+                        lambda chat_id, text, *a, **k: alerts.append((chat_id, text)))
+
+    src_id = _ingest("запиши: сегодня была рвота кровью, кофейной гущей")
+    with patch("app.write_path.extract", return_value=_mock_extract(no_medical=True)):
+        result = process(src_id)
+
+    assert result["flags"]["red_flag"]["hit"] is True
+    assert len(alerts) == 1
+    chat_id, text = alerts[0]
+    assert chat_id == "8956401"
+    assert "Красные флаги" in text
+    assert "кофейной гущей" in text  # фрагмент исходного текста — владелец видит контекст
+
+
+def test_process_survives_red_flag_alert_failure(monkeypatch):
+    """Сбой отправки алерта не должен ломать обработку — флаг всё равно в результате."""
+    import app.write_path as wp
+
+    def boom(*a, **k):
+        raise RuntimeError("hermes down")
+
+    monkeypatch.setattr(wp.hermes_telegram, "send_message", boom)
+
+    src_id = _ingest("грудь давит, отдаёт в левую руку, одышка")
+    with patch("app.write_path.extract", return_value=_mock_extract(no_medical=True)):
+        result = process(src_id)  # не бросает
+
+    assert result["flags"]["red_flag"]["hit"] is True
