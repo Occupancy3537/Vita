@@ -62,6 +62,23 @@ with get_conn() as _conn, _conn.cursor() as _cur:
           "Last_Done" text, "Next_Due" text, "Reason" text, "Status" text, "Source" text,
           "Notes" text, _synced_at timestamptz NOT NULL DEFAULT now())
     """)
+    # Фаза 0 плана TIME_AND_MULTIUSER_PLAN_2026-09-22: app/timeutil.py читает
+    # зону человека из {HEALTH_SCHEMA}.people — в тестах это card_test (тот же
+    # переключатель REGISTRAR_HEALTH_SCHEMA, что у commit.py/registrar.py).
+    # DDL = pg_schema_people.sql (прод) + строка self: тесты идут по реальному
+    # пути чтения зоны, а не только по fail-safe фолбэку.
+    _cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schema()}.people (
+          id text PRIMARY KEY, name text NOT NULL, birth_year int,
+          home_tz text NOT NULL DEFAULT 'Asia/Vladivostok',
+          current_tz text NOT NULL DEFAULT 'Asia/Vladivostok',
+          locale text NOT NULL DEFAULT 'ru',
+          created_at timestamptz NOT NULL DEFAULT now())
+    """)
+    _cur.execute(
+        f"INSERT INTO {schema()}.people (id, name, birth_year) VALUES ('self', 'тест', 1982) "
+        "ON CONFLICT (id) DO NOTHING"
+    )
     _conn.commit()
 
 

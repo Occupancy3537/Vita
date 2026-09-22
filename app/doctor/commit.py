@@ -27,6 +27,7 @@ from typing import Optional
 from psycopg import sql
 from ulid import ULID
 
+from app import timeutil
 from app.db import get_conn, schema
 from app.doctor.contract import (
     CloseInvestigationArgs, OpenInvestigationArgs, PlanLabArgs,
@@ -45,6 +46,12 @@ from app.write_path import apply_draft
 # запись Влада (radikulopatiya-l5s1-right-leg), с которой тестовый инвариант
 # "только одно открытое расследование" честно и предсказуемо конфликтовал.
 _HEALTH_SCHEMA = os.environ.get("REGISTRAR_HEALTH_SCHEMA", "health")
+
+# T1 (внешний аудит логики, 2026-09-22): все ДАТЫ здесь считаются в зоне
+# человека через app/timeutil.py, НЕ через CURRENT_DATE — Postgres живёт в
+# UTC, и до 10:00 по Владивостоку CURRENT_DATE давал ВЧЕРАШНЮЮ дату (живое
+# доказательство: health.doctor_notes id 135/73). Моменты событий (now())
+# не трогаем — они и должны быть UTC.
 
 
 class CommitError(Exception):
@@ -83,8 +90,8 @@ def _write_symptom(cur, args: RecordSymptomArgs, turn_id: str) -> None:
 def _write_note(cur, args: RecordNoteArgs) -> None:
     cur.execute(
         f"INSERT INTO {_HEALTH_SCHEMA}.doctor_notes (note_date, category, note, trigger, plan) "
-        "VALUES (CURRENT_DATE, %s, %s, %s, %s)",
-        (args.category, args.note, args.trigger, args.plan),
+        "VALUES (%s, %s, %s, %s, %s)",
+        (timeutil.today(), args.category, args.note, args.trigger, args.plan),
     )
 
 
@@ -108,20 +115,20 @@ def _open_investigation(cur, args: OpenInvestigationArgs) -> None:
     cur.execute(
         f"INSERT INTO {_HEALTH_SCHEMA}.investigations "
         "(inv_id, opened, updated, status, trigger, trigger_detail, hypothesis) "
-        "VALUES (%s, CURRENT_DATE, CURRENT_DATE, 'open', %s, %s, %s) "
+        "VALUES (%s, %s, %s, 'open', %s, %s, %s) "
         "ON CONFLICT (inv_id) DO NOTHING",
-        (args.inv_id, args.trigger, args.trigger_detail, args.hypothesis),
+        (args.inv_id, timeutil.today(), timeutil.today(), args.trigger, args.trigger_detail, args.hypothesis),
     )
 
 
 def _update_investigation(cur, args: UpdateInvestigationArgs) -> None:
     cur.execute(
-        f"UPDATE {_HEALTH_SCHEMA}.investigations SET updated = CURRENT_DATE, "
+        f"UPDATE {_HEALTH_SCHEMA}.investigations SET updated = %s, "
         "hypothesis = COALESCE(%s, hypothesis), findings = COALESCE(%s, findings), "
         "questions_pending = COALESCE(%s, questions_pending), "
         "labs_suggested = COALESCE(%s, labs_suggested) "
         "WHERE inv_id = %s AND lower(status) = 'open'",
-        (args.hypothesis, args.findings, args.questions_pending, args.labs_suggested, args.inv_id),
+        (timeutil.today(), args.hypothesis, args.findings, args.questions_pending, args.labs_suggested, args.inv_id),
     )
     if cur.rowcount == 0:
         raise CommitError(f"Update_Investigation({args.inv_id}): нет открытого расследования с этим inv_id")
@@ -129,11 +136,11 @@ def _update_investigation(cur, args: UpdateInvestigationArgs) -> None:
 
 def _close_investigation(cur, args: CloseInvestigationArgs) -> None:
     cur.execute(
-        f"UPDATE {_HEALTH_SCHEMA}.investigations SET status = 'report_ready', updated = CURRENT_DATE, "
-        "closed = CURRENT_DATE, findings = COALESCE(%s, findings), "
+        f"UPDATE {_HEALTH_SCHEMA}.investigations SET status = 'report_ready', updated = %s, "
+        "closed = %s, findings = COALESCE(%s, findings), "
         "doctor_brief = COALESCE(%s, doctor_brief), referral = COALESCE(%s, referral) "
         "WHERE inv_id = %s AND lower(status) = 'open'",
-        (args.findings, args.doctor_brief, args.referral, args.inv_id),
+        (timeutil.today(), timeutil.today(), args.findings, args.doctor_brief, args.referral, args.inv_id),
     )
     if cur.rowcount == 0:
         raise CommitError(f"Close_Investigation({args.inv_id}): нет открытого расследования с этим inv_id")
@@ -143,8 +150,8 @@ def _plan_lab(cur, args: PlanLabArgs) -> None:
     plan_id = f"LP-{ULID()}"
     next_due = None
     if args.interval_months:
-        cur.execute("SELECT to_char(CURRENT_DATE + (%s || ' months')::interval, 'YYYY-MM-DD')",
-                    (args.interval_months,))
+        cur.execute("SELECT to_char(%s::date + (%s || ' months')::interval, 'YYYY-MM-DD')",
+                    (timeutil.today(), args.interval_months))
         next_due = cur.fetchone()[0]
     cur.execute(
         f'INSERT INTO {_HEALTH_SCHEMA}.lab_plan '

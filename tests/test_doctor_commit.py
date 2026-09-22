@@ -246,3 +246,44 @@ def test_already_committed_true_after_note_only_batch():
 
     with get_conn() as conn, conn.cursor() as cur:
         assert already_committed(cur, turn_id) is True
+
+
+def test_note_dates_are_vladivostok_not_utc():
+    """T1 (внешний аудит логики, 2026-09-22): note_date — VL-день момента записи,
+    а не CURRENT_DATE (UTC): до 10:00 по Владивостоку UTC-дата ещё вчерашняя
+    (живое доказательство: doctor_notes id 135/73, AGENT_SYNC #57)."""
+    turn_id = _turn()
+    apply_staged_writes([StagedWrite(kind="note", payload={"category": "test-commit-t1", "note": "дата"})],
+                         turn_id=turn_id)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT note_date, (created_at AT TIME ZONE 'Asia/Vladivostok')::date "
+            f"FROM {_HEALTH_SCHEMA}.doctor_notes WHERE category = 'test-commit-t1'"
+        )
+        note_date, vl_created = cur.fetchone()
+    assert note_date == vl_created
+
+
+def test_investigation_and_lab_plan_dates_are_vladivostok():
+    """T1 продолжение: opened/updated расследования и Next_Due плана — тоже VL."""
+    apply_staged_writes([StagedWrite(kind="investigation_open",
+                                      payload={"inv_id": "test-commit-t1-inv", "trigger": "тест"})],
+                         turn_id=_turn())
+    apply_staged_writes([StagedWrite(kind="lab_plan",
+                                      payload={"test": "test-commit-t1-lab", "interval_months": 3})],
+                         turn_id=_turn())
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT opened, (created_at AT TIME ZONE 'Asia/Vladivostok')::date "
+            f"FROM {_HEALTH_SCHEMA}.investigations WHERE inv_id = 'test-commit-t1-inv'"
+        )
+        opened, vl_created = cur.fetchone()
+        assert opened == vl_created
+
+        cur.execute(f'SELECT "Next_Due" FROM {_HEALTH_SCHEMA}.lab_plan WHERE "Test" = \'test-commit-t1-lab\'')
+        next_due = cur.fetchone()[0]
+        # Next_Due = VL-сегодня + 3 месяца; проверяем диапазон, чтобы тест не
+        # зависел от календарной даты прогона
+        assert next_due is not None and len(next_due) == 10

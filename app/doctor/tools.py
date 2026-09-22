@@ -38,6 +38,7 @@ from app.doctor.contract import (
     RecordNoteArgs, RecordSymptomArgs, UpdateInvestigationArgs,
 )
 
+from app import timeutil
 from app.db import schema
 from app.doctor.context import _num, _room_climate
 
@@ -177,21 +178,33 @@ def get_room_climate_now(cur, args: dict) -> dict:
 
 # --- Nutrition Analyzer (портирован из Sub-Agent: Nutrition Analyzer) -------
 
-def _nutrition_date_with_shift(dt: Optional[datetime]) -> Optional[datetime]:
-    """Приёмы после полуночи до 2:00 считаются предыдущим днём (поздний ужин) —
-    та же логика, что была в n8n-версии, не переизобретена заново."""
+def _nutrition_date_with_shift(dt: Optional[datetime], tz) -> Optional[datetime]:
+    """Приёмы после полуночи до 2:00 считаются предыдущим днём («поздний ужин») —
+    та же логика, что была в n8n-версии, но по ЛОКАЛЬНОМУ часу человека.
+
+    T2 (внешний аудит логики, 2026-09-22): раньше условие `dt.hour < 2`
+    сравнивалось по UTC — во Владивостоке местные 00:00–02:00 это 14:00–16:00
+    UTC, правило не срабатывало НИКОГДА; зато ошибочно сдвигало на вчера
+    местную еду 10:00–12:00 (UTC 00–01). Заодно чинится и дата без сдвига:
+    возвращаем день в зоне человека (раньше `.date()` был UTC-днём — для еды
+    до 10:00 VL это тоже был вчерашний день). Возврат — наивный datetime в
+    полдень нужного дня (вызывающий использует только .date())."""
     if dt is None:
         return None
-    if dt.hour < 2:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    day = dt.astimezone(tz).date()
+    if dt.astimezone(tz).hour < 2:
         from datetime import timedelta
-        return (dt - timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
-    return dt
+        day = day - timedelta(days=1)
+    return datetime(day.year, day.month, day.day, 12, 0, 0)
 
 
 def analyze_nutrition_stability(cur, args: dict) -> dict:
     """Портировано 1:1 из Sub-Agent: Nutrition Analyzer (Code in JavaScript):
     среднее в день по нутриентам + стабильность калорий (100 - коэфф. вариации)
     за последние 7 полных дней ДО самой свежей даты в health.meals."""
+    tz = timeutil.person_tz()
     cur.execute(
         'SELECT "User_ID", "Date", "Calories", "Proteins", "Carbs", "Fats", "Магний", '
         '"Витамин D", "Омега-3 (EPA/DHA)", "Селен", "Йод", "Калий", "Железо", "Кальций", '
@@ -204,7 +217,7 @@ def analyze_nutrition_stability(cur, args: dict) -> dict:
     cols = ["User_ID", "Date"] + NUTRITION_NUMERIC_FIELDS
     parsed = [dict(zip(cols, r)) for r in rows]
 
-    shifted = [(_nutrition_date_with_shift(r["Date"]), r) for r in parsed]
+    shifted = [(_nutrition_date_with_shift(r["Date"], tz), r) for r in parsed]
     shifted = [(d, r) for d, r in shifted if d is not None]
     if not shifted:
         return {"error": "Не удалось определить даты в данных"}

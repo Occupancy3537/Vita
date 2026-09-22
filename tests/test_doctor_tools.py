@@ -3,12 +3,22 @@
 живая построчная сверка с реальными данными уже сделана вручную при разработке,
 см. STATE.md; здесь проверяется маппинг колонок и алгоритмическая логика
 портированных анализаторов на детерминированных фикстурах, не на проде)."""
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
 
 from app.doctor import tools
+
+
+@pytest.fixture
+def vl_tz(monkeypatch):
+    """analyze_nutrition_stability читает зону через timeutil.person_tz — в
+    юнитах подменяем фиксированной зоной, чтобы не ходить в БД (докстринг файла:
+    эти тесты проверяют логику на FakeCursor, без базы)."""
+    monkeypatch.setattr(tools.timeutil, "person_tz",
+                        lambda person_id="self": ZoneInfo("Asia/Vladivostok"))
 
 
 class FakeCursor:
@@ -126,13 +136,13 @@ def test_get_room_climate_now_no_data():
 
 # --- Nutrition_Analyzer ------------------------------------------------------
 
-def test_analyze_nutrition_stability_empty_returns_error():
+def test_analyze_nutrition_stability_empty_returns_error(vl_tz):
     cur = FakeCursor([[]])
     r = tools.analyze_nutrition_stability(cur, {})
     assert r == {"error": "Нет данных для анализа"}
 
 
-def test_analyze_nutrition_stability_averages_and_stability():
+def test_analyze_nutrition_stability_averages_and_stability(vl_tz):
     def row(day, kcal):
         values = {f: "1" for f in tools.NUTRITION_NUMERIC_FIELDS}
         values["Calories"] = str(kcal)
@@ -151,7 +161,7 @@ def test_analyze_nutrition_stability_averages_and_stability():
     assert 0 <= user["calorie_stability_pct"] <= 100
 
 
-def test_analyze_nutrition_stability_excludes_max_date_and_older_than_7_days():
+def test_analyze_nutrition_stability_excludes_max_date_and_older_than_7_days(vl_tz):
     def row(day, kcal=2000):
         values = {f: "0" for f in tools.NUTRITION_NUMERIC_FIELDS}
         values["Calories"] = str(kcal)
@@ -162,6 +172,30 @@ def test_analyze_nutrition_stability_excludes_max_date_and_older_than_7_days():
     cur = FakeCursor([rows])
     r = tools.analyze_nutrition_stability(cur, {})
     assert r["users"] == []  # обе строки отфильтрованы, не должно быть деления на 0/мусора
+
+
+# --- T2 (внешний аудит логики, 2026-09-22): «поздний ужин» по локальному часу ---
+
+def test_nutrition_date_shift_late_dinner_moves_to_previous_local_day():
+    tz = ZoneInfo("Asia/Vladivostok")
+    # 23.09 01:30 VL == 22.09 15:30 UTC → «поздний ужин», относим к 22.09
+    d = tools._nutrition_date_with_shift(datetime(2026, 9, 22, 15, 30, tzinfo=timezone.utc), tz)
+    assert d.date() == date(2026, 9, 22)
+
+
+def test_nutrition_date_shift_late_morning_stays_same_local_day():
+    """Регресс старого бага: VL-завтрак 10:30 (00:30 UTC) ошибочно уезжал на вчера
+    (условие hour<2 сравнивалось по UTC и ловило именно это окно)."""
+    tz = ZoneInfo("Asia/Vladivostok")
+    d = tools._nutrition_date_with_shift(datetime(2026, 9, 23, 0, 30, tzinfo=timezone.utc), tz)
+    assert d.date() == date(2026, 9, 23)
+
+
+def test_nutrition_date_shift_returns_local_day_not_utc():
+    """Даже без сдвига день — локальный: 09:00 VL 24.09 (23:00 UTC 23.09) — это 24-е."""
+    tz = ZoneInfo("Asia/Vladivostok")
+    d = tools._nutrition_date_with_shift(datetime(2026, 9, 23, 23, 0, tzinfo=timezone.utc), tz)
+    assert d.date() == date(2026, 9, 24)
 
 
 # --- Analyze_Symptom_Food ----------------------------------------------------
