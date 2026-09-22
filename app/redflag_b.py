@@ -11,10 +11,16 @@ from typing import Optional
 import httpx
 from pydantic import BaseModel, Field
 
+from app.ai_models import DEFAULT_MODEL
 from app.redflag import CRITICAL_CATEGORIES, HIGH_CATEGORIES
 
 PROMPT_VERSION = "rf-classifier/1"
-MODEL = "google/gemini-3.8-flash"  # та же модель, что extraction/advisor — не выбирал новую без причины
+# 2026-09-22 (по запросу Влада, находка в логах OpenRouter): было отдельным
+# литералом google/gemini-3.8-flash — самый дорогой потребитель в логах,
+# комментарий "та же модель, что extraction/advisor" был неактуален (доктор
+# и advisor давно на GLM). Теперь — общая точка выбора, см. app/ai_models.py.
+MODEL = DEFAULT_MODEL
+PROVIDER_ORDER = ["Crusoe", "Fireworks", "BaseTen"]
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 CATEGORIES = [
@@ -111,6 +117,7 @@ def classify(text: str, prior_replies: Optional[list[str]] = None, timeout: floa
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
                 "model": MODEL,
+                "provider": {"order": PROVIDER_ORDER, "allow_fallbacks": True},
                 "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_content}],
                 "response_format": {"type": "json_object"},
                 "temperature": 0,

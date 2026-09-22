@@ -35,6 +35,7 @@ from typing import Optional
 
 import httpx
 
+from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _dkey, _num
 from app.db import get_conn
 from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
@@ -47,7 +48,7 @@ CHAT_ID = "8956401"
 VL = timezone(timedelta(hours=10))
 WEEKLY_HOUR_VL = 20  # воскресенье
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "z-ai/glm-5.3-flash"
+MODEL = DEFAULT_MODEL  # 2026-09-22: см. app/ai_models.py
 PROVIDER_ORDER = ["Crusoe", "Fireworks", "BaseTen"]
 
 MIN_ABS_DELTA = {

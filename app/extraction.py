@@ -3,8 +3,14 @@ LLM-извлечение (П2 §3.2) — structured output из свободно
 Слой A (regex, app/redflag.py) выполняется ДО этого шага и независимо — извлечение
 не участвует в решении "неотложка или нет", оно только достаёт структуру симптома.
 
-Модель — та же, что уже используется в проекте (Sub-Agent: AI Doctor, Weekly AI
-Advisor) через OpenRouter — не выбирал новую без причины.
+2026-09-22 (по запросу Влада, находка в логах OpenRouter): модель раньше была
+отдельным литералом google/gemini-3.8-flash с комментарием "та же модель, что
+уже используется в проекте" — комментарий устарел (доктор и Weekly Advisor
+давно на GLM), а этот модуль вслед за ними не переехал, и стал самым дорогим
+потребителем в логах. Теперь — общая точка выбора модели по роли, см.
+app/ai_models.py (DEFAULT_MODEL — не DOCTOR_MODEL: обоснование в докстринге
+ai_models.py, коротко — это дешёвая одноразовая классификация на каждое
+сообщение, не дорогое рассуждение на ход диалога).
 """
 import json
 import os
@@ -14,7 +20,10 @@ from typing import Optional
 import httpx
 from pydantic import BaseModel
 
-MODEL = "google/gemini-3.8-flash"
+from app.ai_models import DEFAULT_MODEL
+
+MODEL = DEFAULT_MODEL
+PROVIDER_ORDER = ["Crusoe", "Fireworks", "BaseTen"]
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # Версия промпта (тот же принцип версионирования, что у rv-engine/1, memory-render/1
 # из спеки) — смена SYSTEM_PROMPT ниже требует бампа, чтобы card.extraction хранило,
@@ -69,6 +78,7 @@ def extract(text: str, timeout: float = 15.0) -> ExtractionResult:
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         json={
             "model": MODEL,
+            "provider": {"order": PROVIDER_ORDER, "allow_fallbacks": True},
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": text},

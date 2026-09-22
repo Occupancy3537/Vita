@@ -34,6 +34,7 @@ from typing import Optional
 
 import httpx
 
+from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _num, _rows_as_dicts
 from app.db import get_conn
 from app import nutrition_telegram as telegram  # 2026-09-21: отчёты о питании -> @vvk_gemini_bot, не бот доктора (см. app/nutrition_telegram.py)
@@ -46,7 +47,7 @@ VL = timezone(timedelta(hours=10))
 DAILY_HOUR_VL, DAILY_MINUTE_VL = 21, 45
 WEEKLY_HOUR_VL = 12  # воскресенье, эмпирически по execution_entity (Weekly Food Report)
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "z-ai/glm-5.3-flash"
+MODEL = DEFAULT_MODEL  # 2026-09-22: см. app/ai_models.py
 PROVIDER_ORDER = ["Crusoe", "Fireworks", "BaseTen"]
 TARGET_USER = "Влад Васюк"
 

@@ -34,7 +34,7 @@ import httpx
 from psycopg import sql
 
 from app.db import schema
-from app.extraction import MODEL, OPENROUTER_URL
+from app.extraction import MODEL, OPENROUTER_URL, PROVIDER_ORDER
 import os
 
 RENDERER_VERSION = "memory-render/1"
@@ -330,6 +330,7 @@ def resolve_entities_l2_llm(text: str, timeout: float = 8.0) -> list[tuple[str, 
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
                 "model": MODEL,
+                "provider": {"order": PROVIDER_ORDER, "allow_fallbacks": True},
                 "messages": [{"role": "system", "content": _L2_PROMPT}, {"role": "user", "content": text}],
                 "response_format": {"type": "json_object"},
                 "temperature": 0,

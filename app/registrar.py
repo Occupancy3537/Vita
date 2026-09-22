@@ -37,10 +37,12 @@
 jsCode (не руками) — /tmp/gen_syn.py, см. волна 3 отчёт.
 
 Файлы живут в памяти (bytes), на диск ничего не пишется. Модели:
-REGISTRAR_MODEL (изображения, дефолт z-ai/glm-5.3-flash — проверена живым
-вызовом 18.09: кириллица лаб-бланка читается, 1.8с, ~$0.00013/вызов) и
-REGISTRAR_PDF_MODEL (PDF — glm-5.3-flash не принимает file-модальность,
-поэтому дефолт google/gemini-3.1-flash-lite, модель фото-пути Food diary).
+REGISTRAR_MODEL (изображения, дефолт — DEFAULT_MODEL из app/ai_models.py,
+z-ai/glm-5.3-flash — проверена живым вызовом 18.09: кириллица лаб-бланка
+читается, 1.8с, ~$0.00013/вызов) и REGISTRAR_PDF_MODEL (PDF — glm-5.3-flash
+не принимает file-модальность, поэтому дефолт FOOD_MODEL, google/gemini-3.1-
+flash-lite — та же модель, что и у фото-пути Food diary, но выбрана здесь
+по ДРУГОЙ причине: не "это еда", а "единственная дешёвая с поддержкой PDF").
 """
 import base64
 import json
@@ -52,6 +54,7 @@ from typing import Optional
 
 import httpx
 
+from app.ai_models import DEFAULT_MODEL, FOOD_MODEL
 from app.db import get_conn
 from app.doctor import telegram
 
@@ -60,8 +63,8 @@ logger = logging.getLogger(__name__)
 OWNER_CHAT_ID = "8956401"
 VL = timezone(timedelta(hours=10))
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-REGISTRAR_MODEL = os.environ.get("REGISTRAR_MODEL", "z-ai/glm-5.3-flash")
-REGISTRAR_PDF_MODEL = os.environ.get("REGISTRAR_PDF_MODEL", "google/gemini-3.1-flash-lite")
+REGISTRAR_MODEL = os.environ.get("REGISTRAR_MODEL", DEFAULT_MODEL)
+REGISTRAR_PDF_MODEL = os.environ.get("REGISTRAR_PDF_MODEL", FOOD_MODEL)
 PROMPT_VERSION = "registrar-vision/1"
 
 # ─────────────────── чистая логика (без сети и БД — для тестов) ───────────────────

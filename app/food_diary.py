@@ -69,14 +69,16 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+from app.ai_models import FOOD_MODEL
 from app.dashboard import _js_round
 
 VL = timezone(timedelta(hours=10))
 
 # 2026-09-22: раньше фото и текст ходили в разные модели (GLM 5.3 Flash на
 # тексте, Gemini Flash Lite на фото) — по запросу Влада оставлена только
-# одна, единая для питания.
-MODEL = "google/gemini-3.1-flash-lite"
+# одна, единая для питания. Сама модель теперь — в app/ai_models.py (общая
+# точка выбора модели по роли), не литерал здесь.
+MODEL = FOOD_MODEL
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 PROVIDER_ORDER = ["Crusoe", "Fireworks", "BaseTen"]
 

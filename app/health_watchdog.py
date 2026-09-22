@@ -39,6 +39,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from app.ai_models import DEFAULT_MODEL
 from app.db import get_conn
 from app.doctor import telegram
 from app.scheduler_alert import alert_on_failure
@@ -49,7 +50,7 @@ CHAT_ID = "8956401"
 VL = timezone(timedelta(hours=10))
 CHECK_HOUR_VL = 9
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "z-ai/glm-5.3-flash"
+MODEL = DEFAULT_MODEL  # 2026-09-22: см. app/ai_models.py
 PROVIDER_ORDER = ["Crusoe", "Fireworks", "BaseTen"]
 
 STALE_MIN_DAYS, STALE_MAX_DAYS, STALE_RENUDGE_DAYS = 10, 365, 7
