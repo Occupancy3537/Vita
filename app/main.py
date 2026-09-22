@@ -30,6 +30,14 @@ from datetime import datetime, timezone
 # по умолчанию показывает только WARNING+) — а это единственный канал видеть,
 # что long-polling живой, раз в контейнере нет отдельного дашборда для этого.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# 2026-09-22 (внешний аудит, K4 — КРИТИЧНО): httpx на INFO логирует ПОЛНЫЙ URL
+# каждого запроса, включая токен бота в пути (.../bot<TOKEN>/getUpdates) —
+# оба токена (доктор, food diary) реально светились в docker logs каждые
+# ~секунды поллинга. httpcore (низкоуровневый слой httpx) на DEBUG логирует
+# то же самое ещё подробнее. Оба подняты до WARNING — свой logger.info()
+# (poller/dispatch/и т.д.) не затронут, это отдельные именованные логгеры.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 from typing import Callable, Literal, Optional
 
