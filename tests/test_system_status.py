@@ -41,7 +41,7 @@ def test_build_returns_full_shape(monkeypatch):
     with get_conn() as conn, conn.cursor() as cur:
         out = system_status.build(cur)
 
-    assert set(out) >= {"ts", "money", "host", "peak24", "loops", "freshness", "nightly", "config"}
+    assert set(out) >= {"ts", "money", "host", "peak24", "loops", "freshness", "nightly", "issues", "config"}
     assert len(out["loops"]) == len(system_status.LOOPS)
     assert out["host"] is not None and out["host"]["cores"] >= 1
     assert out["config"]["secrets_total"] == len(system_status.SECRET_NAMES)
@@ -126,3 +126,29 @@ def test_nightly_backup_reflects_state(monkeypatch):
     old_row = ("ok", "", "20260920_020001", 30.0)  # пинг старше 26ч
     out = system_status._nightly(FakeCur(old_row))
     assert out[0]["st"] == "warn"
+
+
+# --- _issues (2026-09-23, Шаг 2 «петли самоулучшения») ----------------------
+
+def test_issues_returns_only_open_sorted_by_severity_then_recency():
+    from app import issue_log
+    from app.db import schema
+
+    with get_conn() as conn, conn.cursor() as cur:
+        issue_log.record_issue(cur, "test:sysstatus:minor", source="x", summary="мелочь", severity="minor")
+        issue_log.record_issue(cur, "test:sysstatus:critical", source="y", summary="критично", severity="critical")
+        issue_log.record_issue(cur, "test:sysstatus:fixed", source="z", summary="починено", severity="critical")
+        issue_log.resolve_issue(cur, "test:sysstatus:fixed", resolution_ref="commit x")
+        conn.commit()
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            out = system_status._issues(cur)
+        keys = {r["source"] for r in out}
+        assert "y" in keys and "x" in keys
+        assert "z" not in keys  # fixed — не показываем
+        assert out[0]["source"] == "y"  # critical раньше minor
+        assert out[0]["occurrences"] == 1
+    finally:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(f"DELETE FROM {schema()}.issue_log WHERE natural_key LIKE 'test:sysstatus:%'")
+            conn.commit()

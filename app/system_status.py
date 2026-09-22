@@ -10,7 +10,10 @@ LLM — пока только путь доктора, остальные мод
 card.scheduler_run_log (прогоны циклов, app/run_log.py), таблицы-источники
 («свежесть данных»), health.backup_alert_state + card.err_dedup_state (ночные
 процессы), env/модули (модели и ФАКТ наличия секретов — значения не отдаём
-никогда), health.patient_state (гейт нагрузки, через dashboard).
+никогда), health.patient_state (гейт нагрузки, через dashboard), card.issue_log
+(2026-09-23, Шаг 2 «петли самоулучшения» — открытые находки, см. app/issue_log.py;
+не то же самое, что «Автоматические проверки» ниже: там — жив ли цикл СЕЙЧАС,
+здесь — durable-бэклог того, что уже случалось и не закрыто).
 
 Fail-safe: каждая секция независима — при сбое отдаётся degraded-заглушка
 (None/пустой список), страница наблюдения не должна падать целиком из-за одной
@@ -314,6 +317,29 @@ def _nightly(cur) -> list[dict]:
     return out
 
 
+_SEVERITY_RANK = {"critical": 0, "important": 1, "minor": 2}
+
+
+def _issues(cur) -> list[dict]:
+    """card.issue_log, только status='open' — snoozed/wontfix/fixed сознательно
+    не показываем здесь (это уже принятые решения, не то, что «требует
+    внимания сейчас»); полную историю смотреть в самой таблице, не на этой
+    странице."""
+    cur.execute(
+        "SELECT source, severity, summary, occurrences, "
+        "extract(epoch from now() - first_seen) / 3600, "
+        "extract(epoch from now() - last_seen) / 3600 "
+        "FROM {t} WHERE status = 'open' ORDER BY "
+        "CASE severity WHEN 'critical' THEN 0 WHEN 'important' THEN 1 ELSE 2 END, last_seen DESC"
+        .format(t=schema() + ".issue_log")
+    )
+    return [
+        {"source": source, "severity": severity, "summary": summary, "occurrences": occurrences,
+         "first_seen_h": round(first_h, 1), "last_seen_h": round(last_h, 1)}
+        for source, severity, summary, occurrences, first_h, last_h in cur.fetchall()
+    ]
+
+
 def _config(cur) -> dict:
     models = [
         {"n": "Доктор", "v": "%s · effort %s" % (doctor_config.DOCTOR_MODEL,
@@ -369,6 +395,7 @@ def build(cur) -> dict:
     loops = _sec("loops", lambda: _loops(cur), [])
     freshness = _sec("freshness", lambda: _freshness(cur), [])
     nightly = _sec("nightly", lambda: _nightly(cur), [])
+    issues = _sec("issues", lambda: _issues(cur), [])
     config = _sec("config", lambda: _config(cur), {"models": [], "secrets_ok": 0,
                                                    "secrets_total": len(SECRET_NAMES), "gate": None})
     timezone = _sec("timezone", timezone_block, None)
@@ -384,6 +411,7 @@ def build(cur) -> dict:
         "loops": loops,
         "freshness": freshness,
         "nightly": nightly,
+        "issues": issues,
         "config": config,
         "timezone": timezone,
     }
