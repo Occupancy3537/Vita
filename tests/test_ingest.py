@@ -35,6 +35,28 @@ def test_duplicate_raw_text_is_idempotent_not_a_new_row():
     assert count == 1
 
 
+def test_same_text_other_day_is_new_event(monkeypatch):
+    """F10 (внешний аудит логики, 2026-09-22): дедуп-ключ = канал + день (в зоне
+    человека) + текст — идентичный текст в ДРУГОЙ день это новое событие, а не
+    «дубликат» давнего (раньше повторное «запиши вес 82» назавтра молча
+    возвращало старую запись и ничего не сохраняло)."""
+    from datetime import date
+    import app.main as main_mod
+
+    r1 = client.post("/ingest", json={"channel": "telegram", "raw_text": "запиши вес 82"})
+    assert r1.json()["duplicate"] is False
+
+    monkeypatch.setattr(main_mod.timeutil, "today", lambda: date(1999, 1, 1))  # «другой день»
+    r2 = client.post("/ingest", json={"channel": "telegram", "raw_text": "запиши вес 82"})
+    assert r2.json()["duplicate"] is False
+    assert r2.json()["id"] != r1.json()["id"]
+
+    monkeypatch.undo()  # снова реальный день — тот же текст и день дедупятся
+    r3 = client.post("/ingest", json={"channel": "telegram", "raw_text": "запиши вес 82"})
+    assert r3.json()["duplicate"] is True
+    assert r3.json()["id"] == r1.json()["id"]
+
+
 def test_empty_raw_text_rejected():
     r = client.post("/ingest", json={"channel": "manual", "raw_text": "   "})
     assert r.status_code == 422

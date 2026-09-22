@@ -141,15 +141,23 @@ def ask_daily() -> dict:
 
 def handle_reply(update: dict) -> None:
     """Реплай на сообщение с тегом #A##: записать ответ, подтвердить. Идемпотентно:
-    повторный ответ на уже закрытый вопрос НЕ перезаписывает его (ответ видно в логе)."""
+    повторный ответ на уже закрытый вопрос НЕ перезаписывает его (ответ видно в логе).
+
+    F10 (внешний аудит логики, 2026-09-22): текст вопроса обещает «или просто
+    напиши ответ — я пойму по тегу #A05», но тег искался ТОЛЬКО в тексте
+    сообщения бота (реплай), и обычный ответ без reply уезжал в диспетчер к
+    доктору. Теперь тег принимается и в самом тексте ответа (диспетчер
+    маршрутизирует такие сообщения сюда, см. dispatch.route)."""
     msg = update.get("message") or {}
     reply_text = ((msg.get("reply_to_message") or {}).get("text")) or ""
-    m = _ANAM_TAG.search(reply_text)
+    own_text = (msg.get("text") or "").strip()
+    m = _ANAM_TAG.search(reply_text) or _ANAM_TAG.search(own_text)
     if not m:
         logger.warning("anamnesis handle_reply без тега — проигнорировано")
         return
     q_id = m.group(1)
-    text = (msg.get("text") or "").strip()
+    # F10: если тег был в самом тексте ответа (не реплай) — в карту он не попадёт
+    text = _ANAM_TAG.sub("", own_text).strip()
     if not text:
         return
     with get_conn() as conn, conn.cursor() as cur:

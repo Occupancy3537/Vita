@@ -61,6 +61,7 @@ from app.doctor import gate as doctor_gate
 from app.doctor import anamnesis as doctor_anamnesis
 from app.doctor import poller as doctor_poller
 from app import hermes_telegram
+from app import timeutil
 from app.doctor.intake import handle_update
 from app.journal import write_journal
 from app.memory import get_context, get_object, index_entity, run_pre_archive_check
@@ -406,7 +407,14 @@ def ingest(req: IngestRequest) -> IngestResponse:
     if not req.raw_text or not req.raw_text.strip():
         raise HTTPException(status_code=422, detail="raw_text пуст")
 
-    content_hash = hashlib.sha256(req.raw_text.encode("utf-8")).hexdigest()
+    # F10 (внешний аудит логики, 2026-09-22): дедуп-ключ = канал + ДЕНЬ в зоне
+    # человека + текст. Сетевые ретраи одного и того же сообщения по-прежнему
+    # идемпотентны, но идентичный текст в ДРУГОЙ день — уже новое событие, а не
+    # «дубликат» недельной давности (раньше повторное «запиши вес 82» назавтра
+    # молча возвращало старую запись и ничего не сохраняло).
+    content_hash = hashlib.sha256(
+        f"{req.channel}|{timeutil.today().isoformat()}|{req.raw_text}".encode("utf-8")
+    ).hexdigest()
     new_id = f"src_{ULID()}"
     ts = req.ts_received or datetime.now(timezone.utc)
 

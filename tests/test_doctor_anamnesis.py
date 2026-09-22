@@ -110,3 +110,28 @@ class TestHandleReply:
     def test_empty_text_no_write(self, monkeypatch):
         monkeypatch.setattr(anamnesis, "get_conn", lambda: (_ for _ in ()).throw(AssertionError("не должен лезть в БД")))
         anamnesis.handle_reply(self._update(text=""))
+
+    def test_tag_in_own_text_without_reply_recorded(self, monkeypatch):
+        """F10 (2026-09-22): тег #A## в самом тексте (без реплая) — ответ
+        принимается, тег вырезается из сохраняемого текста."""
+        sent = []
+        monkeypatch.setattr(anamnesis.telegram, "send_message", lambda *a, **k: sent.append(a))
+        exe = []
+        class Cur:
+            description = [("Q_ID",)]
+            def execute(self, sql, params=None): exe.append((sql, params)); return None
+            def fetchone(self): return ("A05",)
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        class Conn:
+            def cursor(self): return Cur()
+            def commit(self): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        monkeypatch.setattr(anamnesis, "get_conn", lambda: Conn())
+        update = {"update_id": 3, "message": {"message_id": 4, "chat": {"id": 8956401},
+                  "text": "#A05 мне 44 года"}}  # без reply_to_message
+        anamnesis.handle_reply(update)
+        assert exe, "ответ должен быть записан"
+        assert exe[0][1][0] == "мне 44 года"  # тег вырезан из текста ответа
+        assert sent and "Записал ✅ (A05)" in sent[0][1]

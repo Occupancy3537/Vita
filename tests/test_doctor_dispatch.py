@@ -89,6 +89,49 @@ def test_classify_category_unparseable_response_defaults_to_symptom(monkeypatch)
     assert dispatch.classify_category("текст", has_image=False) == "SYMPTOM"
 
 
+# --- F5 (внешний аудит логики, 2026-09-22): разбор ответа классификатора ---
+
+class _Resp:
+    def __init__(self, content):
+        self._c = content
+    def raise_for_status(self): pass
+    def json(self):
+        return {"choices": [{"message": {"content": self._c}}]}
+
+
+@pytest.mark.parametrize("content,expected", [
+    ("SYMPTOM", "SYMPTOM"),
+    ("TEST", "TEST"),
+    ("CALENDAR", "CALENDAR"),
+    ("SLEEP", "SLEEP"),
+    ("Это SYMPTOM, не TEST", "SYMPTOM"),    # регресс F5: раньше подстрочный матч давал TEST
+    ("NOT_TEST", "SYMPTOM"),                 # подстрока не считается словом
+    ("TEST (не SYMPTOM)", "SYMPTOM"),        # при неоднозначности — осторожный SYMPTOM
+    ("мусор без категорий", "SYMPTOM"),      # фолбэк «при сомнении», как в промпте
+])
+def test_parse_category_priority_and_fallback(content, expected):
+    assert dispatch.parse_category(content) == expected
+
+
+def test_classify_category_negated_test_is_not_test(monkeypatch):
+    """Сквозь classify_category: ответ «это SYMPTOM, а не TEST» больше не уводит
+    сообщение в маршрут данных (F5)."""
+    import httpx
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _Resp("Это SYMPTOM, а не TEST"))
+    assert dispatch.classify_category("грудь давит", has_image=False) == "SYMPTOM"
+
+
+# --- F10 (внешний аудит логики, 2026-09-22): тег анамнеза в тексте ---
+
+def test_anamnesis_tag_in_own_text_routes_to_anamnesis(monkeypatch):
+    """Текст вопроса обещает «или просто напиши ответ — я пойму по тегу #A05»:
+    теперь тег в САМОМ тексте (без реплая) маршрутизируется в анамнез, мимо LLM."""
+    def boom(*a, **k):
+        raise AssertionError("тег в тексте не должен идти в классификатор")
+    monkeypatch.setattr(dispatch, "classify_category", boom)
+    assert dispatch.route(_update(text="#A05 мне 44 года")) == "anamnesis"
+
+
 def test_reply_to_bot_sticky_doctor_no_llm_call(monkeypatch):
     # Инцидент 18.09 09:05 VL: короткий ответ потерялся в "other". Порт Capitan
     # Sticky Route: реплай на сообщение бота = продолжение разговора с доктором.

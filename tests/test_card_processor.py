@@ -81,3 +81,37 @@ def test_run_once_one_failure_does_not_block_others(monkeypatch):
 
 def test_run_once_empty_queue_no_crash():
     cp.run_once()
+
+
+def test_failed_processing_counts_attempts_then_dead_letter(monkeypatch):
+    """F7: неудачи считаются; после MAX_ATTEMPTS — dead-letter (status='failed',
+    выпадает из очереди) и один алерт владельцу; до лимита — без алерта."""
+    alerts = []
+    monkeypatch.setattr(cp.hermes_telegram, "send_message",
+                        lambda chat_id, text, **k: alerts.append(text))
+    monkeypatch.setattr("app.write_path.process",
+                        lambda source_id: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with get_conn() as conn, conn.cursor() as cur:
+        _insert_received(cur)
+        conn.commit()
+
+    for expected in (1, 2):
+        cp.run_once()
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT status, process_attempts FROM {schema()}.source_message WHERE id = %s",
+                        (TEST_ID,))
+            status, attempts = cur.fetchone()
+        assert status == "received" and attempts == expected
+        assert alerts == []  # до лимита алертов нет
+
+    cp.run_once()  # третья попытка — dead-letter
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT status, process_attempts, process_error FROM {schema()}.source_message WHERE id = %s",
+                    (TEST_ID,))
+        status, attempts, error = cur.fetchone()
+    assert status == "failed" and attempts == cp.MAX_ATTEMPTS and "boom" in error
+    assert len(alerts) == 1 and TEST_ID in alerts[0]
+
+    with get_conn() as conn, conn.cursor() as cur:
+        assert TEST_ID not in cp.get_pending_ids(cur)  # выпало из очереди, ретраев больше нет

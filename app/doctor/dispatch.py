@@ -89,10 +89,28 @@ def classify_category(text: str, has_image: bool, timeout: float = 8.0,
     data = resp.json()
     llm_usage.record("dispatch", config.DOCTOR_MODEL, data.get("usage"))
     content = data["choices"][0]["message"]["content"].strip().upper()
-    for cat in ("TEST", "SYMPTOM", "CALENDAR", "SLEEP"):
-        if cat in content:
+    return parse_category(content)
+
+
+# F5 (внешний аудит логики, 2026-09-22): раньше разбор был `if cat in content`
+# с TEST ПЕРВЫМ — «Это SYMPTOM, не TEST» возвращало TEST (подстрока), то есть
+# обратный заявленному правилу случай: промпт требует «при сомнении — SYMPTOM», а
+# разбор при малейшей неоднозначности уводил сообщение в маршрут регистрации
+# данных вместо диалога с врачом. Теперь по целым словам (границы слова
+# учитывают «_», поэтому NOT_TEST — не TEST, а непонятный токен), и при
+# нескольких категориях в ответе приоритет — осторожный (SYMPTOM первый).
+_CATEGORY_WORDS = ("SYMPTOM", "CALENDAR", "SLEEP", "TEST")
+
+
+def parse_category(content: str) -> str:
+    """Категория из ответа классификатора: по целым словам, при нескольких —
+    осторожный приоритет SYMPTOM > CALENDAR > SLEEP > TEST; ничего не нашли —
+    SYMPTOM (то же правило «при сомнении», что и в промпте)."""
+    words = set(re.findall(r"\b[A-Z]+\b", (content or "").upper()))
+    for cat in _CATEGORY_WORDS:
+        if cat in words:
             return cat
-    return "SYMPTOM"  # то же правило "при сомнении", что и в самом промпте
+    return "SYMPTOM"
 
 
 def is_anamnesis_reply(update: dict) -> bool:
@@ -145,9 +163,12 @@ def route(update: dict) -> str:
     msg = update.get("message") or {}
     if msg.get("photo") or msg.get("document"):
         return "registrar"
-    if is_anamnesis_reply(update):
-        return "anamnesis"
     text = msg.get("text") or msg.get("caption") or ""
+    # F10 (2026-09-22): тег анамнеза принимается и в самом тексте ответа
+    # (текст вопроса обещает «просто напиши ответ — пойму по тегу #A05»,
+    # см. anamnesis.handle_reply), а не только в реплае на сообщение бота.
+    if is_anamnesis_reply(update) or _ANAM_REPLY_RE.search(text):
+        return "anamnesis"
     if not text:
         # Голосовое, стикер и т.п. — не фото/документ (иначе уже отфильтровано
         # выше), не про занесение данных. Старый доктор на голосовое просил

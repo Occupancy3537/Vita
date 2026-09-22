@@ -11,27 +11,76 @@
 Порт — прямой вызов process_source() в процессе вместо HTTP-круга на себя
 же, тот же принцип, что и во всех остальных портах этой сессии. process()
 сам помечает status='processed' в конце (app/write_path.py) — цикл здесь
-просто выбирает необработанные id и не трогает статус сам."""
+просто выбирает необработанные id и не трогает статус сам.
+
+F7 (внешний аудит логики, 2026-09-22): раньше упавшее сообщение навсегда
+оставалось status='received' и переразбиралось КАЖДЫЕ 5 МИНУТ — бессрочно,
+причём каждая попытка это LLM-вызов извлечения (деньги) и вечная ошибка в
+логах. Теперь попытки считаются (`process_attempts` в card.source_message),
+после MAX_ATTEMPTS сообщение уходит в dead-letter (status='failed', выпадает
+из очереди) и владельцу уходит ОДИН алерт с id и последней ошибкой — сырьё цело
+в карте, переиграть можно руками (write_path.process), ничего не потеряно.
+"""
 import logging
 import time
 
-from app import run_log
+from app import hermes_telegram, run_log
+from app.db import get_conn, schema
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
 INTERVAL_SECONDS = 5 * 60
 BATCH_LIMIT = 20
+MAX_ATTEMPTS = 3  # F7: после стольких неудач — dead-letter, не вечный ретрай
 
 
 def get_pending_ids(cur) -> list[str]:
-    from app.db import schema
-    cur.execute(f"SELECT id FROM {schema()}.source_message WHERE status = 'received' ORDER BY ts_received LIMIT %s", (BATCH_LIMIT,))
+    cur.execute(
+        f"SELECT id FROM {schema()}.source_message WHERE status = 'received' "
+        "ORDER BY ts_received LIMIT %s",
+        (BATCH_LIMIT,),
+    )
     return [r[0] for r in cur.fetchall()]
 
 
+def _mark_failure(source_id: str, exc: BaseException) -> int:
+    """Посчитать неудачную попытку; на MAX_ATTEMPTS — dead-letter. Возвращает
+    число попыток (0, если строка уже исчезла)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE {schema()}.source_message "
+            "SET process_attempts = process_attempts + 1, process_error = %s "
+            "WHERE id = %s RETURNING process_attempts",
+            (str(exc)[:500], source_id),
+        )
+        row = cur.fetchone()
+        attempts = int(row[0]) if row else 0
+        if attempts >= MAX_ATTEMPTS:
+            cur.execute(
+                f"UPDATE {schema()}.source_message SET status = 'failed' WHERE id = %s",
+                (source_id,),
+            )
+        conn.commit()
+    return attempts
+
+
+def _alert_dead_letter(source_id: str, attempts: int, exc: BaseException) -> None:
+    """Один алерт владельцу при уходе сообщения в dead-letter (fail-safe)."""
+    try:
+        hermes_telegram.send_message(
+            hermes_telegram.CHAT_ID,
+            f"💀 Сообщение {source_id} не разобралось за {attempts} попытки — убрано из очереди "
+            f"(status=failed), вечного ретрая больше нет.\n"
+            f"Последняя ошибка: {str(exc)[:300]}\n"
+            "Текст цел в card.source_message; переиграть можно так: "
+            "docker exec card-service python -c \"from app.write_path import process; print(process('<id>'))\"",
+        )
+    except Exception:
+        logger.exception("card_processor: не удалось отправить алерт о dead-letter %s", source_id)
+
+
 def run_once() -> None:
-    from app.db import get_conn
     from app.write_path import process as process_source
 
     with get_conn() as conn, conn.cursor() as cur:
@@ -44,8 +93,15 @@ def run_once() -> None:
         try:
             process_source(source_id)
             ok += 1
-        except Exception:
-            logger.exception("card_processor: process(%s) упал — статус не продвинулся, повтор на следующем тике", source_id)
+        except Exception as e:
+            logger.exception("card_processor: process(%s) упал — попытка посчитана, повтор на следующем тике",
+                             source_id)
+            try:
+                attempts = _mark_failure(source_id, e)
+                if attempts >= MAX_ATTEMPTS:
+                    _alert_dead_letter(source_id, attempts, e)
+            except Exception:
+                logger.exception("card_processor: не удалось отметить неудачную попытку для %s", source_id)
 
     logger.info("card_processor: обработано %d/%d сообщений", ok, len(pending))
 
