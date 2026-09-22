@@ -36,7 +36,7 @@ import base64
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -45,11 +45,11 @@ from app import llm_usage
 from app import food_diary as fd
 from app.db import get_conn, schema
 from app import run_log
+from app import timeutil
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
-VL = timezone(timedelta(hours=10))
 _API_BASE = "https://api.telegram.org/bot{token}/{method}"
 _FILE_BASE = "https://api.telegram.org/file/bot{token}/{file_path}"
 POLL_TIMEOUT = 30
@@ -279,8 +279,9 @@ def _handle_stats(message: dict) -> None:
     command = message.get("text") or "/today"
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
-            'FROM health.meals m ORDER BY m."Date"'
+            "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE %s, 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
+            'FROM health.meals m ORDER BY m."Date"',
+            (timeutil.person_tz_name(),),
         )
         cols = [c.name for c in cur.description]
         meals = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -307,7 +308,7 @@ def _handle_new_entry(message: dict, msg_type: str) -> None:
 
     entry_id = str(message["message_id"])
     user_id = fd.telegram_user_id(message.get("from") or {})
-    date_iso = datetime.fromtimestamp(message["date"], tz=timezone.utc).astimezone(VL).isoformat()
+    date_iso = datetime.fromtimestamp(message["date"], tz=timezone.utc).astimezone(timeutil.person_tz()).isoformat()
 
     with get_conn() as conn, conn.cursor() as cur:
         fd.insert_meal(cur, entry_id, user_id, date_iso, parsed)

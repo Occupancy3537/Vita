@@ -32,7 +32,7 @@
 import logging
 import os
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 import httpx
 
@@ -44,7 +44,6 @@ from app.scheduler_alert import alert_on_failure
 logger = logging.getLogger(__name__)
 
 CHAT_ID = "8956401"
-VL = timezone(timedelta(hours=10))
 CHECK_HOUR_VL = 8
 CHECK_MINUTE_VL = 43
 
@@ -98,7 +97,7 @@ def _d10(v) -> str:
 
 
 def _vl_now() -> datetime:
-    return datetime.now(VL)
+    return timeutil.now_local()
 
 
 def _check_webhooks(problems: list, notes: list) -> dict:
@@ -151,9 +150,10 @@ def _check_gaps(cur, problems: list, notes: list) -> None:
         problems.append(f"day_sum нет строк за: {', '.join(sorted(m))} (лог еды?)")
 
     since = (_vl_now() - timedelta(days=10)).date()
+    tz = timeutil.person_tz_name()
     cur.execute(
-        "SELECT DISTINCT (\"Date\" AT TIME ZONE 'Asia/Vladivostok')::date FROM health.meals "
-        "WHERE (\"Date\" AT TIME ZONE 'Asia/Vladivostok')::date >= %s", (since,),
+        "SELECT DISTINCT (\"Date\" AT TIME ZONE %s)::date FROM health.meals "
+        "WHERE (\"Date\" AT TIME ZONE %s)::date >= %s", (tz, tz, since),
     )
     meal_dates = {_d10(r[0]) for r in cur.fetchall()}
     if not meal_dates:

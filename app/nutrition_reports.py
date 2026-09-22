@@ -29,7 +29,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 
 import httpx
@@ -45,7 +45,6 @@ from app.scheduler_alert import alert_on_failure
 logger = logging.getLogger(__name__)
 
 CHAT_ID = "8956401"
-VL = timezone(timedelta(hours=10))
 DAILY_HOUR_VL, DAILY_MINUTE_VL = 21, 45
 WEEKLY_HOUR_VL = 12  # воскресенье, эмпирически по execution_entity (Weekly Food Report)
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -101,7 +100,7 @@ def _format_meals(items: list[str]) -> str:
 # =====================================================================
 
 def build_daily_report(cur) -> Optional[dict]:
-    now_vl = datetime.now(VL)
+    now_vl = timeutil.now_local()
     start_vl = now_vl.replace(hour=0, minute=0, second=0, microsecond=0)
     meals = _fetch_meals(cur, start_vl, now_vl)
     if not meals:
@@ -111,7 +110,7 @@ def build_daily_report(cur) -> Optional[dict]:
     meal_lists = {"breakfast": [], "lunch": [], "snack": [], "dinner": [], "ultra": []}
     dates_seen = set()
     for m in meals:
-        date_vl = m["Date"].astimezone(VL)
+        date_vl = m["Date"].astimezone(timeutil.person_tz())
         dates_seen.add(date_vl.date())
         for f in FIELDS:
             sums[f] += _num(m.get(f)) or 0
@@ -244,7 +243,7 @@ def build_weekly_report(cur) -> Optional[dict]:
         return None
 
     def shifted_date(dt):
-        d = dt.astimezone(VL)
+        d = dt.astimezone(timeutil.person_tz())
         return (d - timedelta(days=1)).date() if d.hour < 2 else d.date()
 
     max_date = max(shifted_date(r["Date"]) for r in rows)

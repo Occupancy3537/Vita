@@ -49,7 +49,6 @@ from app.scheduler_alert import alert_on_failure
 logger = logging.getLogger(__name__)
 
 CHAT_ID = "8956401"
-VL = timezone(timedelta(hours=10))
 CHECK_HOUR_VL = 9
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = DEFAULT_MODEL  # 2026-09-22: см. app/ai_models.py
@@ -87,7 +86,7 @@ def _days(a: str, b: str) -> float:
 
 
 def _today_vl() -> str:
-    return _d10((datetime.now(timezone.utc) + timedelta(hours=10)).date().isoformat())
+    return _d10(timeutil.today().isoformat())
 
 
 def _fetch_sources(cur) -> dict:
@@ -182,7 +181,7 @@ def detect(cur) -> dict:
     today = _today_vl()
 
     def d_ago(d):
-        return _d10((datetime.now(timezone.utc) + timedelta(hours=10) - timedelta(days=d)).date().isoformat())
+        return _d10((timeutil.now_local() - timedelta(days=d)).date().isoformat())
 
     mark_name = {m["Marker_ID"]: m["Name"] for m in markers if m.get("Marker_ID")}
     v_sorted = sorted((v for v in visits if v.get("Date") and v.get("Visit_ID")), key=lambda v: _d10(v["Date"]))

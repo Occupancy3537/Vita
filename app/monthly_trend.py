@@ -28,7 +28,7 @@ constants DOMAIN/DATE_FIELD внутри каждой. Порт — один н�
 import json
 import logging
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app import run_log, timeutil
@@ -36,7 +36,6 @@ from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
-VL = timezone(timedelta(hours=10))
 MONTHLY_HOUR_VL = 10
 CHAT_ID = "8956401"
 Z_MODERATE = 1.5
@@ -76,7 +75,7 @@ def _to_number(v):
 def define_month_windows(now: Optional[datetime] = None) -> dict:
     """Порт "Define Month Windows" — на 1-е число месяца current_month это
     только что закончившийся месяц, previous_month — тот, что перед ним."""
-    now = now or datetime.now(VL)
+    now = now or timeutil.now_local()
     current = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
     prev_anchor = now.replace(day=1) - timedelta(days=1)
     previous = (prev_anchor.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
@@ -180,7 +179,7 @@ def compute_trend(rows: list[dict]) -> list[dict]:
             interpretation = "изменение"
 
         results.append({
-            "date_computed": datetime.now(VL).date().isoformat(), "domain": domain, "metric": m,
+            "date_computed": timeutil.today().isoformat(), "domain": domain, "metric": m,
             "prev_month_mean": round(prev["mean"], 2), "this_month_mean": round(cur["mean"], 2),
             "z": round(z, 2), "n_current": cur["n"], "n_previous": prev["n"],
             "severity": severity, "direction": direction, "interpretation": interpretation,

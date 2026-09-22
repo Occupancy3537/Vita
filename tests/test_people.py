@@ -3,7 +3,7 @@
 фикстура восстанавливает исходное значение после каждого теста."""
 import pytest
 
-from app import people
+from app import people, timeutil
 from app.db import get_conn, schema
 
 
@@ -40,6 +40,21 @@ def test_set_and_reset_current_tz():
     back = people.reset_current_tz()
     assert back == home
     assert people.is_travelling() is False
+
+
+def test_set_current_tz_drops_tz_cache(monkeypatch):
+    """T3: смена зоны через /tz или страницу «Настройки» видна сразу, а не через
+    TTL кеша (иначе бот минуту отвечал бы старой зоной)."""
+    monkeypatch.setenv("TIMEUTIL_TZ_CACHE_SECONDS", "300")
+    timeutil.invalidate_tz_cache()
+    try:
+        before = people.get_person()["current_tz"]
+        assert timeutil.person_tz_name() == before   # прочиталось и закешировалось
+        people.set_current_tz("Bangkok")
+        assert timeutil.person_tz_name() == "Asia/Bangkok"
+    finally:
+        people.reset_current_tz()
+        timeutil.invalidate_tz_cache()
 
 
 def test_set_current_tz_bad_name_raises_and_changes_nothing():

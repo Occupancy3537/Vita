@@ -49,12 +49,13 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timedelta, timezone
+
 from typing import Optional
 
 import httpx
 
 from app import llm_usage
+from app import timeutil
 from app.ai_models import DEFAULT_MODEL, FOOD_MODEL
 from app.db import get_conn
 from app.doctor import telegram
@@ -62,7 +63,6 @@ from app.doctor import telegram
 logger = logging.getLogger(__name__)
 
 OWNER_CHAT_ID = "8956401"
-VL = timezone(timedelta(hours=10))
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 REGISTRAR_MODEL = os.environ.get("REGISTRAR_MODEL", DEFAULT_MODEL)
 REGISTRAR_PDF_MODEL = os.environ.get("REGISTRAR_PDF_MODEL", FOOD_MODEL)
@@ -82,7 +82,7 @@ ABS_SET = {"M058", "M061", "M063", "M065", "M067"}
 
 
 def _vl_today() -> str:
-    return datetime.now(VL).strftime("%Y-%m-%d")
+    return timeutil.today().isoformat()
 
 
 def norm(s) -> str:

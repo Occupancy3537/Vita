@@ -12,6 +12,7 @@ import zoneinfo
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from app import timeutil
 from app.db import get_conn
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ def set_current_tz(tz_name: str, person_id: str = SELF_PERSON_ID) -> str:
             (key, person_id),
         )
         conn.commit()
+    timeutil.invalidate_tz_cache()
     logger.info("people: текущая зона %s -> %s", person_id, key)
     return key
 
@@ -88,6 +90,7 @@ def reset_current_tz(person_id: str = SELF_PERSON_ID) -> str:
         conn.commit()
     if row is None:
         raise ValueError(f"человек {person_id!r} не найден")
+    timeutil.invalidate_tz_cache()
     logger.info("people: %s вернулся в домашнюю зону %s", person_id, row[0])
     return row[0]
 

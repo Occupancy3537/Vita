@@ -63,7 +63,7 @@ import math
 import os
 import re
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import httpx
@@ -76,7 +76,6 @@ from app.scheduler_alert import alert_on_failure
 logger = logging.getLogger(__name__)
 
 CHAT_ID = "8956401"
-VL = timezone(timedelta(hours=10))
 DAILY_HOUR_VL = 9
 DAILY_MINUTE_VL = 15
 WEEKLY_HOUR_VL = 11

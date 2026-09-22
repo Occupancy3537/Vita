@@ -47,7 +47,6 @@ from app.scheduler_alert import alert_on_failure
 logger = logging.getLogger(__name__)
 
 CHAT_ID = "8956401"
-VL = timezone(timedelta(hours=10))
 WEEKLY_HOUR_VL = 20  # воскресенье
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = DEFAULT_MODEL  # 2026-09-22: см. app/ai_models.py
@@ -97,11 +96,13 @@ def _fetch_all(cur) -> dict:
     cur.execute('SELECT d.*, to_char(d."Date", \'YYYY-MM-DD\') AS "Date" FROM health.day_sum d ORDER BY d."Date"')
     day_sum = _rows(cur)
 
+    tz = timeutil.person_tz_name()
     cur.execute(
-        "SELECT to_char(\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\", "
+        "SELECT to_char(\"Date\" AT TIME ZONE %s, 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\", "
         '"Meal_description", "Calories", "NOVA" FROM health.meals '
-        "WHERE (\"Date\" AT TIME ZONE 'Asia/Vladivostok')::date >= (now() AT TIME ZONE 'Asia/Vladivostok')::date - 10 "
-        'ORDER BY "Date"'
+        "WHERE (\"Date\" AT TIME ZONE %s)::date >= (now() AT TIME ZONE %s)::date - 10 "
+        'ORDER BY "Date"',
+        (tz, tz, tz),
     )
     meals = _rows(cur)
 
@@ -184,14 +185,14 @@ def build_context(src: dict) -> dict:
     lab_res, lab_mark, lab_visit, pheno_log = src["lab_res"], src["lab_mark"], src["lab_visit"], src["pheno_log"]
 
     daily_sorted = sorted((r for r in daily if r.get("Дата")), key=lambda r: _dkey(r["Дата"]))
-    last_date = _dkey(daily_sorted[-1]["Дата"]) if daily_sorted else _dkey(datetime.now(timezone.utc) + timedelta(hours=10))
+    last_date = _dkey(daily_sorted[-1]["Дата"]) if daily_sorted else _dkey(timeutil.now_local())
     last_ms = datetime.fromisoformat(last_date + "T00:00:00+00:00")
 
     def days_ago(d):
         return (last_ms - timedelta(days=d)).date().isoformat()
 
     win7, win30, win60, win90 = days_ago(7), days_ago(30), days_ago(60), days_ago(90)
-    today = _dkey(datetime.now(timezone.utc) + timedelta(hours=10))
+    today = _dkey(timeutil.now_local())
 
     def not_future(d):
         k = str(d or "")[:10]
@@ -583,7 +584,7 @@ def build_context(src: dict) -> dict:
 # =====================================================================
 
 def build_prompt(ctx: dict) -> str:
-    today = datetime.now(VL).strftime("%Y-%m-%d")
+    today = timeutil.now_local().strftime("%Y-%m-%d")
     ctx_json = json.dumps(ctx, ensure_ascii=False)
     return f"""СЕГОДНЯ: {today}. Все данные в контексте — это ПРОШЛОЕ (поле context.today и context.data_coverage). Категорически запрещено упоминать любые даты позже сегодняшней или описывать события, которые «случатся». Если в медкарте попалась дата из будущего — это ошибка ввода, игнорируй такую запись.
 
@@ -1050,7 +1051,7 @@ def run_once() -> None:
         src = _fetch_all(cur)
 
     ctx = build_context(src)
-    today_date = (ctx.get("window") or {}).get("to") or datetime.now(VL).date().isoformat()
+    today_date = (ctx.get("window") or {}).get("to") or timeutil.today().isoformat()
     prev_weekly = _prev_weekly(src["recs"], today_date)
 
     raw = call_model(build_prompt(ctx))

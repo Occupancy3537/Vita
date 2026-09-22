@@ -13,7 +13,7 @@
 import logging
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from app.db import get_conn, schema
 from app.doctor import telegram
@@ -23,13 +23,12 @@ from app.scheduler_alert import alert_on_failure
 logger = logging.getLogger(__name__)
 
 CHAT_ID = "8956401"
-VL = timezone(timedelta(hours=10))
 ASK_HOUR_VL = 11
 _ANAM_TAG = re.compile(r"#(A\d{2})\b")
 
 
 def _vl_today() -> str:
-    return datetime.now(VL).strftime("%Y-%m-%d")
+    return timeutil.today().isoformat()
 
 
 def _days_between(a: str, b: str) -> int:

@@ -43,7 +43,7 @@ import logging
 import math
 import re
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from typing import Optional
 
 from app import run_log, timeutil
@@ -51,7 +51,6 @@ from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
-VL = timezone(timedelta(hours=10))
 WEEKLY_HOUR_VL = 9
 HEALTH_DB_SHEET_ID = "1M8focgZBHCbhLEQb4GoyxTYxedA-FcdjQ_XakX5SG2w"
 
@@ -179,7 +178,7 @@ def compute_phenoage_result(results: list[dict], visits: list[dict], markers: li
     """Порт "Compute PhenoAge" (без Sheets-специфики) — возвращает
     {current, series, series_estimated, rows, missing_for_current}."""
     visit_map = build_visit_map(results, visits, markers)
-    today = today or datetime.now(VL).date().isoformat()
+    today = today or timeutil.today().isoformat()
 
     age_anchor = None
     for v in sorted((x for x in visit_map.values() if x["date"] and x["age"] is not None), key=lambda x: x["date"]):

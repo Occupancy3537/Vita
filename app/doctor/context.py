@@ -20,6 +20,7 @@ from typing import Optional
 
 from psycopg import sql
 
+from app import timeutil
 from app.db import schema
 from app.memory import get_context
 
@@ -92,7 +93,8 @@ def _nutrition_today(cur) -> Optional[dict]:
     cur.execute(
         'SELECT "Calories", "Proteins", "Carbs", "Fats", "Кофеин", "Алкоголь, гр", '
         '"Добавленный сахар" FROM health.day_sum '
-        "WHERE \"Date\" = (now() AT TIME ZONE 'Asia/Vladivostok')::date"
+        "WHERE \"Date\" = (now() AT TIME ZONE %s)::date",
+        (timeutil.person_tz_name(),),
     )
     row = cur.fetchone()
     if row is None:
@@ -106,12 +108,14 @@ def _nutrition_today(cur) -> Optional[dict]:
 
 
 def _meals_today(cur) -> list[dict]:
+    tz = timeutil.person_tz_name()
     cur.execute(
-        "SELECT to_char(\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'HH24:MI') AS t, "
+        "SELECT to_char(\"Date\" AT TIME ZONE %s, 'HH24:MI') AS t, "
         '"Meal_description", "Calories", "Proteins", "Fats", "Carbs" '
         'FROM health.meals '
-        "WHERE (\"Date\" AT TIME ZONE 'Asia/Vladivostok')::date = (now() AT TIME ZONE 'Asia/Vladivostok')::date "
-        'ORDER BY "Date"'
+        "WHERE (\"Date\" AT TIME ZONE %s)::date = (now() AT TIME ZONE %s)::date "
+        'ORDER BY "Date"',
+        (tz, tz, tz),
     )
     return [
         {"time": t, "description": desc, "kcal": _num(k), "protein_g": _num(p),

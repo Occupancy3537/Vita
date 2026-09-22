@@ -373,8 +373,11 @@ def build(cur) -> dict:
                                                    "secrets_total": len(SECRET_NAMES), "gate": None})
     timezone = _sec("timezone", timezone_block, None)
     local_now = timeutil.now_local()
+    # T3 (2026-09-23): время уже местное (зона человека) — подпись тоже должна
+    # быть про его зону, а не про зашитый «VL»: в поездке «07:45 VL» врало бы.
+    tz_label = timeutil.person_tz_name().split("/")[-1].replace("_", " ")
     return {
-        "ts": local_now.strftime("%d.%m %H:%M") + " VL",
+        "ts": local_now.strftime("%d.%m %H:%M") + " " + tz_label,
         "money": money,
         "host": host,
         "peak24": peak,

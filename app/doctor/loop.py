@@ -19,11 +19,11 @@ import json
 import os
 import threading
 import time
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
 
+from app import timeutil
 from app.db import get_conn
 from app.doctor import config, telegram, trace
 from app.doctor.contract import StagedWrite, TurnResult
@@ -33,7 +33,6 @@ from app.doctor.prompt import PROMPT_VERSION, SYSTEM_PROMPT, build_soft_probe, f
 from app.doctor.tools import TOOLS_BY_NAME, openai_tool_schemas
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-VLADIVOSTOK = timezone(timedelta(hours=10))
 
 DEGRADED_REPLY = (
     "Не успел разобраться — техническая заминка на моей стороне. "
@@ -43,7 +42,7 @@ DEGRADED_REPLY = (
 
 
 def _today_vladivostok() -> str:
-    return datetime.now(VLADIVOSTOK).strftime("%Y-%m-%d")
+    return timeutil.today().isoformat()
 
 
 def _run_tool(name: str, args: dict) -> dict:

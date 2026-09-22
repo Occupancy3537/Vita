@@ -66,13 +66,13 @@ LLM-ключа "pufa_g" в колонку "ПНЖ") — в normalize_food_group_
 import json
 import math
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Optional
 
+from app import timeutil
 from app.ai_models import FOOD_MODEL
 from app.dashboard import _js_round
 
-VL = timezone(timedelta(hours=10))
 
 # 2026-09-22: раньше фото и текст ходили в разные модели (GLM 5.3 Flash на
 # тексте, Gemini Flash Lite на фото) — по запросу Влада оставлена только
@@ -333,7 +333,7 @@ def generate_bar(current: float, target: float) -> str:
 def build_stats_message(meals: list[dict], user_id: str, command: str, now: Optional[datetime] = None) -> dict:
     """Порт "Агрегация /day_week". `meals` — health.meals строки (User_ID,
     Date как YYYY-MM-DDTHH:MI text, Calories/Proteins/Carbs/Fats)."""
-    now = now or datetime.now(VL)
+    now = now or timeutil.now_local()
     is_week = "week" in command
     today_str = now.date().isoformat()
     week_ago_str = (now.date() - timedelta(days=6)).isoformat()

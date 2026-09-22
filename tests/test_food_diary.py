@@ -8,6 +8,7 @@ from datetime import datetime
 import pytest
 
 from app import food_diary as fd
+from app import timeutil
 from app.db import get_conn
 
 
@@ -226,7 +227,7 @@ def _meal(user, date_str, cal, prot, carb, fat):
 
 
 def test_build_stats_message_today_sums_only_todays_meals():
-    now = datetime(2026, 9, 21, 12, 0, tzinfo=fd.VL)
+    now = datetime(2026, 9, 21, 12, 0, tzinfo=timeutil.person_tz())
     meals = [
         _meal("Влад Васюк", "2026-09-21T08:00", "500", "30", "50", "20"),
         _meal("Влад Васюк", "2026-09-21T13:00", "700", "40", "60", "25"),
@@ -239,7 +240,7 @@ def test_build_stats_message_today_sums_only_todays_meals():
 
 
 def test_build_stats_message_week_sums_last_7_days():
-    now = datetime(2026, 9, 21, 12, 0, tzinfo=fd.VL)
+    now = datetime(2026, 9, 21, 12, 0, tzinfo=timeutil.person_tz())
     meals = [_meal("Влад Васюк", f"2026-09-{d:02d}T08:00", "1000", "10", "10", "10") for d in range(15, 22)]
     meals.append(_meal("Влад Васюк", "2026-09-14T08:00", "9999", "9", "9", "9"))  # 8 дней назад — не входит
     result = fd.build_stats_message(meals, "Влад Васюк", "/week", now)

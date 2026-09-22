@@ -22,8 +22,59 @@ def test_person_tz_unknown_person_falls_back_to_default():
 
 def test_person_tz_unknown_zone_name_falls_back(monkeypatch):
     """Битая IANA-строка в БД тоже не должна ронять вызов."""
-    monkeypatch.setattr(timeutil, "_read_tz_name", lambda person_id: "Mars/Olympus")
+    monkeypatch.setattr(timeutil, "_read_tz_row",
+                        lambda person_id: ("Mars/Olympus", "Mars/Olympus"))
     assert str(timeutil.person_tz()) == timeutil.DEFAULT_TZ
+
+
+# --- T3 (2026-09-23): зона как IANA-имя для SQL и внешних сервисов ----------
+
+def test_person_tz_name_is_iana_name_for_sql():
+    """Именно эта строка уходит параметром в `AT TIME ZONE %s`."""
+    assert timeutil.person_tz_name() == "Asia/Vladivostok"
+
+
+def test_person_tz_name_unknown_person_is_default():
+    assert timeutil.person_tz_name("nobody-xyz") == timeutil.DEFAULT_TZ
+
+
+def test_home_tz_name_does_not_follow_traveller(monkeypatch):
+    """Погода по домашним координатам не должна уезжать за путешественником:
+    person_tz_name() — текущая зона, home_tz_name() — домашняя."""
+    monkeypatch.setattr(timeutil, "_read_tz_row",
+                        lambda person_id: ("Asia/Bangkok", "Asia/Vladivostok"))
+    assert timeutil.person_tz_name() == "Asia/Bangkok"
+    assert timeutil.home_tz_name() == "Asia/Vladivostok"
+
+
+def test_broken_zone_name_falls_back_for_sql_param(monkeypatch):
+    """Битая строка в БД не должна уходить в SQL: PostgreSQL на «Bangkok» без
+    префикса отвечает «time zone not recognized»."""
+    monkeypatch.setattr(timeutil, "_read_tz_row",
+                        lambda person_id: ("Bangkok", "Bangkok"))
+    assert timeutil.person_tz_name() == timeutil.DEFAULT_TZ
+
+
+def test_tz_cache_reads_zone_once_per_ttl(monkeypatch):
+    """Дашборд и доктор зовут зону по нескольку раз на запрос — чтение в БД
+    должно быть одно (T3, иначе +6 запросов на страницу)."""
+    calls = []
+
+    def reader(person_id):
+        calls.append(person_id)
+        return ("Asia/Vladivostok", "Asia/Vladivostok")
+
+    monkeypatch.setattr(timeutil, "_read_tz_row", reader)
+    monkeypatch.setenv("TIMEUTIL_TZ_CACHE_SECONDS", "300")
+    timeutil.invalidate_tz_cache()
+    try:
+        timeutil.person_tz_name()
+        timeutil.person_tz_name()
+        timeutil.home_tz_name()
+        timeutil.now_local()
+        assert calls == ["self"]
+    finally:
+        timeutil.invalidate_tz_cache()
 
 
 def test_today_is_vladivostok_date():

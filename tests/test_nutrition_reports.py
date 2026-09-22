@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app import nutrition_reports as nr
+from app import timeutil
 from app.db import get_conn
 
 
@@ -22,7 +23,7 @@ def test_build_daily_report_none_when_no_meals(monkeypatch):
 
 
 def test_build_daily_report_categorizes_by_hour_and_sums(monkeypatch):
-    now_vl = datetime.now(nr.VL)
+    now_vl = datetime.now(timeutil.person_tz())
     breakfast = now_vl.replace(hour=8, minute=0, second=0, microsecond=0)
     dinner = now_vl.replace(hour=19, minute=0, second=0, microsecond=0)
     rows = [
@@ -42,7 +43,7 @@ def test_build_daily_report_categorizes_by_hour_and_sums(monkeypatch):
 
 
 def test_build_daily_report_non_ultra_meal_not_in_ultra_list(monkeypatch):
-    now_vl = datetime.now(nr.VL)
+    now_vl = datetime.now(timeutil.person_tz())
     rows = [{"Date": now_vl.replace(hour=8), "Meal_description": "овсянка", "NOVA": "1",
              **{f: "" for f in nr.FIELDS}}]
     monkeypatch.setattr(nr, "_fetch_meals", lambda cur, since, until: rows)
@@ -60,7 +61,7 @@ def test_build_weekly_report_none_when_no_meals(monkeypatch):
 def test_build_weekly_report_averages_per_day_not_per_meal(monkeypatch):
     # день3 — самый свежий (max_date) и, как в оригинале, ИСКЛЮЧАЕТСЯ из
     # усреднения (вдруг ещё не закончен) — считаем только день1+день2.
-    now_vl = datetime.now(nr.VL)
+    now_vl = datetime.now(timeutil.person_tz())
     day1 = now_vl - timedelta(days=3)
     day2 = now_vl - timedelta(days=2)
     day3 = now_vl - timedelta(days=1)
@@ -81,7 +82,7 @@ def test_build_weekly_report_averages_per_day_not_per_meal(monkeypatch):
 
 
 def test_build_weekly_report_only_surfaces_narrow_field_set(monkeypatch):
-    now_vl = datetime.now(nr.VL)
+    now_vl = datetime.now(timeutil.person_tz())
     rows = [
         {"Date": now_vl - timedelta(days=2), "Meal_description": "x", "NOVA": "1", **{f: "10" for f in nr.FIELDS}},
         {"Date": now_vl - timedelta(days=1), "Meal_description": "y", "NOVA": "1", **{f: "10" for f in nr.FIELDS}},
@@ -96,7 +97,7 @@ def test_build_weekly_report_late_night_meal_counts_as_previous_day(monkeypatch)
     """parseDateWithShift: время < 2:00 (ВЛ) -> предыдущий день. Второй (более
     свежий) приём нужен, чтобы поздний ужин не оказался единственным и не
     попал под исключение max_date."""
-    now_vl = datetime.now(nr.VL)
+    now_vl = datetime.now(timeutil.person_tz())
     late_night = (now_vl - timedelta(days=2)).replace(hour=1, minute=0)
     later_meal = now_vl - timedelta(days=1)
     rows = [

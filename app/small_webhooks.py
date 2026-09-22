@@ -5,9 +5,10 @@ n8n-воркфлоу, сгруппированы в одном файле тол
 негласно к app/gate_watch.py — маленький сфокусированный модуль на функцию,
 здесь просто несколько функций такого размера в одном файле)."""
 import os
-from datetime import datetime, timedelta, timezone
+
 from pathlib import Path
 
+from app import timeutil
 from app.db import get_conn
 
 # --- «Был ли завтрак?» (webhook check-breakfast) -----------------------------
@@ -19,14 +20,16 @@ from app.db import get_conn
 
 
 def check_breakfast(cur) -> dict:
+    tz = timeutil.person_tz_name()
     cur.execute(
-        "SELECT to_char(\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'YYYY-MM-DD') AS d "
+        "SELECT to_char(\"Date\" AT TIME ZONE %s, 'YYYY-MM-DD') AS d "
         'FROM health.meals '
-        "WHERE (\"Date\" AT TIME ZONE 'Asia/Vladivostok')::date >= (now() AT TIME ZONE 'Asia/Vladivostok')::date - 2 "
-        'ORDER BY "Date" DESC'
+        "WHERE (\"Date\" AT TIME ZONE %s)::date >= (now() AT TIME ZONE %s)::date - 2 "
+        'ORDER BY "Date" DESC',
+        (tz, tz, tz),
     )
     dates = {r[0] for r in cur.fetchall()}
-    today_vl = (datetime.now(timezone.utc) + timedelta(hours=10)).strftime("%Y-%m-%d")
+    today_vl = timeutil.today().isoformat()
     return {"breakfast_ready": today_vl in dates}
 
 
@@ -53,7 +56,7 @@ def action_ack(token: str, action_id: str, done) -> dict:
     done_bool = done if isinstance(done, bool) else str(done) == "true"
     parts = action_id.split("|", 1)
     date_issued, title = parts[0], (parts[1] if len(parts) > 1 else "")
-    done_at = (datetime.now(timezone.utc) + timedelta(hours=10)).strftime("%Y-%m-%d %H:%M")
+    done_at = timeutil.now_local().strftime("%Y-%m-%d %H:%M")
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(

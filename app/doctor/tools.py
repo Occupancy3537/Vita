@@ -103,12 +103,14 @@ def get_patient_medical_history(cur, args: dict) -> dict:
 
 
 def get_meals_today(cur, args: dict) -> dict:
+    tz = timeutil.person_tz_name()
     cur.execute(
-        "SELECT to_char(\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'HH24:MI') AS t, "
+        "SELECT to_char(\"Date\" AT TIME ZONE %s, 'HH24:MI') AS t, "
         '"Meal_description", "Calories", "Proteins", "Fats", "Carbs" '
         'FROM health.meals '
-        "WHERE (\"Date\" AT TIME ZONE 'Asia/Vladivostok')::date = (now() AT TIME ZONE 'Asia/Vladivostok')::date "
-        'ORDER BY "Date"'
+        "WHERE (\"Date\" AT TIME ZONE %s)::date = (now() AT TIME ZONE %s)::date "
+        'ORDER BY "Date"',
+        (tz, tz, tz),
     )
     meals = [
         {"time": t, "description": d, "kcal": _num(k), "protein_g": _num(p),

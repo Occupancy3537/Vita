@@ -10,6 +10,9 @@ os.environ["CARD_PG_SCHEMA"] = "card_test"  # жёстко, не полагае�
 # эти цели перенаправлены в card_test-копии той же формы (прод health.* тесты
 # не касаются вообще).
 os.environ["REGISTRAR_HEALTH_SCHEMA"] = "card_test"
+# T3 (2026-09-23): кеш чтения зоны в timeutil — в тестах выключен, иначе
+# смена зоны в одном тесте протекала бы в соседние (TTL 60 с).
+os.environ["TIMEUTIL_TZ_CACHE_SECONDS"] = "0"
 
 import pytest  # noqa: E402
 

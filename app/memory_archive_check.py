@@ -11,7 +11,6 @@ w3_question — эпизод с критическим паттерном, мо�
 нельзя, нужен ответ Влада. "archived" — не шумим (см. run_pre_archive_check)."""
 import logging
 import time
-from datetime import datetime, timedelta, timezone
 
 from app.db import get_conn
 from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
@@ -22,7 +21,6 @@ from app.scheduler_alert import alert_on_failure
 logger = logging.getLogger(__name__)
 
 CHAT_ID = "8956401"
-VL = timezone(timedelta(hours=10))
 CHECK_HOUR_VL = 8
 
 

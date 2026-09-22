@@ -12,6 +12,10 @@ person_id везде 'self'. Fail-safe осознанный: любая проб
 исключение, а DEFAULT_TZ + warning. «Не смог посчитать день → упал весь ход
 доктора» недопустимо; CURRENT_DATE в SQL запрещён (зона сервера UTC — это и
 был T1: утренние записи доктора получали вчерашнюю дату).
+
+T3 (2026-09-23): здесь же `person_tz_name()`/`home_tz_name()` — зона как
+IANA-строка для SQL-параметра и внешних сервисов. Раньше «Владивосток» был
+зашит в ~40 местах тремя способами; теперь это единственный источник.
 """
 import logging
 import os
@@ -31,32 +35,88 @@ SELF_PERSON_ID = "self"
 _HEALTH_SCHEMA = os.environ.get("REGISTRAR_HEALTH_SCHEMA", "health")
 
 
-def _read_tz_name(person_id: str) -> Optional[str]:
-    """Имя зоны из people; None при любой проблеме (включая отсутствие таблицы
-    до применения миграции pg_schema_people.sql)."""
+def _read_tz_row(person_id: str) -> tuple:
+    """(current_tz, home_tz) из people; (None, None) при любой проблеме
+    (включая отсутствие таблицы до применения миграции pg_schema_people.sql)."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                f"SELECT COALESCE(current_tz, home_tz) FROM {_HEALTH_SCHEMA}.people WHERE id = %s",
+                f"SELECT current_tz, home_tz FROM {_HEALTH_SCHEMA}.people WHERE id = %s",
                 (person_id,),
             )
             row = cur.fetchone()
-            return row[0] if row else None
+            return (row[0], row[1]) if row else (None, None)
     except Exception:
-        logger.warning("timeutil: не удалось прочитать зону для %r — беру %s",
+        logger.warning("timeutil: не удалось прочитать зоны для %r — беру %s",
                        person_id, DEFAULT_TZ, exc_info=True)
+        return (None, None)
+
+
+# T3 (внешний аудит логики, 2026-09-23): «Владивосток» был записан в проекте
+# тремя способами (`AT TIME ZONE 'Asia/Vladivostok'` в SQL,
+# `timedelta(hours=10)`, `timezone(timedelta(hours=10))`) — три независимых
+# источника одного правила, которые разъедутся при первом «не Владивостоке».
+# Теперь зону и для SQL, и для внешних сервисов даёт только этот модуль.
+_TZ_CACHE: dict = {}  # person_id -> (current_tz, home_tz, monotonic)
+
+
+def _tz_cache_ttl() -> float:
+    """Секунды кеша чтения зоны. Тесты ставят 0 (tests/conftest.py), иначе смена
+    зоны в одном тесте протекала бы в соседний."""
+    try:
+        return float(os.environ.get("TIMEUTIL_TZ_CACHE_SECONDS", "60"))
+    except Exception:
+        return 60.0
+
+
+def invalidate_tz_cache() -> None:
+    """Сбросить кеш зон. Зовут сеттеры app/people.py — смена зоны через /tz или
+    страницу «Настройки» видна сразу, а не через TTL."""
+    _TZ_CACHE.clear()
+
+
+def _tz_names(person_id: str) -> tuple:
+    """(current_tz, home_tz) с коротким кешем: дашборд и доктор зовут зону по
+    нескольку раз на запрос, а чтение — это запрос в БД."""
+    ttl = _tz_cache_ttl()
+    hit = _TZ_CACHE.get(person_id)
+    now = time.monotonic()
+    if hit is not None and ttl > 0 and now - hit[2] < ttl:
+        return hit[0], hit[1]
+    current, home = _read_tz_row(person_id)
+    _TZ_CACHE[person_id] = (current, home, now)
+    return current, home
+
+
+def _known_tz(name: Optional[str]) -> Optional[str]:
+    """Каноничное IANA-имя или None. Заодно защита SQL-параметра: PostgreSQL
+    принимает не всякую строку (например, «Bangkok» без префикса — «time zone
+    not recognized», проверено на живом PG 17)."""
+    if not name:
         return None
+    try:
+        return ZoneInfo(name).key
+    except Exception:
+        return None
+
+
+def person_tz_name(person_id: str = SELF_PERSON_ID) -> str:
+    """IANA-имя зоны человека — для SQL (`AT TIME ZONE %s`) и внешних сервисов."""
+    current, home = _tz_names(person_id)
+    return _known_tz(current) or _known_tz(home) or DEFAULT_TZ
+
+
+def home_tz_name(person_id: str = SELF_PERSON_ID) -> str:
+    """IANA-имя ДОМАШНЕЙ зоны — для того, что привязано к месту, а не к
+    человеку (погода по домашним координатам: она не должна уезжать за
+    путешественником в Бангкок)."""
+    current, home = _tz_names(person_id)
+    return _known_tz(home) or _known_tz(current) or DEFAULT_TZ
 
 
 def person_tz(person_id: str = SELF_PERSON_ID) -> ZoneInfo:
     """Зона человека: current_tz из people; при любой проблеме — DEFAULT_TZ."""
-    tz_name = _read_tz_name(person_id) or DEFAULT_TZ
-    try:
-        return ZoneInfo(tz_name)
-    except Exception:
-        logger.warning("timeutil: неизвестная зона %r для %r — беру %s",
-                       tz_name, person_id, DEFAULT_TZ)
-        return ZoneInfo(DEFAULT_TZ)
+    return ZoneInfo(person_tz_name(person_id))
 
 
 def now_local(person_id: str = SELF_PERSON_ID) -> datetime:

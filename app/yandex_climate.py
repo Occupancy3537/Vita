@@ -15,11 +15,11 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from app import run_log
+from app import timeutil
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
-VL = timezone(timedelta(hours=10))
 HOURLY_MINUTE_VL = 5
 
 YANDEX_DEVICE_ID = "1c92a9dc-cd69-448a-98ba-f202814f50b0"
@@ -109,7 +109,7 @@ def run_once() -> None:
 
 
 def _sleep_until_next_hour(minute: int) -> None:
-    now = datetime.now(VL)
+    now = datetime.now(timeutil.person_tz())
     nxt = now.replace(minute=minute, second=0, microsecond=0)
     if nxt <= now:
         nxt += timedelta(hours=1)

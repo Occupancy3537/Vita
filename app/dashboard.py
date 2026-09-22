@@ -27,6 +27,7 @@ import math
 import re
 from datetime import date, datetime, timedelta, timezone
 
+from app import timeutil
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
 
 # --- «Здоровье»-экран: порт n8n Code-ноды "Build Health JSON" (2026-09-16) ---
@@ -310,7 +311,7 @@ def get_health_dashboard(cur) -> dict:
     # Три явных состояния (запрос Влада, было и в n8n-версии): flagged —
     # сегодняшняя проверка что-то нашла; clean — прошла и чисто; not_run —
     # сегодняшних данных ещё нет, проверке не из чего было считать.
-    today_vl = _dkey((datetime.now(timezone.utc) + timedelta(hours=10)))
+    today_vl = _dkey(timeutil.now_local())
     if anomalies["report_date"] == today_vl:
         anomalies["status"] = "flagged"
     elif _dkey(last_date) == today_vl:
@@ -349,9 +350,11 @@ def get_today_live_metrics(cur) -> dict:
     # что и totalFats.toFixed в n8n Dashboard Cached, см. STATE.md 2026-09-16) —
     # SQL SUM() падает с UndefinedFunction; складываем в Python через _num(),
     # как уже сделано в get_meals_today (app/doctor/tools.py).
+    tz = timeutil.person_tz_name()
     cur.execute(
         "SELECT \"Calories\", \"Proteins\" FROM health.meals "
-        "WHERE (\"Date\" AT TIME ZONE 'Asia/Vladivostok')::date = (now() AT TIME ZONE 'Asia/Vladivostok')::date"
+        "WHERE (\"Date\" AT TIME ZONE %s)::date = (now() AT TIME ZONE %s)::date",
+        (tz, tz),
     )
     meal_rows = cur.fetchall()
     kcal_sum = sum(v for v in (_num(r[0]) for r in meal_rows) if v is not None)
@@ -360,7 +363,8 @@ def get_today_live_metrics(cur) -> dict:
 
     cur.execute(
         "SELECT steps, stress, date, updated_at FROM health.live_steps_today "
-        "WHERE date = (now() AT TIME ZONE 'Asia/Vladivostok')::date"
+        "WHERE date = (now() AT TIME ZONE %s)::date",
+        (timeutil.person_tz_name(),),
     )
     row = cur.fetchone()
     steps, stress, steps_date, steps_updated_at = (row if row else (None, None, None, None))
@@ -499,7 +503,7 @@ def get_bioage_dashboard(cur) -> dict:
 
     sorted_visits = sorted((v for v in visit_map.values() if v["date"]), key=lambda v: v["date"])
 
-    today_vl = _dkey(datetime.now(timezone.utc) + timedelta(hours=10))
+    today_vl = _dkey(timeutil.now_local())
     cur_age = age_at_date(today_vl)
     key_label = {k: d["label"] for k, d in PHENO_MARKERS.items()}
 
@@ -785,11 +789,13 @@ def get_today_dashboard(cur) -> dict:
     cur.execute('SELECT d.*, to_char(d."Дата", \'YYYY-MM-DD\') AS "Дата" FROM health.daily_trends d ORDER BY d."Дата"')
     daily = _rows_as_dicts(cur)
 
+    tz = timeutil.person_tz_name()
     cur.execute(
-        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
+        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE %s, 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
         'FROM health.meals m '
-        "WHERE (m.\"Date\" AT TIME ZONE 'Asia/Vladivostok')::date >= (now() AT TIME ZONE 'Asia/Vladivostok')::date - 3 "
-        'ORDER BY m."Date"'
+        "WHERE (m.\"Date\" AT TIME ZONE %s)::date >= (now() AT TIME ZONE %s)::date - 3 "
+        'ORDER BY m."Date"',
+        (tz, tz, tz),
     )
     meals = _rows_as_dicts(cur)
 
@@ -813,7 +819,7 @@ def get_today_dashboard(cur) -> dict:
     profile = prof_rows[0] if prof_rows else {}
 
     # ---------- время ----------
-    now_vl = datetime.now(timezone.utc) + timedelta(hours=10)
+    now_vl = timeutil.now_local()
     today_iso = _dkey(now_vl)
     now_min = now_vl.hour * 60 + now_vl.minute
 
@@ -1205,6 +1211,8 @@ def get_today_dashboard(cur) -> dict:
 # в фильтре "сегодняшних" приёмов пищи ловил бы UTC-дату, которая отстаёт от
 # владивостокской на 10 часов каждую ночь (00:00–10:00 ВЛ = ещё вчера в UTC) —
 # реального бага в проде не было, но легко было бы внести его в порт, не заметив.
+# T3 (2026-09-23): зона больше не литерал — `timeutil.person_tz_name()`; при
+# путешествии «сегодня» следует за человеком (см. app/timeutil.py).
 
 
 def _js_num(v) -> float:
@@ -1229,8 +1237,9 @@ def _or0(v):
 
 def get_today_nutrition(cur) -> dict:
     cur.execute(
-        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
-        'FROM health.meals m ORDER BY m."Date"'
+        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE %s, 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
+        'FROM health.meals m ORDER BY m."Date"',
+        (timeutil.person_tz_name(),),
     )
     meals_all = _rows_as_dicts(cur)
 
@@ -1250,7 +1259,7 @@ def get_today_nutrition(cur) -> dict:
     cur.execute('SELECT d.*, to_char(d."Дата", \'YYYY-MM-DD\') AS "Дата" FROM health.daily_trends d ORDER BY d."Дата"')
     trends_all = _rows_as_dicts(cur)
 
-    today = _dkey(datetime.now(timezone.utc) + timedelta(hours=10))
+    today = _dkey(timeutil.now_local())
     today_meals = [m for m in meals_all if str(m.get("Date") or "").startswith(today)]
 
     total_kcal = sum(_js_num(m.get("Calories")) for m in today_meals)
@@ -1588,8 +1597,9 @@ def get_weekly_nutrition(cur) -> dict:
     targets = _rows_as_dicts(cur)
 
     cur.execute(
-        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
-        'FROM health.meals m ORDER BY m."Date"'
+        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE %s, 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
+        'FROM health.meals m ORDER BY m."Date"',
+        (timeutil.person_tz_name(),),
     )
     meals_all = _rows_as_dicts(cur)
 

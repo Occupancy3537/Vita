@@ -50,11 +50,11 @@ from typing import Optional
 import httpx
 from pydantic import BaseModel
 
+from app import timeutil
 from app.db import get_conn
 
 logger = logging.getLogger(__name__)
 
-VL = timezone(timedelta(hours=10))
 HEALTH_DB_SHEET_ID = "1M8focgZBHCbhLEQb4GoyxTYxedA-FcdjQ_XakX5SG2w"
 DAILY_TRENDS_SHEET_TITLE = "Daily_Trends"
 MICROCLIMATE_SHEET_ID = "1wejYO7GKnizGQ9QIMzPua4NxY8uGKwRIcJxBDvyfcqw"
@@ -526,8 +526,9 @@ def build_upsert_sql(row: dict) -> tuple[str, list]:
 
 def fetch_nutrition(cur) -> list[dict]:
     cur.execute(
-        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE 'Asia/Vladivostok', 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
-        'FROM health.meals m ORDER BY m."Date"'
+        "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE %s, 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "
+        'FROM health.meals m ORDER BY m."Date"',
+        (timeutil.person_tz_name(),),
     )
     cols = [c.name for c in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -574,7 +575,7 @@ def fetch_weather() -> dict:
         "https://api.open-meteo.com/v1/forecast",
         params={"latitude": WEATHER_LAT, "longitude": WEATHER_LON,
                 "hourly": "surface_pressure,sunshine_duration,shortwave_radiation",
-                "past_days": 1, "forecast_days": 1, "timezone": "Asia/Vladivostok"},
+                "past_days": 1, "forecast_days": 1, "timezone": timeutil.home_tz_name()},
         timeout=20.0,
     )
     resp.raise_for_status()

@@ -13,7 +13,7 @@ Credential (Google Calendar, PqacoYjKhCXLSGf8) уже расшифрован и 
 import logging
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import timezone
 from typing import Optional
 
 from app import run_log, timeutil
@@ -21,7 +21,6 @@ from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
-VL = timezone(timedelta(hours=10))
 DAILY_HOUR_VL = 9
 CALENDAR_ID = "vasukvladislav@gmail.com"
 
@@ -74,7 +73,7 @@ def sync_meds_from_calendar(events: list[dict]) -> int:
 def run_once() -> None:
     from app.sheets_client import get_calendar_events
 
-    now = datetime.now(VL)
+    now = timeutil.now_local()
     start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
     try:
