@@ -148,6 +148,11 @@ def test_issues_returns_only_open_sorted_by_severity_then_recency():
         assert "z" not in keys  # fixed — не показываем
         assert out[0]["source"] == "y"  # critical раньше minor
         assert out[0]["occurrences"] == 1
+        # 2026-09-23: живая проверка поймала Decimal из SQL extract(epoch...),
+        # который FastAPI кодирует в JSON строкой — здесь считаем в Python
+        # именно чтобы получить float, тест ловит регрессию на этот тип.
+        assert isinstance(out[0]["first_seen_h"], float)
+        assert isinstance(out[0]["last_seen_h"], float)
     finally:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(f"DELETE FROM {schema()}.issue_log WHERE natural_key LIKE 'test:sysstatus:%'")

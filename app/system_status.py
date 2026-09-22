@@ -324,19 +324,25 @@ def _issues(cur) -> list[dict]:
     """card.issue_log, только status='open' — snoozed/wontfix/fixed сознательно
     не показываем здесь (это уже принятые решения, не то, что «требует
     внимания сейчас»); полную историю смотреть в самой таблице, не на этой
-    странице."""
+    странице.
+
+    Возраст считаем В PYTHON от сырых timestamptz (тот же приём, что в
+    _loops()), а не extract(epoch...)/3600 в SQL — та форма возвращает
+    Decimal, а FastAPI кодирует Decimal в JSON СТРОКОЙ ("0.0" вместо 0.0),
+    страница получила бы нечисловое поле (живая проверка 2026-09-23 поймала
+    это до деплоя на прод)."""
     cur.execute(
-        "SELECT source, severity, summary, occurrences, "
-        "extract(epoch from now() - first_seen) / 3600, "
-        "extract(epoch from now() - last_seen) / 3600 "
+        "SELECT source, severity, summary, occurrences, first_seen, last_seen "
         "FROM {t} WHERE status = 'open' ORDER BY "
         "CASE severity WHEN 'critical' THEN 0 WHEN 'important' THEN 1 ELSE 2 END, last_seen DESC"
         .format(t=schema() + ".issue_log")
     )
+    now = datetime.now(timezone.utc)
     return [
         {"source": source, "severity": severity, "summary": summary, "occurrences": occurrences,
-         "first_seen_h": round(first_h, 1), "last_seen_h": round(last_h, 1)}
-        for source, severity, summary, occurrences, first_h, last_h in cur.fetchall()
+         "first_seen_h": round((now - first_seen).total_seconds() / 3600, 1),
+         "last_seen_h": round((now - last_seen).total_seconds() / 3600, 1)}
+        for source, severity, summary, occurrences, first_seen, last_seen in cur.fetchall()
     ]
 
 
