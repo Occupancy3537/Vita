@@ -33,6 +33,7 @@ from typing import Optional
 import httpx
 from psycopg import sql
 
+from app import llm_usage
 from app.db import schema
 from app.extraction import MODEL, OPENROUTER_URL, PROVIDER_ORDER
 import os
@@ -338,7 +339,9 @@ def resolve_entities_l2_llm(text: str, timeout: float = 8.0) -> list[tuple[str, 
             timeout=timeout,
         )
         resp.raise_for_status()
-        parsed = json.loads(resp.json()["choices"][0]["message"]["content"])
+        data = resp.json()
+        llm_usage.record("memory_l2", MODEL, data.get("usage"))
+        parsed = json.loads(data["choices"][0]["message"]["content"])
         return [(e["type"], e["value"]) for e in parsed.get("entities", []) if e.get("type") and e.get("value")]
     except Exception:
         return []  # L2 — best-effort; провал деградирует к "не нашли", не роняет вызов

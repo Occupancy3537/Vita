@@ -27,6 +27,7 @@ import re
 
 import httpx
 
+from app import llm_usage
 from app.doctor import config
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -85,7 +86,9 @@ def classify_category(text: str, has_image: bool, timeout: float = 8.0,
         timeout=timeout,
     )
     resp.raise_for_status()
-    content = resp.json()["choices"][0]["message"]["content"].strip().upper()
+    data = resp.json()
+    llm_usage.record("dispatch", config.DOCTOR_MODEL, data.get("usage"))
+    content = data["choices"][0]["message"]["content"].strip().upper()
     for cat in ("TEST", "SYMPTOM", "CALENDAR", "SLEEP"):
         if cat in content:
             return cat

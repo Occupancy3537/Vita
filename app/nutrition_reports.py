@@ -34,6 +34,7 @@ from typing import Optional
 
 import httpx
 
+from app import llm_usage
 from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _num, _rows_as_dicts
 from app.db import get_conn
@@ -317,7 +318,9 @@ def call_model(prompt: str, max_tokens: int, reasoning_tokens: int, temperature:
             timeout=timeout,
         )
         resp.raise_for_status()
-        return str(resp.json()["choices"][0]["message"]["content"] or "").strip()
+        data = resp.json()
+        llm_usage.record("nutrition_reports", MODEL, data.get("usage"))
+        return str(data["choices"][0]["message"]["content"] or "").strip()
     except Exception:
         logger.exception("nutrition_reports: вызов модели упал")
         return ""

@@ -35,6 +35,7 @@ from typing import Optional
 
 import httpx
 
+from app import llm_usage
 from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _dkey, _num
 from app.db import get_conn
@@ -667,7 +668,9 @@ def call_model(prompt: str, timeout: float = 60.0) -> str:
             timeout=timeout,
         )
         resp.raise_for_status()
-        return str(resp.json()["choices"][0]["message"]["content"] or "").strip()
+        data = resp.json()
+        llm_usage.record("weekly_advisor", MODEL, data.get("usage"))
+        return str(data["choices"][0]["message"]["content"] or "").strip()
     except Exception:
         logger.exception("weekly_advisor: вызов модели упал")
         return ""

@@ -39,6 +39,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from app import llm_usage
 from app.ai_models import DEFAULT_MODEL
 from app.db import get_conn
 from app.doctor import telegram
@@ -505,7 +506,9 @@ def call_model(prompt: str, timeout: float = 30.0) -> str:
             timeout=timeout,
         )
         resp.raise_for_status()
-        return str(resp.json()["choices"][0]["message"]["content"] or "").strip()
+        data = resp.json()
+        llm_usage.record("health_watchdog", MODEL, data.get("usage"))
+        return str(data["choices"][0]["message"]["content"] or "").strip()
     except Exception:
         logger.exception("health_watchdog: вызов модели упал")
         return ""

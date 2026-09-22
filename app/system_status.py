@@ -166,38 +166,53 @@ def host_block() -> Optional[dict]:
 def _money(cur) -> dict:
     t = schema() + ".agent_step"
     tz_name = str(timeutil.person_tz())
-    cur.execute(
-        "SELECT coalesce(sum(cost_usd), 0) FROM {t} "
-        "WHERE role = 'model' AND ts >= date_trunc('day', now() AT TIME ZONE %s) AT TIME ZONE %s".format(t=t),
-        (tz_name, tz_name),
-    )
-    today = float(cur.fetchone()[0] or 0)
-    cur.execute(
-        "SELECT coalesce(sum(cost_usd), 0) FROM {t} "
-        "WHERE role = 'model' AND ts >= now() - interval '7 days'".format(t=t),
-    )
-    week = float(cur.fetchone()[0] or 0)
+
+    def _sum(sql_tpl: str, params: tuple) -> float:
+        """Сумма стоимости двух источников: доктор (agent_step, структурный
+        трейс) + остальные модули (llm_usage; с 2026-09-22 пишут советник,
+        регистратор, дневник еды, извлечение, red-flag B, диспетчер, память L2,
+        отчёты, watchdog — «полные расходы» по запросу Влада)."""
+        total = 0.0
+        cur.execute(sql_tpl.format(t=t), params)
+        total += float(cur.fetchone()[0] or 0)
+        cur.execute(sql_tpl.format(t=schema() + ".llm_usage"), params)
+        total += float(cur.fetchone()[0] or 0)
+        return total
+
+    day_sql = ("SELECT coalesce(sum(cost_usd), 0) FROM {t} "
+               "WHERE ts >= date_trunc('day', now() AT TIME ZONE %s) AT TIME ZONE %s")
+    today = _sum(day_sql, (tz_name, tz_name))
+    today = _round_money(today)
+
+    week_sql = "SELECT coalesce(sum(cost_usd), 0) FROM {t} WHERE ts >= now() - interval '7 days'"
+    week = _round_money(_sum(week_sql, ()))
+
     cur.execute(
         "SELECT count(DISTINCT turn_id), coalesce(sum(cost_usd), 0), avg(latency_ms) "
         "FROM {t} WHERE role = 'model' AND ts >= now() - interval '7 days'".format(t=t),
     )
-    turns, week_cost, avg_ms = cur.fetchone()
+    turns, _week_cost, avg_ms = cur.fetchone()
     note = "ходов доктора за неделю не было"
     if turns:
-        note = "$%.2f за ход доктора · ответ ~%d с" % (float(week_cost or 0) / int(turns),
+        note = "$%.2f за ход доктора · ответ ~%d с" % (float(_week_cost or 0) / int(turns),
                                                        round(float(avg_ms or 0) / 1000))
     return {
         "providers": [{
             "n": "OpenRouter",
             "purpose": "доктор, чтение анализов, недельные советы",
-            "today": round(today, 2),
+            "today": today,
             "cap": DAILY_BUDGET_USD,
-            "week": round(week, 2),
+            "week": week,
             "note": note,
         }],
         "future": ["Anthropic", "Google Gemini", "OpenAI"],
-        "uncovered": "учтены вызовы доктора; советник, регистратор и дневник еды стоимость пока не записывают",
+        "uncovered": "учтены все вызовы: доктор + советник, регистратор, дневник еды, "
+                     "извлечение, классификатор, память, отчёты, watchdog",
     }
+
+
+def _round_money(v: float) -> float:
+    return round(v + 1e-9, 2)  # +1e-9 — чтобы 0.005 не «прыгал» вниз из-за float
 
 
 def _loops(cur) -> list[dict]:

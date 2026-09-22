@@ -92,6 +92,12 @@ with get_conn() as _conn, _conn.cursor() as _cur:
           ts timestamptz PRIMARY KEY, load1 real, load5 real, load15 real,
           mem_used_mb int, swap_used_mb int)
     """)
+    _cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schema()}.llm_usage (
+          id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+          ts timestamptz NOT NULL DEFAULT now(), module text NOT NULL, model text,
+          tokens_prompt int, tokens_completion int, cost_usd numeric(12, 6))
+    """)
     _conn.commit()
 
 
@@ -103,6 +109,7 @@ TABLES_TO_CLEAN = [
     "visits", "results",  # двойники health.* для дуал-райта регистратора
     "symptom_log", "doctor_notes", "investigations", "lab_plan",  # двойники health.* для commit.py
     "scheduler_run_log", "host_metrics",  # статус-страница (run_log/host_metrics)
+    "llm_usage",  # учёт стоимости LLM вне доктора
 ]
 
 

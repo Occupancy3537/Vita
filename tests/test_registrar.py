@@ -332,3 +332,72 @@ def test_to_comma_formats():
     assert registrar._to_comma(5.222) == "5,222"
     assert registrar._to_comma(None) == ""
     assert registrar._to_comma("4.1") == "4,1"
+
+
+# ─────────── F6 (внешний аудит логики, 2026-09-22): частичная запись ───────────
+
+_ROWS_2 = [
+    {"marker_id": "M041", "label": "Гемоглобин", "value_num": 145.0,
+     "unit": "г/л", "ref_min": 130.0, "ref_max": 160.0},
+    {"marker_id": "M003", "label": "Глюкоза", "value_num": 5.2,
+     "unit": "ммоль/л", "ref_min": 4.1, "ref_max": 5.9},
+]
+
+
+def test_partial_persist_retries_once_and_succeeds(lab_doc, monkeypatch):
+    """Один маркер падает на первой попытке — повтор дозальёт его (идемпотентно)."""
+    import app.main as main_mod
+    real = main_mod.labs_result_sync
+    seen = {"M041": 0}
+
+    def flaky(req):
+        if req.marker_key == "M041":
+            seen["M041"] += 1
+            if seen["M041"] == 1:
+                raise RuntimeError("сеть мигнула")
+        return real(req)
+
+    monkeypatch.setattr(main_mod, "labs_result_sync", flaky)
+    ref = registrar.persist_document({"lab_name": "Инвитро", "notes": ""}, {"rows": _ROWS_2}, "2026-09-15")
+
+    assert ref == "V20260915"
+    assert seen["M041"] == 2  # была повторная попытка
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {schema()}.lab_result")
+        assert cur.fetchone()[0] == 2  # оба записаны, дубля нет
+
+
+def test_partial_persist_raises_with_counts(lab_doc, monkeypatch):
+    """Постоянный сбой одного маркера: PartialPersistError со счётчиками,
+    успевшие показатели остаются в базе (раньше наружу уходило «ничего»)."""
+    import app.main as main_mod
+    real = main_mod.labs_result_sync
+
+    def boom_m003(req):
+        if req.marker_key == "M003":
+            raise RuntimeError("база недоступна")
+        return real(req)
+
+    monkeypatch.setattr(main_mod, "labs_result_sync", boom_m003)
+    with pytest.raises(registrar.PartialPersistError) as ei:
+        registrar.persist_document({"lab_name": "Инвитро", "notes": ""}, {"rows": _ROWS_2}, "2026-09-15")
+
+    assert ei.value.written == 1 and ei.value.total == 2
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT marker_key FROM {schema()}.lab_result ORDER BY marker_key")
+        assert [r[0] for r in cur.fetchall()] == ["M041"]
+
+
+def test_handle_update_partial_write_honest_reply(lab_doc, sent, monkeypatch):
+    """Ответ Владу при частичной записи честный: сколько записано, что делать."""
+    def partial(*a, **k):
+        raise registrar.PartialPersistError(1, 2, RuntimeError("сеть"))
+
+    monkeypatch.setattr(registrar, "persist_document", partial)
+    monkeypatch.setattr(registrar, "persist_health", lambda *a, **k: "V20260915")
+
+    registrar.handle_update(_photo_update())
+
+    assert len(sent) == 1
+    _, text = sent[0]
+    assert "частично" in text and "1 из 2" in text and "дозапишутся" in text

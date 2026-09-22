@@ -20,6 +20,7 @@ from typing import Optional
 import httpx
 from pydantic import BaseModel
 
+from app import llm_usage
 from app.ai_models import DEFAULT_MODEL
 
 MODEL = DEFAULT_MODEL
@@ -89,7 +90,9 @@ def extract(text: str, timeout: float = 15.0) -> ExtractionResult:
         timeout=timeout,
     )
     resp.raise_for_status()
-    content = resp.json()["choices"][0]["message"]["content"]
+    data = resp.json()
+    llm_usage.record("extraction", MODEL, data.get("usage"))
+    content = data["choices"][0]["message"]["content"]
     parsed = json.loads(content)
     drafts = [Draft(**d) for d in parsed.get("drafts", [])]
     return ExtractionResult(

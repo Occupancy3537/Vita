@@ -41,6 +41,7 @@ from typing import Optional
 
 import httpx
 
+from app import llm_usage
 from app import food_diary as fd
 from app.db import get_conn, schema
 from app import run_log
@@ -162,7 +163,9 @@ def call_text_llm(user_prompt: str, timeout: float = 30.0) -> str:
             timeout=timeout,
         )
         resp.raise_for_status()
-        return fd.extract_llm_text(resp.json())
+        data = resp.json()
+        llm_usage.record("food_diary", fd.MODEL, data.get("usage"))
+        return fd.extract_llm_text(data)
     except Exception:
         logger.exception("food_diary_bot: call_text_llm упал")
         return ""
@@ -191,7 +194,9 @@ def call_photo_llm(user_prompt: str, image_bytes: bytes, timeout: float = 30.0) 
             timeout=timeout,
         )
         resp.raise_for_status()
-        return fd.extract_llm_text(resp.json())
+        data = resp.json()
+        llm_usage.record("food_diary", fd.MODEL, data.get("usage"))
+        return fd.extract_llm_text(data)
     except Exception:
         logger.exception("food_diary_bot: call_photo_llm упал")
         return ""

@@ -6,12 +6,24 @@ Telegram update -> IncomingMessage (план §3.2, §3.9). `parse_update` — �
 
 `handle_update` — транспорт-агностичный обработчик одного хода целиком (§3.2:
 "handle_update(update) -> None"). Гейт красных флагов (gate.py, Phase 2) —
-L3 короткое замыкание, ответ без модели. Всё остальное идёт в агентный цикл
-(loop.py, Phase 4) — реальный разбор, не заглушка.
+L3 короткое замыкание, ответ без модели.
+
+F9 (внешний аудит логики, 2026-09-22): длинная часть хода (агентный цикл до
+TURN_DEADLINE_SECONDS, бюджет в doctor/config.py) вынесена в ОДИН фоновый
+воркер. До этого поток поллера обрабатывал апдейты строго по одному и на всё
+время хода не вызывал getUpdates — неотложное сообщение ждало в очереди
+Telegram до ~3 минут за предыдущим разбором. Теперь: поллер делает быструю
+часть (user-turn + детерминированный гейт, <200мс) и СРАЗУ идёт за следующим
+апдейтом; медленный разбор идёт в воркере параллельно. Воркер один —
+последовательность ходов одного чата сохраняется (ответы по порядку, история
+turn_index не перемешивается). L3, как и раньше, отвечает тут же, в
+вызывающем потоке, не вставая в очередь за длинным ходом.
 """
 import logging
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from psycopg.errors import UniqueViolation
@@ -132,6 +144,87 @@ def _deliver_emergency(msg: IncomingMessage, reply_text: str) -> bool:
         return False
 
 
+# F9 (внешний аудит логики, 2026-09-22): один воркер на все длинные ходы.
+# Почему один: ходы одного чата обязаны идти последовательно (окно диалога,
+# turn_index, ответы по порядку) — параллелить их значило бы перемешивать
+# разговор. Приём и быстрый гейт при этом уже не блокируются (см. модульный
+# докстринг). flush() — только для тестов: дождаться завершения отложенных ходов.
+_turn_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="doctor-turn")
+_pending_futures: set = set()
+_pending_lock = threading.Lock()
+
+
+def _forget_future(fut) -> None:
+    with _pending_lock:
+        _pending_futures.discard(fut)
+
+
+def _submit_turn(fn, *args) -> None:
+    fut = _turn_executor.submit(fn, *args)
+    with _pending_lock:
+        _pending_futures.add(fut)
+    fut.add_done_callback(_forget_future)
+
+
+def flush(timeout: float = 300.0) -> None:
+    """Дождаться завершения всех отложенных ходов (тесты; в проде не нужен)."""
+    import concurrent.futures
+    while True:
+        with _pending_lock:
+            futures = list(_pending_futures)
+        if not futures:
+            return
+        concurrent.futures.wait(futures, timeout=timeout)
+
+
+def _finish_turn(msg: IncomingMessage, text: str, user_turn_id: str, placeholder_id: int) -> None:
+    """Длинная часть хода — агентный цикл, коммит записей, финальный ответ.
+    Исполняется в воркере (F9): ошибки здесь уже не видны поллеру
+    (_safe_process), поэтому падение уходит алертом владельцу явно."""
+    from app.scheduler_alert import alert_on_failure
+    try:
+        result = loop.run_turn(chat_id=msg.chat_id, person_id=msg.person_id,
+                               text=text, turn_id=user_turn_id)
+        reply_text = render.sanitize_for_telegram(result.reply_text)
+
+        # Коммит — ДО ответа пациенту (быстрый, только локальные транзакции, без
+        # сети): если инвариант нарушен (план §3.6: второе открытое расследование
+        # и т.п.), это отказ, а не тихая потеря — узнаём до, а не после того, как
+        # уже сказали пациенту "записал".
+        commit_error: Optional[str] = None
+        commit_result = {"committed": False, "reason": "nothing_to_write"}
+        if result.staged_writes:
+            try:
+                commit_result = commit.apply_staged_writes(result.staged_writes, turn_id=user_turn_id)
+            except CommitError as e:
+                commit_error = str(e)
+
+        telegram.edit_message(msg.chat_id, placeholder_id, reply_text, parse_mode="HTML")
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                # Отложенные записи — в meta целиком, вместе с исходом коммита: даже
+                # если инвариант отклонил запись, сам факт попытки и содержимое не
+                # теряются молча (тихая потеря данных — риск №1 проекта, CLAUDE.md).
+                write_turn(cur, chat_id=msg.chat_id, update_id=None, role="assistant",
+                           text=reply_text, wrote_anything=commit_result.get("committed", False),
+                           meta={"staged_writes": [w.model_dump() for w in result.staged_writes],
+                                 "commit_result": commit_result, "commit_error": commit_error}
+                           if result.staged_writes else None)
+            conn.commit()
+
+        # L1/L2 (только слой B их порождает — см. gate.py) детектируются здесь же,
+        # уже после ответа: пишут rf_event, но пока не меняют сам ответ — вставка
+        # строки "показаться врачу сегодня" для L2 требует знать уровень ДО ответа
+        # модели, а B считается параллельно ей же — честный нерешённый разрыв,
+        # не забытый: пока L2 виден только в rf_event, не в тексте пациенту.
+        gate.slow_gate_followup(text)
+    except Exception as e:
+        logger.exception("intake: длинная часть хода упала (update=%s) — ход потерян после user-turn",
+                         msg.update_id)
+        alert_on_failure("doctor_turn", e)
+
+
 def handle_update(update: dict) -> None:
     msg = parse_update(update)
     if msg is None:
@@ -174,38 +267,7 @@ def handle_update(update: dict) -> None:
     telegram.send_chat_action(msg.chat_id, "typing")
     placeholder_id = telegram.send_message(msg.chat_id, "…", reply_to_message_id=msg.message_id)
 
-    result = loop.run_turn(chat_id=msg.chat_id, person_id=msg.person_id, text=text, turn_id=user_turn_id)
-    reply_text = render.sanitize_for_telegram(result.reply_text)
-
-    # Коммит — ДО ответа пациенту (быстрый, только локальные транзакции, без
-    # сети): если инвариант нарушен (план §3.6: второе открытое расследование
-    # и т.п.), это отказ, а не тихая потеря — узнаём до, а не после того, как
-    # уже сказали пациенту "записал".
-    commit_error: Optional[str] = None
-    commit_result = {"committed": False, "reason": "nothing_to_write"}
-    if result.staged_writes:
-        try:
-            commit_result = commit.apply_staged_writes(result.staged_writes, turn_id=user_turn_id)
-        except CommitError as e:
-            commit_error = str(e)
-
-    telegram.edit_message(msg.chat_id, placeholder_id, reply_text, parse_mode="HTML")
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # Отложенные записи — в meta целиком, вместе с исходом коммита: даже
-            # если инвариант отклонил запись, сам факт попытки и содержимое не
-            # теряются молча (тихая потеря данных — риск №1 проекта, CLAUDE.md).
-            write_turn(cur, chat_id=msg.chat_id, update_id=None, role="assistant",
-                       text=reply_text, wrote_anything=commit_result.get("committed", False),
-                       meta={"staged_writes": [w.model_dump() for w in result.staged_writes],
-                             "commit_result": commit_result, "commit_error": commit_error}
-                       if result.staged_writes else None)
-        conn.commit()
-
-    # L1/L2 (только слой B их порождает — см. gate.py) детектируются здесь же,
-    # уже после ответа: пишут rf_event, но пока не меняют сам ответ — вставка
-    # строки "показаться врачу сегодня" для L2 требует знать уровень ДО ответа
-    # модели, а B считается параллельно ей же — честный нерешённый разрыв,
-    # не забытый: пока L2 виден только в rf_event, не в тексте пациенту.
-    gate.slow_gate_followup(text)
+    # F9: агентный цикл (до TURN_DEADLINE_SECONDS) — в фоновый воркер; поллер
+    # сразу возвращается к приёму, следующее сообщение проходит свой быстрый
+    # гейт немедленно.
+    _submit_turn(_finish_turn, msg, text, user_turn_id, placeholder_id)

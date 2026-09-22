@@ -5,6 +5,9 @@ gate.slow_gate_followup после ответа) и агентный цикл (l
 настоящий вызов OpenRouter) мокаются — юнит-тесты не должны бить по сети ни к
 Telegram, ни к OpenRouter (единственный тест с настоящим вызовом LLM в проекте —
 test_extraction_live.py, остальные мокают, см. её докстринг)."""
+import threading
+import time
+
 from app.db import get_conn
 from app.doctor import gate, intake as intake_module, loop, telegram as telegram_module
 from app.doctor.contract import TurnResult
@@ -104,6 +107,7 @@ def test_handle_update_writes_both_turns_and_replies_via_telegram(monkeypatch):
         turn_id=kw["turn_id"], reply_text="ответ про колет в боку (замокан цикл)"))
 
     handle_update(_text_update(update_id=100, chat_id=456, text="колет в боку", message_id=5))
+    intake_module.flush()  # F9: длинная часть хода — в фоновом воркере
 
     assert sent["typing"] == ("456", "typing")
     assert sent["placeholder"] == ("456", "…", 5)
@@ -142,6 +146,7 @@ def test_handle_update_duplicate_update_id_processed_once(monkeypatch):
     update = _text_update(update_id=200, chat_id=789, text="повтор")
     handle_update(update)
     handle_update(update)  # Телеграм переотправил тот же update_id
+    intake_module.flush()
 
     assert calls["n"] == 1  # второй раз даже не дошли до отправки
 
@@ -256,3 +261,81 @@ def test_handle_update_l3_delivery_failure_still_runs_layer_b(monkeypatch):
                                 text="грудь давит, отдаёт в левую руку, одышка"))
 
     assert layer_b_calls == ["грудь давит, отдаёт в левую руку, одышка"]
+
+
+# --- F9 (внешний аудит логики, 2026-09-22): длинный ход не блокирует приём ---
+
+def _quiet_telegram(monkeypatch, sent_list=None):
+    """Тихая отправка: аккуратно мокает Telegram и слой B, собирает sent."""
+    sent = sent_list if sent_list is not None else []
+    monkeypatch.setattr(telegram_module, "send_chat_action", lambda *a, **k: None)
+    monkeypatch.setattr(telegram_module, "send_message",
+                        lambda chat_id, text, **k: (sent.append(text), 42)[1])
+    monkeypatch.setattr(telegram_module, "edit_message", lambda *a, **k: None)
+    monkeypatch.setattr(gate, "classify_layer_b", lambda *a, **k: LayerBResult(hit=False))
+    return sent
+
+
+def test_slow_turn_does_not_block_handle_update(monkeypatch):
+    """F9: пока доктор «думает» (ход висит в воркере), handle_update уже
+    вернулся — приём следующего сообщения возможен немедленно."""
+    release = threading.Event()
+    started = threading.Event()
+
+    def slow_turn(**kw):
+        started.set()
+        release.wait(timeout=10)
+        return TurnResult(turn_id=kw["turn_id"], reply_text="ответ (медленный)")
+
+    monkeypatch.setattr(loop, "run_turn", slow_turn)
+    _quiet_telegram(monkeypatch)
+
+    t0 = time.monotonic()
+    handle_update(_text_update(update_id=1000, chat_id=901, text="колет в боку"))
+    dt = time.monotonic() - t0
+    try:
+        assert dt < 3.0, "handle_update ждал агентный цикл (%.1fс) — F9 не работает" % dt
+        assert started.wait(timeout=5), "воркер не начал ход"
+    finally:
+        release.set()
+        intake_module.flush()
+
+
+def test_l3_emergency_not_blocked_by_busy_worker(monkeypatch):
+    """F9, главное: пока предыдущий ход висит в воркере, следующее L3-сообщение
+    получает эмердженси-ответ немедленно (раньше ждало до конца разбора)."""
+    release = threading.Event()
+
+    def slow_turn(**kw):
+        release.wait(timeout=10)
+        return TurnResult(turn_id=kw["turn_id"], reply_text="обычный ответ")
+
+    monkeypatch.setattr(loop, "run_turn", slow_turn)
+    sent = _quiet_telegram(monkeypatch)
+
+    handle_update(_text_update(update_id=1001, chat_id=902, text="колет в боку"))
+    t0 = time.monotonic()
+    handle_update(_text_update(update_id=1002, chat_id=902,
+                                text="грудь давит, отдаёт в левую руку, одышка"))
+    dt = time.monotonic() - t0
+    try:
+        assert dt < 3.0, "L3 ждал занятого воркера (%.1fс)" % dt
+        assert any("скорую" in s.lower() for s in sent), sent
+    finally:
+        release.set()
+        intake_module.flush()
+
+
+def test_finish_turn_failure_alerts_owner(monkeypatch):
+    """Сбой внутри длинной части хода поллеру уже не виден (_safe_process его
+    не поймает) — уходит алертом владельцу явно."""
+    alerts = []
+    from app import scheduler_alert
+    monkeypatch.setattr(scheduler_alert, "alert_on_failure",
+                        lambda src, exc: alerts.append((src, exc)))
+    monkeypatch.setattr(loop, "run_turn", lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+    _quiet_telegram(monkeypatch)
+
+    handle_update(_text_update(update_id=1003, chat_id=903, text="колет в боку"))
+    intake_module.flush()
+    assert alerts and alerts[0][0] == "doctor_turn"

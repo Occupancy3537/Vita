@@ -54,6 +54,7 @@ from typing import Optional
 
 import httpx
 
+from app import llm_usage
 from app.ai_models import DEFAULT_MODEL, FOOD_MODEL
 from app.db import get_conn
 from app.doctor import telegram
@@ -337,7 +338,9 @@ def _vision_json(system_prompt: str, content: bytes, mime: str, timeout: float =
         timeout=timeout,
     )
     resp.raise_for_status()
-    return json.loads(resp.json()["choices"][0]["message"]["content"])
+    data = resp.json()
+    llm_usage.record("registrar", _model_for(mime), data.get("usage"))
+    return json.loads(data["choices"][0]["message"]["content"])
 
 
 def classify_document(content: bytes, mime: str) -> dict:
@@ -389,21 +392,55 @@ def _fetch_marker_rows() -> list[dict]:
         return [{"Marker_ID": r[0], "Name": r[1]} for r in cur.fetchall()]
 
 
+class PartialPersistError(Exception):
+    """F6 (внешний аудит логики, 2026-09-22): визит записан, но часть показателей —
+    нет (сбой посередине батча). Несёт счётчики для честного ответа Владу: раньше
+    любое падение здесь превращалось в «Ничего не записал», хотя визит и часть
+    показателей уже лежали в карте."""
+
+    def __init__(self, written: int, total: int, last_error: BaseException):
+        super().__init__("записано %d из %d: %s" % (written, total, last_error))
+        self.written = written
+        self.total = total
+        self.last_error = last_error
+
+
 def persist_document(doc: dict, mapped: dict, date_iso: str) -> str:
     """Визит + результаты через внутренние функции /visits/sync и /labs/result.
     Импорт ленивый: app.main импортирует poller -> сюда, обычный import дал бы
     цикл на этапе загрузки. visit_source_ref = V<ГГГГММДД> — тот же ключ, что
-    строил нода Build Visit (дублей при перезагрузке не будет: ON CONFLICT)."""
+    строил нода Build Visit (дублей при перезагрузке не будет: ON CONFLICT).
+
+    F6 (2026-09-22): каждый показатель пишется своей транзакцией (внутренний
+    /labs/result), сбой на середине оставлял частичную запись. Теперь неудачные
+    маркеры повторяются один раз (повтор идемпотентен — ON CONFLICT по
+    source_ref), а если остались — PartialPersistError со счётчиками."""
     from app.main import LabResultSyncRequest, VisitSyncRequest, labs_result_sync, visits_sync  # noqa: E501
     visit_ref = "V" + date_iso.replace("-", "")
     ts = date_iso + "T00:00:00Z"  # тот же формат, что Sync Visit to Card в n8n
     visits_sync(VisitSyncRequest(source_ref=visit_ref, title=doc.get("lab_name") or None,
                                  raw_text=doc.get("notes") or None, ts_event=ts))
-    for r in mapped["rows"]:
-        labs_result_sync(LabResultSyncRequest(
-            visit_source_ref=visit_ref, visit_ts_event=ts, marker_key=r["marker_id"],
-            marker_label=r["label"], value_num=r["value_num"], unit=r["unit"] or None,
-            ref_min=r["ref_min"], ref_max=r["ref_max"]))
+    rows = mapped["rows"]
+    written = 0
+    remaining = list(rows)
+    last_error: Optional[BaseException] = None
+    for _attempt in (1, 2):
+        still = []
+        for r in remaining:
+            try:
+                labs_result_sync(LabResultSyncRequest(
+                    visit_source_ref=visit_ref, visit_ts_event=ts, marker_key=r["marker_id"],
+                    marker_label=r["label"], value_num=r["value_num"], unit=r["unit"] or None,
+                    ref_min=r["ref_min"], ref_max=r["ref_max"]))
+                written += 1
+            except Exception as e:
+                still.append(r)
+                last_error = e
+        remaining = still
+        if not remaining:
+            break
+    if remaining:
+        raise PartialPersistError(written, len(rows), last_error or RuntimeError("неизвестная причина"))
     return visit_ref
 
 
@@ -541,6 +578,15 @@ def handle_update(update: dict) -> None:
                              visit_ref, update_id)
             health_note = "\n⚠️ Записал в карту, но данные не доехали до старой базы (панель PhenoAge их не увидит)."
         _reply(chat_id, build_reply(date_iso, mapped, cls["kind"]) + health_note)  # шаг 4
+    except PartialPersistError as e:
+        # F6 (2026-09-22): часть показателей уже в базе — честно говорим сколько
+        # и что повторная отправка дозальёт остальное (дублей не будет).
+        logger.exception("registrar: частичная запись update %s — %d из %d",
+                         update_id, e.written, e.total)
+        _reply(chat_id,
+               f"⚠️ Записал частично: {e.written} из {e.total} показателей "
+               "(сбой на середине, похоже на сеть).\n"
+               "Пришли это же фото ещё раз — недостающие дозапишутся, дубли не появятся.")
     except Exception:
         logger.exception("registrar: сбой обработки update %s", update_id)
         _reply(chat_id, FAILURE_REPLY)

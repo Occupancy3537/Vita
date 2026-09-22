@@ -11,6 +11,7 @@ from typing import Optional
 import httpx
 from pydantic import BaseModel, Field
 
+from app import llm_usage
 from app.ai_models import DEFAULT_MODEL
 from app.redflag import CRITICAL_CATEGORIES, HIGH_CATEGORIES
 
@@ -125,7 +126,9 @@ def classify(text: str, prior_replies: Optional[list[str]] = None, timeout: floa
             timeout=timeout,
         )
         resp.raise_for_status()
-        parsed = json.loads(resp.json()["choices"][0]["message"]["content"])
+        data = resp.json()
+        llm_usage.record("redflag_b", MODEL, data.get("usage"))
+        parsed = json.loads(data["choices"][0]["message"]["content"])
         return _validate(parsed)
     except Exception:
         # §4.3: провал -> degraded-кандидат (очередь пост-обработки), НЕ "не флаг".

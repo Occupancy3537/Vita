@@ -75,6 +75,20 @@ def test_build_includes_timezone_block(monkeypatch):
     assert isinstance(tz["examples"], list) and tz["examples"]
 
 
+def test_money_includes_llm_usage(monkeypatch):
+    """«Полные расходы» (2026-09-22): сумма agent_step (доктор) + llm_usage
+    (советник/регистратор/дневник/прочее)."""
+    from app import llm_usage
+    monkeypatch.setattr(system_status, "_freshness", lambda cur: [])
+    monkeypatch.setattr(system_status, "_nightly", lambda cur: [])
+    llm_usage.record("test_module", "m", {"cost": 0.5})
+    with get_conn() as conn, conn.cursor() as cur:
+        out = system_status.build(cur)
+    p = out["money"]["providers"][0]
+    assert p["week"] >= 0.5 and p["today"] >= 0.5
+    assert "учтены все вызовы" in out["money"]["uncovered"]
+
+
 def test_fmt_moment_utc_and_dates(monkeypatch):
     from datetime import date, datetime, timezone
     name, age = system_status._fmt_moment(datetime.now(timezone.utc))
