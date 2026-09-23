@@ -2,10 +2,16 @@
 Telegram Bot API — тонкая синхронная обёртка (httpx, тот же паттерн, что уже есть
 в app/extraction.py и app/redflag_b.py: весь card-service синхронный, объём
 трафика — единицы сообщений в день, П5-спека §10 — asyncio не оправдан, см.
-app/db.py). Один бот на весь проект (`AI_VVK_Doctor_bot`) — тот же, что сегодня
-использует Capitan; TELEGRAM_BOT_TOKEN должен быть выпущен заново через BotFather
-(см. backups/infra/SECRETS.md — старый токен утёк в git plaintext) до включения
-в прод, это не блокирует Phase 1 (текущий токен рабочий, просто скомпрометирован).
+app/db.py). Один бот на весь проект (`AI_VVK_Doctor_bot`).
+
+2026-09-23 (живой инцидент): старый TELEGRAM_BOT_TOKEN был скомпрометирован
+ещё в n8n-эру (см. backups/infra/SECRETS.md, "утёк в git plaintext") — ротация
+была отложена месяцами как "не блокирует Phase 1", пока кто-то реально не
+воспользовался токеном (свой вебхук на чужой домен, поллер доктора сутки не
+получал апдейты). Ротирован через BotFather тем же днём. Заодно —
+raise_for_status_safe() (app/telegram_safe.py) вместо голого raise_for_status():
+исключение httpx на ошибке несёт URL с токеном ЦЕЛИКОМ в своём тексте, и именно
+так этот инцидент впервые бросился в глаза — в docker logs.
 
 parse_mode не проставляется автоматически внутри этой обёртки — вызывающий
 (intake.py) сам прогоняет текст через render.sanitize_for_telegram() и передаёт
@@ -15,6 +21,8 @@ import os
 from typing import Optional
 
 import httpx
+
+from app.telegram_safe import raise_for_status_safe
 
 _API_BASE = "https://api.telegram.org/bot{token}/{method}"
 _FILE_BASE = "https://api.telegram.org/file/bot{token}/{file_path}"
@@ -29,7 +37,7 @@ def _token() -> str:
 
 def _call(method: str, payload: dict, timeout: float = 10.0) -> dict:
     resp = httpx.post(_API_BASE.format(token=_token(), method=method), json=payload, timeout=timeout)
-    resp.raise_for_status()
+    raise_for_status_safe(resp)
     data = resp.json()
     if not data.get("ok"):
         raise RuntimeError(f"Telegram API {method} failed: {data}")
@@ -76,5 +84,5 @@ def get_file_path(file_id: str) -> str:
 def download_file(file_id: str, timeout: float = 20.0) -> bytes:
     file_path = get_file_path(file_id)
     resp = httpx.get(_FILE_BASE.format(token=_token(), file_path=file_path), timeout=timeout)
-    resp.raise_for_status()
+    raise_for_status_safe(resp)
     return resp.content

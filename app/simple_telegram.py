@@ -4,6 +4,8 @@
 app/nutrition_telegram.py — каждый просто передаёт свой токен."""
 import httpx
 
+from app.telegram_safe import raise_for_status_safe
+
 _API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
 
 
@@ -13,7 +15,7 @@ def send_message(token: str, chat_id: str, text: str, parse_mode: str | None = N
     if parse_mode:
         payload["parse_mode"] = parse_mode
     resp = httpx.post(_API_BASE.format(token=token), json=payload, timeout=timeout)
-    resp.raise_for_status()
+    raise_for_status_safe(resp)
     data = resp.json()
     if not data.get("ok"):
         raise RuntimeError(f"Telegram API sendMessage failed: {data}")

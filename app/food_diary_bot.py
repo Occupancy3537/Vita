@@ -51,6 +51,7 @@ from app.db import get_conn, schema
 from app import run_log
 from app import timeutil
 from app.scheduler_alert import alert_on_sustained_failure
+from app.telegram_safe import raise_for_status_safe
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def _token() -> str:
 
 def _call(method: str, payload: dict, timeout: float = 15.0) -> dict:
     resp = httpx.post(_API_BASE.format(token=_token(), method=method), json=payload, timeout=timeout)
-    resp.raise_for_status()
+    raise_for_status_safe(resp)
     data = resp.json()
     if not data.get("ok"):
         raise RuntimeError(f"Telegram API {method} failed: {data}")
@@ -101,7 +102,7 @@ def get_file_path(file_id: str) -> str:
 def download_file(file_id: str, timeout: float = 20.0) -> bytes:
     file_path = get_file_path(file_id)
     resp = httpx.get(_FILE_BASE.format(token=_token(), file_path=file_path), timeout=timeout)
-    resp.raise_for_status()
+    raise_for_status_safe(resp)
     return resp.content
 
 
@@ -109,7 +110,7 @@ def delete_webhook() -> None:
     try:
         resp = httpx.post(_API_BASE.format(token=_token(), method="deleteWebhook"),
                            json={"drop_pending_updates": False}, timeout=10)
-        resp.raise_for_status()
+        raise_for_status_safe(resp)
         logger.info("food_diary_bot: webhook deleted: %s", resp.json())
     except Exception:
         logger.exception("food_diary_bot: failed to delete webhook")
@@ -121,7 +122,7 @@ def get_updates(offset: int, timeout: float = POLL_TIMEOUT) -> list[dict]:
         params={"offset": offset, "timeout": timeout, "allowed_updates": '["message","callback_query"]'},
         timeout=timeout + 10,
     )
-    resp.raise_for_status()
+    raise_for_status_safe(resp)
     data = resp.json()
     if not data.get("ok"):
         raise RuntimeError(f"getUpdates failed: {data}")

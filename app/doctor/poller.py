@@ -39,6 +39,7 @@ from app import registrar, timeutil
 from app.db import get_conn, schema
 from app.doctor import anamnesis, dispatch, gate, intake, telegram
 from app import run_log
+from app.telegram_safe import raise_for_status_safe
 from app.scheduler_alert import alert_on_failure, alert_on_sustained_failure
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ def disable_telegram_webhook() -> None:
             f"{TELEGRAM_API_BASE.format(token=telegram._token())}/deleteWebhook",
             json={"drop_pending_updates": False}, timeout=10,
         )
-        resp.raise_for_status()
+        raise_for_status_safe(resp)
         logger.info("telegram webhook deleted: %s", resp.json())
     except Exception:
         logger.exception("failed to delete telegram webhook")
@@ -85,7 +86,7 @@ def get_updates(offset: int, timeout: float = POLL_TIMEOUT) -> list[dict]:
         params={"offset": offset, "timeout": timeout, "allowed_updates": '["message"]'},
         timeout=timeout + 10,
     )
-    resp.raise_for_status()
+    raise_for_status_safe(resp)
     data = resp.json()
     if not data.get("ok"):
         raise RuntimeError(f"getUpdates failed: {data}")
