@@ -8,8 +8,8 @@
 `send_to_n8n.py`'s WEBHOOK_URL правится на прямой localhost card-service
 (`http://127.0.0.1:8080/ingest/biohacking`, порт слушает 127.0.0.1 — garminbot
 и card-service на одном VPS, публичный маршрут через nip.io не нужен и не
-заводился — тот же принцип, что у /ingest, /doctor/turn и остальных
-пишущих эндпоинтов в main.py, см. их докстринг).
+заводился — тот же принцип, что у /ingest и остальных пишущих эндпоинтов
+в main.py, см. их докстринг).
 
 Пайплайн: Гармин (тело запроса) + питание (health.meals, 10 дней) + климат
 спальни (Google Sheets MicroClimate — ПОЧАСОВОЙ, не дневной агрегат:

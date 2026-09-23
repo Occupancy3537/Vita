@@ -8,7 +8,8 @@ Telegram API и intake/dispatch мокаются — юниты не бьют п
 import pytest
 
 from app.db import get_conn, schema
-from app.doctor import dispatch, intake, poller
+from app.doctor import dispatch, gate, intake, poller
+from app.redflag_b import LayerBResult
 
 
 @pytest.fixture(autouse=True)
@@ -239,6 +240,104 @@ def test_notify_owner_send_failure_never_raises(monkeypatch, caplog):
     monkeypatch.setattr(poller.telegram, "send_message", boom)
     poller._notify_owner_lost({"update_id": 50, "message": {"text": "x"}})  # не бросает
     poller._last_loss_notify_ts = 0.0
+
+
+# --- L1 (аудит логики, 2026-09-23, КРИТИЧНО): гейт на транспортном уровне ---
+# Раньше fast_gate жил только в intake.handle_update ("doctor"-путь) — фото с
+# подписью, тег анамнеза и сбой классификатора обходили детектор неотложки
+# целиком. Теперь _check_emergency_gate() в process_one() видит КАЖДЫЙ текст
+# ДО решения "куда" — эти тесты проверяют ровно три обходных пути из отчёта.
+
+_EMERGENCY_TEXT = "грудь давит, отдаёт в левую руку, одышка"
+
+
+@pytest.fixture()
+def emergency_gate_env(monkeypatch):
+    """Реальный fast_gate/handle_emergency (та же БД, что test_doctor_gate.py),
+    Telegram и слой B замоканы — тест не должен бить по сети."""
+    sent = []
+    monkeypatch.setattr(poller.telegram, "send_message",
+                        lambda chat_id, text, reply_to_message_id=None, parse_mode=None: (sent.append((chat_id, text)), 1)[1])
+    monkeypatch.setattr(gate, "classify_layer_b", lambda text, prior_replies=None: LayerBResult(hit=False))
+    yield sent
+
+
+def test_emergency_gate_catches_photo_with_caption(monkeypatch, emergency_gate_env):
+    """L1: фото+подпись раньше уходило в registrar.handle_update, минуя гейт —
+    dispatch.route() отсекает фото ДО текстовой проверки (dispatch.py:164)."""
+    calls = {}
+    monkeypatch.setattr(dispatch, "route", lambda update: calls.setdefault("routed", "registrar") or "registrar")
+    monkeypatch.setattr(poller.registrar, "handle_update", lambda update: calls.setdefault("registrar", True))
+
+    update = {"update_id": 600, "message": {"chat": {"id": 8956401}, "message_id": 1,
+              "photo": [{"file_id": "p"}], "caption": _EMERGENCY_TEXT}}
+    poller.process_one(update)
+
+    assert "registrar" not in calls  # маршрутизация не пошла вообще
+    assert len(emergency_gate_env) == 1
+    assert "скорую" in emergency_gate_env[0][1].lower()
+
+
+def test_emergency_gate_catches_anamnesis_reply(monkeypatch, emergency_gate_env):
+    """L1: текст с тегом анамнеза уходил в anamnesis.handle_reply, минуя гейт."""
+    calls = {}
+    monkeypatch.setattr(dispatch, "route", lambda update: "anamnesis")
+    monkeypatch.setattr(poller.anamnesis, "handle_reply", lambda update: calls.setdefault("anamnesis", True))
+
+    update = {"update_id": 601, "message": {"chat": {"id": 8956401}, "message_id": 1, "text": _EMERGENCY_TEXT}}
+    poller.process_one(update)
+
+    assert "anamnesis" not in calls
+    assert len(emergency_gate_env) == 1
+
+
+def test_emergency_gate_catches_classifier_failure_fallback(monkeypatch, emergency_gate_env):
+    """L1: сбой dispatch.route() (LLM-классификатор упал) ронял маршрут в
+    "other" -> ingest_test_message — эмердженси-текст молча превращался в
+    TEST-запись. Гейт теперь стоит ДО dispatch.route(), сбоя не видит вообще."""
+    calls = {}
+
+    def boom(update):
+        raise RuntimeError("classify failed")
+
+    monkeypatch.setattr(dispatch, "route", boom)
+    monkeypatch.setattr(poller, "ingest_test_message", lambda update: calls.setdefault("ingested", True))
+
+    update = {"update_id": 602, "message": {"chat": {"id": 8956401}, "message_id": 1, "text": _EMERGENCY_TEXT}}
+    poller.process_one(update)
+
+    assert "ingested" not in calls
+    assert len(emergency_gate_env) == 1
+
+
+def test_emergency_gate_no_op_for_safe_text(monkeypatch):
+    """Регресс: обычный текст по-прежнему идёт в обычную маршрутизацию —
+    гейт не должен глушить штатные сообщения."""
+    calls = {}
+    monkeypatch.setattr(dispatch, "route", lambda update: "doctor")
+    monkeypatch.setattr(intake, "handle_update", lambda update: calls.setdefault("update", update))
+
+    update = {"update_id": 603, "message": {"chat": {"id": 8956401}, "message_id": 1, "text": "болит голова"}}
+    poller.process_one(update)
+
+    assert calls.get("update") == update
+
+
+def test_emergency_gate_no_text_skips_db(monkeypatch):
+    """Голосовое/стикер без текста — гейт не должен даже открывать соединение
+    с БД впустую (voice/document без caption — самый частый штатный случай)."""
+    monkeypatch.setattr(poller, "get_conn", lambda: (_ for _ in ()).throw(AssertionError("не должно было звать БД")))
+    assert poller._check_emergency_gate({"message": {"voice": {"file_id": "v"}}}) is False
+
+
+def test_emergency_gate_failure_falls_through_to_routing(monkeypatch):
+    """Сбой самого гейта (БД недоступна и т.п.) не должен терять сообщение —
+    пропускаем дальше в обычную маршрутизацию, а не глушим апдейт."""
+    def boom_get_conn():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(poller, "get_conn", boom_get_conn)
+    assert poller._check_emergency_gate({"message": {"text": _EMERGENCY_TEXT}}) is False
 
 
 # --- Фаза 3: команда /tz (часовой пояс) --------------------------------------

@@ -118,14 +118,19 @@ EMERGENCY_SEND_ATTEMPTS = 3
 EMERGENCY_RETRY_DELAY_SECONDS = 1.5
 
 
-def _deliver_emergency(msg: IncomingMessage, reply_text: str) -> bool:
+def _deliver_emergency(chat_id: str, message_id: Optional[int], reply_text: str) -> bool:
     """Доставка эмердженси-ответа с ретраями и фолбэком. Никогда не бросает:
     сбой доставки не должен ронять обработку — эпизод и rf_event к этому
     моменту уже записаны в карту (gate.handle_emergency), теряется только
-    уведомление пациенту, и об этом громко пишем в лог."""
+    уведомление пациенту, и об этом громко пишем в лог.
+
+    2026-09-23 (L1, аудит логики): сигнатура была (msg: IncomingMessage, ...) —
+    сузилась до (chat_id, message_id), т.к. теперь это зовёт не только
+    intake.handle_update (есть IncomingMessage), но и poller._check_emergency_gate
+    (есть только сырой update, IncomingMessage строить незачем)."""
     for attempt in range(1, EMERGENCY_SEND_ATTEMPTS + 1):
         try:
-            telegram.send_message(msg.chat_id, reply_text, reply_to_message_id=msg.message_id)
+            telegram.send_message(chat_id, reply_text, reply_to_message_id=message_id)
             return True
         except Exception:
             logger.exception("intake: попытка %d/%d доставить эмердженси ботом доктора не удалась",
@@ -133,14 +138,13 @@ def _deliver_emergency(msg: IncomingMessage, reply_text: str) -> bool:
             if attempt < EMERGENCY_SEND_ATTEMPTS:
                 time.sleep(EMERGENCY_RETRY_DELAY_SECONDS * attempt)
     try:
-        hermes_telegram.send_message(msg.chat_id, reply_text)
+        hermes_telegram.send_message(chat_id, reply_text)
         logger.warning("intake: эмердженси доставлен фолбэком через Hermes-бот "
-                       "(бот доктора не смог; update=%s, chat=%s)", msg.update_id, msg.chat_id)
+                       "(бот доктора не смог; chat=%s)", chat_id)
         return True
     except Exception:
-        logger.critical("intake: эмердженси НЕ доставлен ни одним ботом (update=%s, chat=%s) — "
-                        "эпизод в карте записан, пациент не уведомлён",
-                        msg.update_id, msg.chat_id)
+        logger.critical("intake: эмердженси НЕ доставлен ни одним ботом (chat=%s) — "
+                        "эпизод в карте записан, пациент не уведомлён", chat_id)
         return False
 
 
@@ -260,7 +264,7 @@ def handle_update(update: dict) -> None:
         # считается — ПОСЛЕ ответа, дописывает ту же сессию, если у него
         # найдётся что добавить (никогда не задерживает эмердженси, §3.7).
         # F1: доставка — с ретраями и фолбэком через Hermes, см. _deliver_emergency.
-        _deliver_emergency(msg, emergency_reply)
+        _deliver_emergency(msg.chat_id, msg.message_id, emergency_reply)
         gate.slow_gate_followup(text)
         return
 

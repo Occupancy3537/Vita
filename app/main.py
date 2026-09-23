@@ -15,9 +15,11 @@ source_message, до всякой обработки (П1 §1.1 "Сначала 
 Telegram/доктора. Решение Влада 2026-09-16: «нафига через n8n, если можно
 напрямую» — n8n больше НЕ используется как релей ни для чего нового; каждый
 такой read-only эндпоинт сам проверяет токен в query (см. `_check_dashboard_token`
-ниже), т.к. nginx токены не знает и не должен. `/ingest`, `/doctor/turn` и
-остальные пишущие/чувствительные эндпоинты остаются недоступны наружу напрямую —
-им это не нужно (доктор сам ходит в Telegram long-polling'ом, не наоборот).
+ниже), т.к. nginx токены не знает и не должен. `/ingest` и остальные пишущие/
+чувствительные эндпоинты остаются недоступны наружу напрямую — им это не нужно
+(доктор сам ходит в Telegram long-polling'ом, не наоборот). `/doctor/turn`
+(временный HTTP-хоп из n8n) удалён 2026-09-23 — n8n снят 2026-09-21, эндпоинт
+не звался ничем, а звал handle_update() в обход K5-фильтра (L16, аудит логики).
 """
 import hashlib
 import json
@@ -42,7 +44,7 @@ logger = logging.getLogger(__name__)
 from typing import Callable, Literal, Optional
 
 import psycopg
-from fastapi import Body, BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from psycopg import sql
 from pydantic import BaseModel
@@ -62,7 +64,6 @@ from app.doctor import anamnesis as doctor_anamnesis
 from app.doctor import poller as doctor_poller
 from app import hermes_telegram
 from app import timeutil
-from app.doctor.intake import handle_update
 from app.journal import write_journal
 from app.memory import get_context, get_object, index_entity, run_pre_archive_check
 from app.redflag_b import LayerBResult, classify as redflag_classify_b
@@ -513,8 +514,8 @@ def ingest_biohacking(payload: BiohackingPayload) -> dict:
     """Порт n8n `Collect_Biohacking_Data` (2026-09-20, группа 3) — см.
     app/biohacking_ingest.py. Это то, на что раньше слал send_to_n8n.py
     (garminbot) — эндпоинт слушает 127.0.0.1, публично не проброшен (тот же
-    принцип, что у /ingest//doctor/turn — garminbot и card-service на одном
-    VPS, нет нужды идти через nginx/nip.io). Не гейтится DASHBOARD_TOKEN'ом
+    принцип, что у /ingest — garminbot и card-service на одном VPS, нет
+    нужды идти через nginx/nip.io). Не гейтится DASHBOARD_TOKEN'ом
     (это не read-only дашборд-путь, а write-путь того же класса, что уже
     описан в докстринге модуля наверху файла — публично недоступен по
     построению, не по токену)."""
@@ -896,14 +897,15 @@ def doctor_health() -> dict:
     return {"status": "ok", "component": "doctor", "phase": 5}
 
 
-@app.post("/doctor/turn", status_code=202)
-def doctor_turn(background_tasks: BackgroundTasks, update: dict = Body(...)) -> dict:
-    """Сырой Telegram update (план §3.2, шаг 1 — временный HTTP-хоп из n8n вместо
-    прямого приёма; шаг 2 переносит приём в card-service, этот эндпоинт не меняется).
-    Отвечает 202 сразу — Телеграм/n8n не должны ждать агентный цикл (сейчас, Phase 1,
-    ждать особо нечего, но контракт станет важен с Phase 4)."""
-    background_tasks.add_task(handle_update, update)
-    return {"accepted": True}
+# /doctor/turn — УДАЛЁН 2026-09-23 (L16, аудит логики): был временным HTTP-
+# хопом из n8n (план §3.2 шаг 1), n8n снят 2026-09-21 и с тех пор ничего этот
+# эндпоинт не вызывало (grep по репо — ни одного вызывающего). Живой риск: он
+# звал intake.handle_update() НАПРЯМУЮ, в обход poller.process_one() — а
+# значит и в обход его K5-фильтра чужого chat_id (nginx уже не пускает сюда
+# снаружи с K1, 2026-09-22, но с самого хоста эндпоинт был достижим). Дырявый
+# мёртвый код хуже отсутствующего кода — снесён целиком, не залатан: если
+# однажды понадобится внешний HTTP-хоп снова, его надо строить с K5-фильтром
+# с первого дня, а не чинить постфактум.
 
 
 class RedFlagGateOnlyRequest(BaseModel):

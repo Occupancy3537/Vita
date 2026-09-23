@@ -37,7 +37,7 @@ import httpx
 
 from app import registrar, timeutil
 from app.db import get_conn, schema
-from app.doctor import anamnesis, dispatch, intake, telegram
+from app.doctor import anamnesis, dispatch, gate, intake, telegram
 from app import run_log
 from app.scheduler_alert import alert_on_failure, alert_on_sustained_failure
 
@@ -148,6 +148,52 @@ def ingest_test_message(update: dict) -> None:
         _notify_owner_lost(update)
 
 
+def _check_emergency_gate(update: dict) -> bool:
+    """L1 (аудит логики, 2026-09-23, КРИТИЧНО): детектор неотложки (fast_gate)
+    раньше жил только внутри intake.handle_update — т.е. защищал ровно один
+    маршрут из пяти. Фото с подписью «боль в груди, не могу дышать» уходило в
+    registrar (dispatch.route отсекает фото/документ ДО текстовой проверки);
+    текст с тегом анамнеза — в anamnesis; сбой LLM-классификатора ронял
+    маршрут в "other" (см. process_one ниже) — все три пути обходили гейт
+    целиком, потому что он был привязан к судьбе маршрутизации, а не к
+    транспорту. Гейт должен видеть КАЖДЫЙ входящий текст ДО решения "куда" —
+    это и есть транспортный уровень (poller.process_one), не doctor-путь.
+
+    Возвращает True, если сработал L3 (короткое замыкание: маршрутизация
+    дальше не идёт вообще — тот же принцип, что "модель не вызывается" в
+    intake.handle_update, только на уровень выше). fast_gate — только A
+    (regex) + bracelet-cross, без сети, <200мс (см. gate.py) — вызывается
+    здесь синхронно, не в воркере, не задерживает приём следующего апдейта
+    заметно.
+
+    Сбой самого гейта (БД недоступна и т.п.) не должен ронять приём апдейта —
+    ловим и пропускаем дальше в обычную маршрутизацию, залогировав громко:
+    лучше обработать сообщение штатно, чем потерять его целиком из-за отказа
+    предохранителя."""
+    msg = update.get("message") or {}
+    text = msg.get("text") or msg.get("caption") or ""
+    if not text:
+        return False
+    chat_id = str((msg.get("chat") or {}).get("id") or "")
+    message_id = msg.get("message_id")
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            gate_result = gate.fast_gate(cur, text)
+            if gate_result["result"].get("level") != "L3":
+                conn.commit()
+                return False
+            emergency_reply = gate.handle_emergency(cur, chat_id, gate_result, text, None)
+            conn.commit()
+    except Exception:
+        logger.exception("_check_emergency_gate: сбой транспортного гейта для update %s — "
+                          "пропускаю дальше в обычную маршрутизацию, не глушу апдейт",
+                          update.get("update_id"))
+        return False
+    intake._deliver_emergency(chat_id, message_id, emergency_reply)
+    gate.slow_gate_followup(text)
+    return True
+
+
 def process_one(update: dict) -> None:
     # 2026-09-22 (внешний аудит, K5 — КРИТИЧНО): ничего в поллере/диспетчере/
     # интейке не проверяло, что сообщение реально от Влада — любой, кто нашёл
@@ -161,6 +207,8 @@ def process_one(update: dict) -> None:
         logger.warning("process_one: апдейт %s от чужого chat_id=%s — игнорирую",
                         update.get("update_id"), chat_id)
         return
+    if _check_emergency_gate(update):
+        return  # L1: L3 — короткое замыкание, dispatch.route() дальше не идёт
     try:
         destination = dispatch.route(update)
     except Exception:
