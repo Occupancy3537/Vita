@@ -677,6 +677,13 @@ class LabResultSyncResponse(BaseModel):
     id: str
     created: bool
     visit_id: str
+    # L5 (аудит логики, 2026-09-23, ВАЖНО): created=False означает "на эту
+    # visit_source_ref+marker_key уже есть значение" — но не говорит, СВОЁ ли
+    # это значение (повторная отправка того же документа, идемпотентно) или
+    # ЧУЖОЕ (второй документ той же даты с другим числом для того же маркера —
+    # реальная находка L5, "два документа одной даты молча портят лабораторию").
+    # None только при created=True (сравнивать не с чем).
+    value_matches: Optional[bool] = None
 
 
 @app.post("/labs/result", response_model=LabResultSyncResponse)
@@ -709,6 +716,7 @@ def labs_result_sync(req: LabResultSyncRequest) -> LabResultSyncResponse:
             )
             row = cur.fetchone()
             created = row is not None
+            value_matches: Optional[bool] = None
 
             if created:
                 result_id = row[0]
@@ -740,12 +748,20 @@ def labs_result_sync(req: LabResultSyncRequest) -> LabResultSyncResponse:
                                   link_back=True)
             else:
                 cur.execute(
-                    sql.SQL("SELECT id FROM {table} WHERE provenance->>'source_ref' = %s").format(table=lab_table),
+                    sql.SQL("SELECT id, value_num, value_text FROM {table} WHERE provenance->>'source_ref' = %s")
+                    .format(table=lab_table),
                     (source_ref,),
                 )
-                result_id = cur.fetchone()[0]
+                result_id, existing_num, existing_text = cur.fetchone()
+                if req.value_num is not None and existing_num is not None:
+                    # value_num — numeric в Postgres, psycopg отдаёт Decimal;
+                    # req.value_num — float (pydantic) — привести к общему типу,
+                    # иначе "-" между float и Decimal падает исключением.
+                    value_matches = abs(float(req.value_num) - float(existing_num)) < 1e-9
+                else:
+                    value_matches = req.value_text == existing_text
         conn.commit()
-    return LabResultSyncResponse(id=result_id, created=created, visit_id=visit_id)
+    return LabResultSyncResponse(id=result_id, created=created, visit_id=visit_id, value_matches=value_matches)
 
 
 @app.post("/recommendations/sync", response_model=RecommendationSyncResponse)

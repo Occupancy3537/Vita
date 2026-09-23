@@ -252,8 +252,14 @@ def _plural(n: int) -> str:
     return "показателей"
 
 
-def build_reply(date_iso: str, mapped: dict, doc_kind: str) -> str:
-    """Шаг 4: текст подтверждения Владу. 0 распознанных — честный отказ."""
+def build_reply(date_iso: str, mapped: dict, doc_kind: str, conflicting: Optional[list[str]] = None) -> str:
+    """Шаг 4: текст подтверждения Владу. 0 распознанных — честный отказ.
+
+    L5 (аудит логики, 2026-09-23): `conflicting` — маркеры, для которых на эту
+    дату УЖЕ было значение с ДРУГИМ числом (второй документ той же даты,
+    например ОАК из одной лабы и биохимия из другой) — раньше это молча
+    "засчитывалось" в счётчик записанных, теперь называется прямо, а число
+    в счётчике "N показателей" — только реально ЗАПИСАННЫЕ (не заявленные)."""
     if not mapped["rows"]:
         parts = ["Не нашёл знакомых показателей — ничего не записал."]
         if mapped["unmatched"]:
@@ -261,12 +267,16 @@ def build_reply(date_iso: str, mapped: dict, doc_kind: str) -> str:
         if doc_kind == "doctor_conclusion":
             parts.append("Это похоже на заключение без числовых показателей — перескажи суть доктору сообщением, он зафиксирует в карте.")
         return " ".join(parts)
-    n = len(mapped["rows"])
+    n = len(mapped["rows"]) - len(conflicting or [])
     text = f"✅ Загрузил: визит {date_iso}, {n} {_plural(n)}"
     if mapped["converted"]:
         text += "\nПриведены к стандартным единицам: " + "; ".join(mapped["converted"]) + "."
     if mapped["unmatched"]:
         text += "\nНе распознаны и НЕ записаны: " + "; ".join(mapped["unmatched"]) + "."
+    if conflicting:
+        text += ("\n⚠️ На эту дату уже есть ДРУГОЕ значение для: " + "; ".join(conflicting) +
+                 " — похоже, это второй документ за тот же день. Новое значение НЕ записано " +
+                 "поверх старого (чтобы не затереть молча); если нужно исправить — через NocoDB напрямую.")
     return text
 
 
@@ -405,7 +415,7 @@ class PartialPersistError(Exception):
         self.last_error = last_error
 
 
-def persist_document(doc: dict, mapped: dict, date_iso: str) -> str:
+def persist_document(doc: dict, mapped: dict, date_iso: str) -> dict:
     """Визит + результаты через внутренние функции /visits/sync и /labs/result.
     Импорт ленивый: app.main импортирует poller -> сюда, обычный import дал бы
     цикл на этапе загрузки. visit_source_ref = V<ГГГГММДД> — тот же ключ, что
@@ -414,25 +424,41 @@ def persist_document(doc: dict, mapped: dict, date_iso: str) -> str:
     F6 (2026-09-22): каждый показатель пишется своей транзакцией (внутренний
     /labs/result), сбой на середине оставлял частичную запись. Теперь неудачные
     маркеры повторяются один раз (повтор идемпотентен — ON CONFLICT по
-    source_ref), а если остались — PartialPersistError со счётчиками."""
+    source_ref), а если остались — PartialPersistError со счётчиками.
+
+    L5 (аудит логики, 2026-09-23, ВАЖНО): раньше "записал N показателей"
+    считал попытки вызова labs_result_sync, а не реально созданные строки —
+    маркер, для которого на visit_source_ref УЖЕ было значение (второй
+    документ той же даты, ON CONFLICT DO NOTHING), молча засчитывался как
+    "записан", хотя новое значение из этого документа отброшено, а Влад об
+    этом не узнавал вообще. Теперь считаем created отдельно от skipped, и
+    ВНУТРИ skipped различаем: (а) то же самое значение — обычная идемпотентная
+    переотправка того же документа, тишина ожидаема; (б) ДРУГОЕ значение —
+    настоящий конфликт (другой документ той же даты для того же маркера),
+    возвращается отдельным списком conflicting для честного ответа Владу
+    (build_reply)."""
     from app.main import LabResultSyncRequest, VisitSyncRequest, labs_result_sync, visits_sync  # noqa: E501
     visit_ref = "V" + date_iso.replace("-", "")
     ts = date_iso + "T00:00:00Z"  # тот же формат, что Sync Visit to Card в n8n
     visits_sync(VisitSyncRequest(source_ref=visit_ref, title=doc.get("lab_name") or None,
                                  raw_text=doc.get("notes") or None, ts_event=ts))
     rows = mapped["rows"]
-    written = 0
+    created_labels: list[str] = []
+    conflicting_labels: list[str] = []
     remaining = list(rows)
     last_error: Optional[BaseException] = None
     for _attempt in (1, 2):
         still = []
         for r in remaining:
             try:
-                labs_result_sync(LabResultSyncRequest(
+                resp = labs_result_sync(LabResultSyncRequest(
                     visit_source_ref=visit_ref, visit_ts_event=ts, marker_key=r["marker_id"],
                     marker_label=r["label"], value_num=r["value_num"], unit=r["unit"] or None,
                     ref_min=r["ref_min"], ref_max=r["ref_max"]))
-                written += 1
+                if resp.created or resp.value_matches:
+                    created_labels.append(r["label"])
+                else:
+                    conflicting_labels.append(r["label"])
             except Exception as e:
                 still.append(r)
                 last_error = e
@@ -440,8 +466,8 @@ def persist_document(doc: dict, mapped: dict, date_iso: str) -> str:
         if not remaining:
             break
     if remaining:
-        raise PartialPersistError(written, len(rows), last_error or RuntimeError("неизвестная причина"))
-    return visit_ref
+        raise PartialPersistError(len(created_labels), len(rows), last_error or RuntimeError("неизвестная причина"))
+    return {"visit_ref": visit_ref, "created": created_labels, "conflicting": conflicting_labels}
 
 
 def persist_health(doc: dict, mapped: dict, date_iso: str) -> str:
@@ -452,7 +478,19 @@ def persist_health(doc: dict, mapped: dict, date_iso: str) -> str:
     семантики Build Visit: существующий визит с той же датой переиспользуется,
     его поля НЕ перезаписываются; нового — Visit_ID = V<ГГГГММДД>,
     Age_at_Visit = год - 1982. Сбой здесь не должен рвать ответ Владу —
-    вызывающий оборачивает в try/except и помечает ответ."""
+    вызывающий оборачивает в try/except и помечает ответ.
+
+    L5 (аудит логики, 2026-09-23, ВАЖНО): конфликт по ("Visit_ID","Marker_ID")
+    раньше решался DO UPDATE — второй документ той же даты для того же
+    маркера молча ЗАТИРАЛ значение первого. card.* (persist_document выше)
+    на тот же конфликт отвечает DO NOTHING — итог: "два канона" после одного
+    и того же действия показывали РАЗНЫЕ числа, без единого предупреждения
+    (ни один из них не был неправ технически, но они расходились молча).
+    Теперь оба хранилища используют одну и ту же политику — первое значение
+    остаётся, второе не заходит ни туда, ни туда — согласовано, не тихо
+    (build_reply в handle_update честно называет конфликтующие маркеры).
+    Если реально нужно ИСПРАВИТЬ уже записанное значение — через NocoDB
+    напрямую, автоматическая перезапись сознательно отключена."""
     ru_date = f"{date_iso[8:10]}.{date_iso[5:7]}.{date_iso[0:4]}"
     age = str(int(date_iso[:4]) - BIRTH_YEAR)
     lab_name = (doc.get("lab_name") or "").strip()
@@ -470,12 +508,12 @@ def persist_health(doc: dict, mapped: dict, date_iso: str) -> str:
                 f'VALUES (%s,%s,%s,%s,%s) ON CONFLICT ("Visit_ID") DO NOTHING',
                 (visit_id, ru_date, age, lab_name, notes))
         for r in mapped["rows"]:
+            # DO NOTHING, не DO UPDATE (L5, см. докстринг выше) — согласовано
+            # с card.*'s ON CONFLICT DO NOTHING в labs_result_sync.
             cur.execute(
                 f'INSERT INTO {_HEALTH_SCHEMA}.results ("Visit_ID","Marker_ID","Value","Original_Unit","Lab_Min","Lab_Max") '
                 f'VALUES (%s,%s,%s,%s,%s,%s) '
-                f'ON CONFLICT ("Visit_ID","Marker_ID") DO UPDATE SET '
-                f'"Value"=EXCLUDED."Value","Original_Unit"=EXCLUDED."Original_Unit",'
-                f'"Lab_Min"=EXCLUDED."Lab_Min","Lab_Max"=EXCLUDED."Lab_Max",_synced_at=now()',
+                f'ON CONFLICT ("Visit_ID","Marker_ID") DO NOTHING',
                 (visit_id, r["marker_id"], _to_comma(r["value_num"]), r["unit"] or "",
                  _to_comma(r["ref_min"]), _to_comma(r["ref_max"])))
         conn.commit()
@@ -565,19 +603,21 @@ def handle_update(update: dict) -> None:
             _reply(chat_id, build_reply(date_iso, mapped, cls["kind"]))
             return
 
-        visit_ref = persist_document(doc, mapped, date_iso)  # шаг 3: card.* (канон)
+        persist_result = persist_document(doc, mapped, date_iso)  # шаг 3: card.* (канон)
+        visit_ref = persist_result["visit_ref"]
+        conflicting = persist_result["conflicting"]
         health_note = ""
         try:
             health_visit_id = persist_health(doc, mapped, date_iso)  # шаг 3b: дуал-райт
-            logger.info("registrar: update %s -> card:%s / health:%s, %d показателей, нераспознано: %s",
-                        update_id, visit_ref, health_visit_id, len(mapped["rows"]),
-                        "; ".join(mapped["unmatched"]) or "нет")
+            logger.info("registrar: update %s -> card:%s / health:%s, %d показателей (конфликт: %s), нераспознано: %s",
+                        update_id, visit_ref, health_visit_id, len(persist_result["created"]),
+                        "; ".join(conflicting) or "нет", "; ".join(mapped["unmatched"]) or "нет")
         except Exception:
             # card.* уже зафиксирован — сбой старой витрины не рвёт ответ, но и не молчит
             logger.exception("registrar: дуал-райт в health.* не удался (card.%s записан), update %s",
                              visit_ref, update_id)
             health_note = "\n⚠️ Записал в карту, но данные не доехали до старой базы (панель PhenoAge их не увидит)."
-        _reply(chat_id, build_reply(date_iso, mapped, cls["kind"]) + health_note)  # шаг 4
+        _reply(chat_id, build_reply(date_iso, mapped, cls["kind"], conflicting) + health_note)  # шаг 4
     except PartialPersistError as e:
         # F6 (2026-09-22): часть показателей уже в базе — честно говорим сколько
         # и что повторная отправка дозальёт остальное (дублей не будет).

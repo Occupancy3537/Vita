@@ -308,6 +308,53 @@ def test_dual_write_reuses_existing_visit_by_date(lab_doc, sent):
         assert cur.fetchall() == [("V09",)]  # результаты под реюзнутым визитом
 
 
+# ─────── L5 (аудит логики, 2026-09-23, ВАЖНО): два документа одной даты ───────
+
+def test_reupload_same_document_no_conflict_warning(lab_doc, sent):
+    """Идемпотентная переотправка ТОГО ЖЕ документа — value_matches=True,
+    предупреждения о конфликте быть не должно (это не второй документ)."""
+    registrar.handle_update(_photo_update())
+    registrar.handle_update(_photo_update())
+
+    assert "⚠️ На эту дату уже есть ДРУГОЕ значение" not in sent[1][1]
+    assert "2 показателя" in sent[1][1]  # оба "записаны" (не отброшены как конфликт)
+
+
+def test_second_document_same_date_different_value_not_overwritten(monkeypatch, sent):
+    """Живой сценарий L5: ОАК из одной лабы и биохимия из другой, обе за
+    22.09 — второй документ несёт ДРУГОЕ значение глюкозы. Раньше: card.* и
+    health.* расходились молча (DO NOTHING vs DO UPDATE), счётчик "записал"
+    врал. Теперь: первое значение остаётся в ОБОИХ хранилищах, конфликт
+    назван прямо в ответе, счётчик считает только реально записанное."""
+    monkeypatch.setattr(registrar.telegram, "download_file", lambda file_id, timeout=20.0: b"fake-image")
+    monkeypatch.setattr(registrar, "classify_document", lambda content, mime: {"kind": "lab_report", "reason": ""})
+    monkeypatch.setattr(registrar, "_fetch_marker_rows", lambda: MARKER_ROWS)
+
+    def doc1(content, mime, today):
+        return {"document_date": "2026.09.15", "lab_name": "Инвитро", "notes": "ОАК",
+                "markers": [{"name": "Глюкоза", "value": "5.2", "unit": "ммоль/л", "ref_low": "4.1", "ref_high": "5.9"}]}
+
+    def doc2(content, mime, today):
+        return {"document_date": "2026.09.15", "lab_name": "КДЦ", "notes": "биохимия",
+                "markers": [{"name": "Глюкоза", "value": "6.8", "unit": "ммоль/л", "ref_low": "4.1", "ref_high": "5.9"}]}
+
+    monkeypatch.setattr(registrar, "extract_document", doc1)
+    registrar.handle_update(_photo_update(file_id="doc1"))
+    monkeypatch.setattr(registrar, "extract_document", doc2)
+    registrar.handle_update(_photo_update(file_id="doc2"))
+
+    assert "1 показатель" in sent[0][1]
+    assert "0 показателей" in sent[1][1]
+    assert "⚠️ На эту дату уже есть ДРУГОЕ значение для: Глюкоза" in sent[1][1]
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT value_num FROM {schema()}.lab_result WHERE marker_key = 'M003'")
+        rows = cur.fetchall()
+        assert len(rows) == 1 and float(rows[0][0]) == 5.2  # первое значение осталось, второй строки нет
+        cur.execute(f'SELECT "Value" FROM {schema()}.results WHERE "Marker_ID" = %s', ("M003",))
+        assert cur.fetchall() == [("5,2",)]  # health.* тоже не перезаписан вторым документом
+
+
 def test_dual_write_failure_visible_card_still_written(lab_doc, sent, monkeypatch):
     """Сбой дуал-райта: card.* записан, ответ Владу с ⚠️-пометкой — не тихий."""
     def boom(*a, **k):
@@ -358,9 +405,11 @@ def test_partial_persist_retries_once_and_succeeds(lab_doc, monkeypatch):
         return real(req)
 
     monkeypatch.setattr(main_mod, "labs_result_sync", flaky)
-    ref = registrar.persist_document({"lab_name": "Инвитро", "notes": ""}, {"rows": _ROWS_2}, "2026-09-15")
+    result = registrar.persist_document({"lab_name": "Инвитро", "notes": ""}, {"rows": _ROWS_2}, "2026-09-15")
 
-    assert ref == "V20260915"
+    assert result["visit_ref"] == "V20260915"
+    assert sorted(result["created"]) == ["Гемоглобин", "Глюкоза"]
+    assert result["conflicting"] == []
     assert seen["M041"] == 2  # была повторная попытка
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(f"SELECT count(*) FROM {schema()}.lab_result")
