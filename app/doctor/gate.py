@@ -15,6 +15,11 @@
                          в ТУ ЖЕ сессию отдельным rf_event (F8), не дублирует
                          то, что уже записал fast_gate (передаёт в union
                          пустые layer_a_hits/bracelet_hits — они уже учтены).
+                         2026-09-23 (аудит логики, L3): если сам находит L3 —
+                         не только пишет rf_event, но и досылает пациенту
+                         активное предупреждение (гарантированной доставкой) —
+                         второй независимый слой больше не молчит на находке,
+                         которую первый пропустил.
 
 Порог эскалации (план §3.7, предложение принято Владом с оговоркой "калибровать
 во время тестирования", не как жёсткая константа с первого дня):
@@ -79,12 +84,25 @@ def handle_emergency(cur, chat_id: str, gate_result: dict, text: str, source_id:
     return EMERGENCY_REPLY
 
 
-def slow_gate_followup(text: str, source_id: Optional[str] = None,
+FOLLOWUP_L3_PREFIX = "⚠️ Пересмотрел твоё предыдущее сообщение внимательнее — оно похоже на неотложное состояние"
+
+
+def slow_gate_followup(chat_id: str, text: str, source_id: Optional[str] = None,
                         prior_replies: Optional[list[str]] = None) -> None:
     """Слой B — вызывать ПОСЛЕ отправки ответа пациенту (не на пути к нему).
     Деградация (сеть легла, невалидный JSON) уже обрабатывается внутри
     redflag_b.classify как degraded=True, не исключением — здесь ловим только
-    неожиданное, чтобы сбой B не ронял фоновую задачу целиком."""
+    неожиданное, чтобы сбой B не ронял фоновую задачу целиком.
+
+    L3 (аудит логики, 2026-09-23, КРИТИЧНО): раньше ЛЮБОЙ уровень от B —
+    включая L3 — только писал rf_event и молчал. Для L1 это нормально
+    (заметка на будущее), но L3 от B означает: A (regex) пропустил, семан-
+    тический слой нашёл, а пациенту УЖЕ ушёл обычный (не эмердженси) ответ —
+    "второй независимый слой безопасности" (план §1.3) констатировал угрозу
+    в карточку и молчал перед пациентом. Теперь L3 от B досылает активное
+    предупреждение той же гарантированной доставкой (ретраи + Hermes-
+    фолбэк), что и детерминированный гейт — не задерживает исходный ответ
+    (уже ушёл), но и не оставляет находку немой."""
     try:
         layer_b = classify_layer_b(text, prior_replies or [])
     except Exception:
@@ -98,3 +116,10 @@ def slow_gate_followup(text: str, source_id: Optional[str] = None,
     with get_conn() as conn, conn.cursor() as cur:
         record_rf_event(cur, result, source_id)
         conn.commit()
+
+    if result["level"] == "L3":
+        from app.doctor.intake import _deliver_emergency  # ленивый импорт — избегаем цикла gate<->intake
+        note = result.get("context_note") or "см. карту"
+        followup = (f"{FOLLOWUP_L3_PREFIX} ({note}). Если это всё ещё актуально — "
+                    "вызови скорую (103 / 112) или обратись в приёмный покой прямо сейчас.")
+        _deliver_emergency(chat_id, None, followup)

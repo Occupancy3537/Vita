@@ -190,7 +190,7 @@ def _check_emergency_gate(update: dict) -> bool:
                           update.get("update_id"))
         return False
     intake._deliver_emergency(chat_id, message_id, emergency_reply)
-    gate.slow_gate_followup(text)
+    gate.slow_gate_followup(chat_id, text)
     return True
 
 

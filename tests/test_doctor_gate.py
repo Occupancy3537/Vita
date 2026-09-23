@@ -6,6 +6,7 @@ import time
 
 from app.db import get_conn, schema
 from app.doctor import gate
+from app.doctor import intake as intake_module
 from app.redflag_b import LayerBResult
 from tests.test_redflag import CRISIS, EDGE, EMERG, SAFE
 
@@ -99,23 +100,31 @@ def test_handle_emergency_writes_episode_and_assistant_turn():
 
 
 def test_slow_gate_followup_records_layer_b_hit(monkeypatch):
+    """cardiac_acute + modality.current=True -> L3 по таблице §2.3 (level_for) —
+    2026-09-23 (L3, аудит логики): раз это L3, теперь ЕЩЁ и досылает активное
+    предупреждение (_deliver_emergency) — мокаем, тест не должен бить по сети."""
     fake_result = LayerBResult(hit=True, category="cardiac_acute", degraded=False,
                                 confidence=0.9, context_note="test")
     fake_result.modality.current = True
 
     monkeypatch.setattr(gate, "classify_layer_b", lambda text, prior_replies=None: fake_result)
+    delivered = []
+    monkeypatch.setattr(intake_module, "_deliver_emergency",
+                         lambda chat_id, message_id, text: delivered.append((chat_id, text)) or True)
 
-    gate.slow_gate_followup("любой текст — B замокан")
+    gate.slow_gate_followup("12345", "любой текст — B замокан")
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM " + schema() + ".rf_event WHERE source = 'B'")
         assert cur.fetchone()[0] == 1
+    assert delivered == [("12345", delivered[0][1])]
+    assert "скорую" in delivered[0][1].lower()
 
 
 def test_slow_gate_followup_no_op_when_b_does_not_hit(monkeypatch):
     monkeypatch.setattr(gate, "classify_layer_b", lambda text, prior_replies=None: LayerBResult(hit=False))
 
-    gate.slow_gate_followup("текст без флагов")
+    gate.slow_gate_followup("12345", "текст без флагов")
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM " + schema() + ".rf_event")
@@ -126,7 +135,7 @@ def test_slow_gate_followup_no_op_when_b_degraded(monkeypatch):
     monkeypatch.setattr(gate, "classify_layer_b",
                          lambda text, prior_replies=None: LayerBResult(hit=True, category="cardiac_acute", degraded=True))
 
-    gate.slow_gate_followup("текст, где B деградировал")
+    gate.slow_gate_followup("12345", "текст, где B деградировал")
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM " + schema() + ".rf_event")
@@ -138,4 +147,21 @@ def test_slow_gate_followup_survives_classify_exception(monkeypatch):
         raise RuntimeError("сеть легла")
 
     monkeypatch.setattr(gate, "classify_layer_b", boom)
-    gate.slow_gate_followup("не должно уронить фоновую задачу")  # не бросает исключение наружу
+    gate.slow_gate_followup("12345", "не должно уронить фоновую задачу")  # не бросает исключение наружу
+
+
+def test_slow_gate_followup_l1_does_not_deliver(monkeypatch):
+    """Регресс: L1 (systemic_warning) — только rf_event, БЕЗ активной доставки.
+    Только L3 должен звать _deliver_emergency (2026-09-23, L3-фикс)."""
+    fake_result = LayerBResult(hit=True, category="systemic_warning", degraded=False,
+                                confidence=0.5, context_note="test")
+    fake_result.modality.current = True
+
+    monkeypatch.setattr(gate, "classify_layer_b", lambda text, prior_replies=None: fake_result)
+    delivered = []
+    monkeypatch.setattr(intake_module, "_deliver_emergency",
+                         lambda chat_id, message_id, text: delivered.append((chat_id, text)) or True)
+
+    gate.slow_gate_followup("12345", "текст на L1")
+
+    assert delivered == []

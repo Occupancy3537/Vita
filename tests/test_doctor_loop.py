@@ -140,6 +140,10 @@ def test_run_turn_exhausts_rounds_degrades(monkeypatch):
                          lambda messages, model, timeout: _tool_call_response("Read_Symptoms", "{}"))
     r = loop.run_turn(chat_id="1", person_id="self", text="тест", turn_id=_real_turn())
     assert "не успел" in r.reply_text.lower()
+    # L2 (аудит логики, 2026-09-23): деградация без ЕДИНОГО намёка на срочность
+    # была худшим сценарием для сообщения, которое могло быть кризисным, а
+    # модель просто не успела его оценить — теперь безопасный хвост есть всегда.
+    assert "103" in r.reply_text and "8-800-2000-122" in r.reply_text
 
 
 def test_run_turn_deadline_exceeded_degrades(monkeypatch):
@@ -149,6 +153,7 @@ def test_run_turn_deadline_exceeded_degrades(monkeypatch):
     r = loop.run_turn(chat_id="1", person_id="self", text="тест", turn_id=_real_turn())
     assert called["n"] == 0  # дедлайн уже истёк до первого вызова модели
     assert "срок" in r.reply_text.lower()
+    assert "103" in r.reply_text and "8-800-2000-122" in r.reply_text
 
 
 def test_run_turn_writes_agent_step_traces(monkeypatch):

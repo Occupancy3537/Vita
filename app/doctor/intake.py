@@ -181,6 +181,20 @@ def flush(timeout: float = 300.0) -> None:
         concurrent.futures.wait(futures, timeout=timeout)
 
 
+_MODEL_EMERGENCY_MARKERS = ("🚨", "8-800-2000-122")
+
+
+def _is_model_emergency_reply(reply_text: str) -> bool:
+    """L2 (аудит логики, 2026-09-23): промпт (prompt.py) держит ВТОРОЙ, семан-
+    тический слой распознавания неотложки/кризиса — специально на случай,
+    когда детерминированный regex-гейт (layer A) не сработал. Оба фиксирован-
+    ных маркера ответа модели узнаваемы буквально: "🚨" — начало шаблона
+    неотложки, "8-800-2000-122" — номер кризисной линии из суицидального
+    блока. Обычный клинический ответ доктора этих строк не содержит —
+    ложных срабатываний не бывает по конструкции промпта."""
+    return any(m in reply_text for m in _MODEL_EMERGENCY_MARKERS)
+
+
 def _finish_turn(msg: IncomingMessage, text: str, user_turn_id: str, placeholder_id: int) -> None:
     """Длинная часть хода — агентный цикл, коммит записей, финальный ответ.
     Исполняется в воркере (F9): ошибки здесь уже не видны поллеру
@@ -203,7 +217,24 @@ def _finish_turn(msg: IncomingMessage, text: str, user_turn_id: str, placeholder
             except CommitError as e:
                 commit_error = str(e)
 
-        telegram.edit_message(msg.chat_id, placeholder_id, reply_text, parse_mode="HTML")
+        # L2 (аудит логики, 2026-09-23, КРИТИЧНО): раньше ЛЮБОЙ ответ, включая
+        # эмердженси-текст модели, уходил одним edit_message без ретраев и без
+        # фолбэка — сбой отправки (сеть/429) означал, что пациент в кризисе не
+        # увидит вообще ничего. Теперь: как и раньше, сперва пробуем аккуратно
+        # заменить плейсхолдер (best effort, обычная UX-картинка "…" -> ответ);
+        # если это эмердженси-текст модели И edit не удался — досылаем
+        # гарантированно той же логикой (ретраи + Hermes-фолбэк), что и
+        # детерминированный гейт (_deliver_emergency), не оставляя пациента
+        # с голым "…" в кризисе.
+        try:
+            telegram.edit_message(msg.chat_id, placeholder_id, reply_text, parse_mode="HTML")
+        except Exception:
+            if _is_model_emergency_reply(reply_text):
+                logger.exception("intake: не удалось отредактировать плейсхолдер эмердженси-"
+                                 "ответом модели — досылаю гарантированно (update=%s)", msg.update_id)
+                _deliver_emergency(msg.chat_id, msg.message_id, reply_text)
+            else:
+                raise
 
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -221,8 +252,10 @@ def _finish_turn(msg: IncomingMessage, text: str, user_turn_id: str, placeholder
         # уже после ответа: пишут rf_event, но пока не меняют сам ответ — вставка
         # строки "показаться врачу сегодня" для L2 требует знать уровень ДО ответа
         # модели, а B считается параллельно ей же — честный нерешённый разрыв,
-        # не забытый: пока L2 виден только в rf_event, не в тексте пациенту.
-        gate.slow_gate_followup(text)
+        # не забытый: пока L2 виден только в rf_event, не в тексте пациенту. L3
+        # от слоя B — другое дело, см. gate.slow_gate_followup: активно
+        # досылает предупреждение, не молчит (аудит логики, 2026-09-23).
+        gate.slow_gate_followup(msg.chat_id, text)
     except Exception as e:
         logger.exception("intake: длинная часть хода упала (update=%s) — ход потерян после user-turn",
                          msg.update_id)
@@ -265,7 +298,7 @@ def handle_update(update: dict) -> None:
         # найдётся что добавить (никогда не задерживает эмердженси, §3.7).
         # F1: доставка — с ретраями и фолбэком через Hermes, см. _deliver_emergency.
         _deliver_emergency(msg.chat_id, msg.message_id, emergency_reply)
-        gate.slow_gate_followup(text)
+        gate.slow_gate_followup(msg.chat_id, text)
         return
 
     telegram.send_chat_action(msg.chat_id, "typing")

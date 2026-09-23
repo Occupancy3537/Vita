@@ -262,12 +262,13 @@ def test_handle_update_l3_delivery_failure_still_runs_layer_b(monkeypatch):
     monkeypatch.setattr(telegram_module, "send_message", boom)
     monkeypatch.setattr(intake_module.hermes_telegram, "send_message", boom)
     monkeypatch.setattr(intake_module, "EMERGENCY_RETRY_DELAY_SECONDS", 0)
-    monkeypatch.setattr(gate, "slow_gate_followup", lambda text, source_id=None: layer_b_calls.append(text))
+    monkeypatch.setattr(gate, "slow_gate_followup",
+                        lambda chat_id, text, source_id=None: layer_b_calls.append((chat_id, text)))
 
     handle_update(_text_update(update_id=600, chat_id=888,
                                 text="грудь давит, отдаёт в левую руку, одышка"))
 
-    assert layer_b_calls == ["грудь давит, отдаёт в левую руку, одышка"]
+    assert layer_b_calls == [("888", "грудь давит, отдаёт в левую руку, одышка")]
 
 
 # --- F9 (внешний аудит логики, 2026-09-22): длинный ход не блокирует приём ---
@@ -331,6 +332,62 @@ def test_l3_emergency_not_blocked_by_busy_worker(monkeypatch):
     finally:
         release.set()
         intake_module.flush()
+
+
+def test_is_model_emergency_reply_detects_markers():
+    assert intake_module._is_model_emergency_reply("🚨 Похоже на неотложное состояние...") is True
+    assert intake_module._is_model_emergency_reply("линия поддержки 8-800-2000-122") is True
+    assert intake_module._is_model_emergency_reply("обычный клинический ответ доктора") is False
+
+
+def test_finish_turn_model_emergency_reply_falls_back_when_edit_fails(monkeypatch):
+    """L2 (аудит логики, 2026-09-23, КРИТИЧНО): модель сама распознала неот-
+    ложку (второй, семантический слой в промпте — regex её не ловит) — раньше
+    сбой edit_message означал полную тихую потерю (один вызов без ретраев).
+    Теперь падает обратно на гарантированную доставку (ретраи + Hermes)."""
+    sent = []
+    monkeypatch.setattr(telegram_module, "send_chat_action", lambda *a, **k: None)
+    monkeypatch.setattr(telegram_module, "send_message",
+                        lambda chat_id, text, **k: (sent.append(text), 42)[1])
+
+    def edit_boom(*a, **k):
+        raise RuntimeError("telegram 429")
+
+    monkeypatch.setattr(telegram_module, "edit_message", edit_boom)
+    monkeypatch.setattr(intake_module, "EMERGENCY_RETRY_DELAY_SECONDS", 0)
+    monkeypatch.setattr(gate, "classify_layer_b", lambda *a, **k: LayerBResult(hit=False))
+    monkeypatch.setattr(loop, "run_turn", lambda **kw: TurnResult(
+        turn_id=kw["turn_id"],
+        reply_text="🚨 Похоже на неотложное состояние. Немедленно к врачу или вызови скорую: 103 / 112."))
+
+    handle_update(_text_update(update_id=1004, chat_id=904, text="что-то не то"))
+    intake_module.flush()
+
+    assert any("🚨" in s for s in sent)  # гарантированная доставка сработала
+
+
+def test_finish_turn_normal_reply_edit_failure_still_alerts(monkeypatch):
+    """Регресс: для ОБЫЧНОГО ответа сбой edit_message по-прежнему падает
+    наружу и алертит владельца — фолбэк только для эмердженси-текста."""
+    alerts = []
+    from app import scheduler_alert
+    monkeypatch.setattr(scheduler_alert, "alert_on_failure",
+                        lambda src, exc: alerts.append((src, exc)))
+    monkeypatch.setattr(telegram_module, "send_chat_action", lambda *a, **k: None)
+    monkeypatch.setattr(telegram_module, "send_message", lambda chat_id, text, **k: 42)
+
+    def edit_boom(*a, **k):
+        raise RuntimeError("telegram 429")
+
+    monkeypatch.setattr(telegram_module, "edit_message", edit_boom)
+    monkeypatch.setattr(gate, "classify_layer_b", lambda *a, **k: LayerBResult(hit=False))
+    monkeypatch.setattr(loop, "run_turn", lambda **kw: TurnResult(
+        turn_id=kw["turn_id"], reply_text="обычный клинический ответ"))
+
+    handle_update(_text_update(update_id=1005, chat_id=905, text="колет в боку"))
+    intake_module.flush()
+
+    assert alerts and alerts[0][0] == "doctor_turn"
 
 
 def test_finish_turn_failure_alerts_owner(monkeypatch):
