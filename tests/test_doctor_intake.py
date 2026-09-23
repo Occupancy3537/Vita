@@ -8,7 +8,7 @@ test_extraction_live.py, остальные мокают, см. её докст�
 import threading
 import time
 
-from app.db import get_conn
+from app.db import get_conn, schema
 from app.doctor import gate, intake as intake_module, loop, telegram as telegram_module
 from app.doctor.contract import TurnResult
 from app.doctor.dialog import recent_turns
@@ -388,6 +388,49 @@ def test_finish_turn_normal_reply_edit_failure_still_alerts(monkeypatch):
     intake_module.flush()
 
     assert alerts and alerts[0][0] == "doctor_turn"
+
+
+# --- L4 (аудит логики, 2026-09-23, КРИТИЧНО): видимая потеря хода при рестарте ---
+
+def _pending_rows():
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT id, chat_id, text FROM {schema()}.doctor_pending_turn")
+        return cur.fetchall()
+
+
+def test_mark_and_clear_turn_pending_roundtrip():
+    pending_id = intake_module._mark_turn_pending("111", 5, 42, "тестовый текст")
+    rows = _pending_rows()
+    assert any(r[0] == pending_id and r[1] == "111" and r[2] == "тестовый текст" for r in rows)
+
+    intake_module._clear_turn_pending(pending_id)
+    rows = _pending_rows()
+    assert not any(r[0] == pending_id for r in rows)
+
+
+def test_handle_update_clears_pending_marker_on_success(monkeypatch):
+    """Штатный ход — маркер не должен остаться висеть после успешного завершения."""
+    _quiet_telegram(monkeypatch)
+    monkeypatch.setattr(loop, "run_turn", lambda **kw: TurnResult(turn_id=kw["turn_id"], reply_text="ок"))
+
+    handle_update(_text_update(update_id=1006, chat_id=906, text="тест pending marker"))
+    intake_module.flush()
+
+    assert not any(t == "тест pending marker" for _, _, t in _pending_rows())
+
+
+def test_handle_update_clears_pending_marker_on_caught_exception(monkeypatch):
+    """Пойманное исключение внутри _finish_turn — маркер тоже снимается
+    (уже видимо через alert_on_failure, второй канал не нужен)."""
+    from app import scheduler_alert
+    monkeypatch.setattr(scheduler_alert, "alert_on_failure", lambda src, exc: None)
+    monkeypatch.setattr(loop, "run_turn", lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+    _quiet_telegram(monkeypatch)
+
+    handle_update(_text_update(update_id=1007, chat_id=907, text="тест pending marker падение"))
+    intake_module.flush()
+
+    assert not any(t == "тест pending marker падение" for _, _, t in _pending_rows())
 
 
 def test_finish_turn_failure_alerts_owner(monkeypatch):

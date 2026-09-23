@@ -27,9 +27,10 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from psycopg.errors import UniqueViolation
+from ulid import ULID
 
 from app import hermes_telegram
-from app.db import get_conn
+from app.db import get_conn, schema
 from app.doctor import commit, gate, loop, render, telegram
 from app.doctor.commit import CommitError
 from app.doctor.contract import IncomingMessage
@@ -181,6 +182,41 @@ def flush(timeout: float = 300.0) -> None:
         concurrent.futures.wait(futures, timeout=timeout)
 
 
+# L4 (аудит логики, 2026-09-23, КРИТИЧНО): ход доктора живёт в _turn_executor
+# (ОЗУ) — рестарт контейнера (деплой/OOM) посреди разбора терял его БЕЗ СЛЕДА:
+# offset поллера уже сдвинут ДО этого места (poller.process_one возвращается
+# сразу после _submit_turn), already_processed уже стоит — Телеграм повторно
+# апдейт не пришлёт, пациент навсегда видит зависшее "…". Полное возобновление
+# хода — большая задача (пришлось бы сериализовать состояние агентного цикла);
+# выбран более простой и безопасный вариант (согласовано с Владом 2026-09-23):
+# не резюмировать ход, а сделать потерю ВИДИМОЙ. Строка в card.doctor_pending_
+# turn живёт ровно между "поставлен в очередь" и "завершился" (успех или
+# пойманное исключение — см. finally в _finish_turn); если её не убрали до
+# следующего старта контейнера — сам процесс был убит посреди хода, и
+# poller.recover_pending_turns() (вызывается один раз при старте) разошлёт
+# видимое "потерялось, повтори" вместо тишины.
+def _mark_turn_pending(chat_id: str, message_id: Optional[int], placeholder_id: int, text: str) -> str:
+    pending_id = f"pt_{ULID()}"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.doctor_pending_turn "
+            "(id, chat_id, message_id, placeholder_id, text) VALUES (%s, %s, %s, %s, %s)",
+            (pending_id, chat_id, message_id, placeholder_id, text),
+        )
+        conn.commit()
+    return pending_id
+
+
+def _clear_turn_pending(pending_id: str) -> None:
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(f"DELETE FROM {schema()}.doctor_pending_turn WHERE id = %s", (pending_id,))
+            conn.commit()
+    except Exception:
+        logger.exception("intake: не удалось снять маркер pending-хода %s — переживёт до следующего "
+                         "старта контейнера и пришлёт лишнее (но не ложное) уведомление", pending_id)
+
+
 _MODEL_EMERGENCY_MARKERS = ("🚨", "8-800-2000-122")
 
 
@@ -195,10 +231,16 @@ def _is_model_emergency_reply(reply_text: str) -> bool:
     return any(m in reply_text for m in _MODEL_EMERGENCY_MARKERS)
 
 
-def _finish_turn(msg: IncomingMessage, text: str, user_turn_id: str, placeholder_id: int) -> None:
+def _finish_turn(msg: IncomingMessage, text: str, user_turn_id: str, placeholder_id: int,
+                  pending_id: str) -> None:
     """Длинная часть хода — агентный цикл, коммит записей, финальный ответ.
     Исполняется в воркере (F9): ошибки здесь уже не видны поллеру
-    (_safe_process), поэтому падение уходит алертом владельцу явно."""
+    (_safe_process), поэтому падение уходит алертом владельцу явно.
+
+    L4: pending_id снимается в finally — при успехе И при пойманном исключении
+    (оба случая уже видимы одним из двух каналов: обычный ответ или
+    alert_on_failure). Не снимется, только если процесс убьют посреди этой
+    функции — тогда её подберёт poller.recover_pending_turns() при рестарте."""
     from app.scheduler_alert import alert_on_failure
     try:
         result = loop.run_turn(chat_id=msg.chat_id, person_id=msg.person_id,
@@ -260,6 +302,8 @@ def _finish_turn(msg: IncomingMessage, text: str, user_turn_id: str, placeholder
         logger.exception("intake: длинная часть хода упала (update=%s) — ход потерян после user-turn",
                          msg.update_id)
         alert_on_failure("doctor_turn", e)
+    finally:
+        _clear_turn_pending(pending_id)
 
 
 def handle_update(update: dict) -> None:
@@ -304,7 +348,11 @@ def handle_update(update: dict) -> None:
     telegram.send_chat_action(msg.chat_id, "typing")
     placeholder_id = telegram.send_message(msg.chat_id, "…", reply_to_message_id=msg.message_id)
 
+    # L4: маркер ДО постановки в очередь — переживает рестарт контейнера в
+    # БД, в отличие от самого ThreadPoolExecutor (см. докстринг у функций выше).
+    pending_id = _mark_turn_pending(msg.chat_id, msg.message_id, placeholder_id, text)
+
     # F9: агентный цикл (до TURN_DEADLINE_SECONDS) — в фоновый воркер; поллер
     # сразу возвращается к приёму, следующее сообщение проходит свой быстрый
     # гейт немедленно.
-    _submit_turn(_finish_turn, msg, text, user_turn_id, placeholder_id)
+    _submit_turn(_finish_turn, msg, text, user_turn_id, placeholder_id, pending_id)

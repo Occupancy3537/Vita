@@ -293,8 +293,38 @@ def _safe_process(update: dict) -> None:
         alert_on_failure("doctor_update", e)
 
 
+def recover_pending_turns() -> None:
+    """L4 (аудит логики, 2026-09-23, КРИТИЧНО): вызывается ОДИН раз при
+    старте контейнера. Если card.doctor_pending_turn не пуста — прошлый
+    процесс был убит (деплой/OOM) ПОСРЕДИ хода доктора: intake.py:_finish_turn
+    не успел снять маркер ни успехом, ни пойманным исключением. Ход при
+    рестарте не резюмируем (агентный цикл не сериализован) — делаем потерю
+    ВИДИМОЙ вместо молчаливой (тихая потеря данных — риск №1, CLAUDE.md):
+    шлём владельцу текст потерянного сообщения, чтобы он мог просто написать
+    его снова, и чистим маркеры."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT id, chat_id, text FROM {schema()}.doctor_pending_turn ORDER BY started_at")
+        rows = cur.fetchall()
+        if not rows:
+            return
+        for pending_id, chat_id, text in rows:
+            try:
+                telegram.send_message(
+                    chat_id,
+                    "⚠️ Прошлый разбор прервался из-за перезапуска сервиса — вот что не "
+                    f"успел обработать:\n«{text}»\nПовтори, пожалуйста, если ещё актуально.",
+                )
+            except Exception:
+                logger.exception("recover_pending_turns: не удалось уведомить о потерянном ходе %s", pending_id)
+        cur.execute(f"DELETE FROM {schema()}.doctor_pending_turn")
+        conn.commit()
+    logger.warning("recover_pending_turns: обнаружено и обработано %d потерянных ходов "
+                   "(рестарт контейнера посреди разбора)", len(rows))
+
+
 def run_polling_loop() -> None:
     disable_telegram_webhook()
+    recover_pending_turns()
     with get_conn() as conn, conn.cursor() as cur:
         offset = _get_last_offset(cur)
     logger.info("telegram polling loop starting from offset %s", offset)

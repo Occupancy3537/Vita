@@ -340,6 +340,55 @@ def test_emergency_gate_failure_falls_through_to_routing(monkeypatch):
     assert poller._check_emergency_gate({"message": {"text": _EMERGENCY_TEXT}}) is False
 
 
+# --- L4 (аудит логики, 2026-09-23, КРИТИЧНО): восстановление после рестарта -
+
+def test_recover_pending_turns_notifies_and_clears(monkeypatch):
+    """Прошлый процесс убит посреди хода (маркер остался) — при старте
+    контейнера владелец получает видимое «потерялось, повтори», а не тишину."""
+    from app.doctor import intake as intake_module
+
+    pending_id = intake_module._mark_turn_pending("222", 9, 77, "текст потерянного хода")
+    sent = []
+    monkeypatch.setattr(poller.telegram, "send_message",
+                        lambda chat_id, text, **k: sent.append((chat_id, text)))
+
+    poller.recover_pending_turns()
+
+    assert len(sent) == 1
+    assert sent[0][0] == "222"
+    assert "текст потерянного хода" in sent[0][1]
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {schema()}.doctor_pending_turn WHERE id = %s", (pending_id,))
+        assert cur.fetchone()[0] == 0
+
+
+def test_recover_pending_turns_no_op_when_empty(monkeypatch):
+    """Штатный случай (чистое завершение всех прошлых ходов) — тишина, без
+    единого сообщения владельцу."""
+    sent = []
+    monkeypatch.setattr(poller.telegram, "send_message", lambda chat_id, text, **k: sent.append((chat_id, text)))
+    poller.recover_pending_turns()
+    assert sent == []
+
+
+def test_recover_pending_turns_notify_failure_still_clears(monkeypatch):
+    """Сбой самой отправки уведомления не должен оставлять маркер висеть
+    навсегда — иначе он спамил бы на каждый следующий рестарт."""
+    from app.doctor import intake as intake_module
+
+    pending_id = intake_module._mark_turn_pending("333", None, 88, "ещё один потерянный")
+
+    def boom(chat_id, text, **k):
+        raise RuntimeError("telegram down")
+
+    monkeypatch.setattr(poller.telegram, "send_message", boom)
+    poller.recover_pending_turns()  # не бросает
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {schema()}.doctor_pending_turn WHERE id = %s", (pending_id,))
+        assert cur.fetchone()[0] == 0
+
+
 # --- Фаза 3: команда /tz (часовой пояс) --------------------------------------
 
 def test_route_tz_command_is_deterministic():
