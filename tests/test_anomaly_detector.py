@@ -2,6 +2,7 @@
 (2026-09-20, группа 3). Юниты на чистый z-score движок + сценарии дедупа/
 записи через monkeypatch и реальную health.anomaly_alerted/health.anomaly_log
 (тестовые даты, явный cleanup)."""
+import json
 from datetime import date, timedelta
 
 import pytest
@@ -300,10 +301,16 @@ def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch, _preserve_ano
             cur.execute("DELETE FROM health.anomaly_alerted WHERE key LIKE %s", (f"{latest_date}%",))
             cur.execute("DELETE FROM health.anomaly_log WHERE date = %s", (latest_date,))
             if preexisting_log:
+                # 2026-09-23: preexisting_log пришёл из SELECT — psycopg уже
+                # ДЕСЕРИАЛИЗОВАЛ jsonb raw_anomalies в Python list/dict; INSERT
+                # обратно тем же значением без json.dumps() падал с
+                # "cannot adapt type 'dict'" (raw_anomalies — jsonb, нужен
+                # текст + ::jsonb, тот же приём, что в write_anomaly_log()).
+                anomaly_count, strong_count, raw_anomalies, created_at = preexisting_log
                 cur.execute(
                     "INSERT INTO health.anomaly_log (date, anomaly_count, strong_count, raw_anomalies, created_at) "
-                    "VALUES (%s, %s, %s, %s, %s)",
-                    (latest_date, *preexisting_log),
+                    "VALUES (%s, %s, %s, %s::jsonb, %s)",
+                    (latest_date, anomaly_count, strong_count, json.dumps(raw_anomalies, ensure_ascii=False), created_at),
                 )
             for key, alert_date in preexisting_alerted:
                 cur.execute(

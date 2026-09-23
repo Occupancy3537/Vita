@@ -191,6 +191,19 @@ def test_build_message_all_clean_no_problems(monkeypatch):
             })
         return _resp(url, status_code=200, json={"updated_at": system_check._vl_now().isoformat()})
     monkeypatch.setattr(httpx, "get", fake_get)
+    # 2026-09-23 (реальная находка Влада): "всё чисто" — контролируемый
+    # сценарий, но _check_gaps/_check_pg_status/_check_numeric_garbage/
+    # _check_anomaly_freshness/_check_garmin_ingest_failures все читают
+    # ЖИВЫЕ health.* напрямую (не card_test) — тест зависел от того, что в
+    # проде СЕЙЧАС ничего не найдётся, и однажды честно поймал реальную (уже
+    # исправленную к тому моменту) находку 3-дневной давности в
+    # garmin_ingest_log. Глушим все пять — "всё чисто" должно быть
+    # воспроизводимо в любой день, не зависеть от текущего состояния прода
+    # (surfaces_a_problem ниже, наоборот, намеренно не глушит — ему всё
+    # равно, что ещё найдётся, кроме одной конкретной проверяемой находки).
+    for name in ("_check_gaps", "_check_pg_status", "_check_numeric_garbage",
+                 "_check_anomaly_freshness", "_check_garmin_ingest_failures"):
+        monkeypatch.setattr(system_check, name, lambda *a, **k: None)
 
     msg = system_check.build_message()
     assert msg["has_problems"] is False
