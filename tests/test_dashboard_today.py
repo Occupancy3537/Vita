@@ -192,6 +192,19 @@ def test_dashboard_today_wrong_token_forbidden():
     assert r.status_code == 403
 
 
+def test_dashboard_today_movement_and_swim_streaks_are_well_formed():
+    """2026-09-23 (ходьба каждые 40 мин / плавание на неделе, разбор L5/S1):
+    реальные данные — просто проверяем форму, если находка есть (не гоняемся
+    за конкретным числом, которое меняется каждый день)."""
+    from app.db import get_conn
+    with get_conn() as conn, conn.cursor() as cur:
+        result = get_today_dashboard(cur)
+    for s in result["streaks"]:
+        if s["label"] in ("Вставал каждые 40 мин", "Плавание на неделе"):
+            assert isinstance(s["count"], int) and s["count"] > 0
+            assert s["unit"] in ("дней", "раз")
+
+
 def test_dashboard_today_gate_blocked_on_real_data():
     """Инвариант проекта: активная грыжа L5/S1 в health.patient_state — гейт
     ОБЯЗАН быть blocked (тот же инвариант, что system_check._check_load_gate)."""

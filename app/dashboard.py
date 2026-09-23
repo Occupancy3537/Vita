@@ -28,6 +28,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from app import timeutil
+from app.biohacking_ingest import MOVEMENT_GAP_OK_THRESHOLD_MIN
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
 
 # --- «Здоровье»-экран: порт n8n Code-ноды "Build Health JSON" (2026-09-16) ---
@@ -997,6 +998,31 @@ def get_today_dashboard(cur) -> dict:
         alcohol_streak_days += 1
     if alcohol_streak_days > 0:
         streaks.append({"label": "Без алкоголя", "count": alcohol_streak_days, "unit": "дней"})
+
+    # 2026-09-23 (по запросу Влада, разбор грыжи L5/S1 по нескольким
+    # специальностям — "основной инструмент — ходьба каждые 30 мин"):
+    # health.daily_trends."Провал_без_движения_мин" — самый длинный провал
+    # без движения за день (app/biohacking_ingest.py::longest_sedentary_gap_minutes,
+    # источник — Garmin "move bar", раньше нигде не собирался). Порог тот же,
+    # что при записи (MOVEMENT_GAP_OK_THRESHOLD_MIN=40) — единое число, не
+    # дублируем магическую константу.
+    movement_streak_days = 0
+    for r in reversed(rows[:-1]):
+        gap = _num(r.get("Провал_без_движения_мин"))
+        if gap is None or gap > MOVEMENT_GAP_OK_THRESHOLD_MIN:
+            break
+        movement_streak_days += 1
+    if movement_streak_days > 0:
+        streaks.append({"label": "Вставал каждые 40 мин", "count": movement_streak_days, "unit": "дней"})
+
+    # Плавание за последние 7 дней — не "подряд", а "сколько раз за неделю"
+    # (тот же список streaks: одна и та же дот-полоска на фронте, "N подряд"
+    # читается чуть криво для недельного счётчика, но переиспользует готовый
+    # виджет вместо нового — обсудить с Владом, если захочет отдельную
+    # галочку вместо этого).
+    swim_week_count = sum(1 for r in rows[-7:] if r.get("Плавание_было") == "Да")
+    if swim_week_count > 0:
+        streaks.append({"label": "Плавание на неделе", "count": swim_week_count, "unit": "раз"})
 
     # =====================================================================
     # 3. БЮДЖЕТ ДНЯ

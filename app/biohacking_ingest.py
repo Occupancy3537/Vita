@@ -81,8 +81,56 @@ KNOWN_COLS = [
     "Темп_тренировки_max_C", "Training_Status", "Training_Acute_Load", "Training_Chronic_Load",
     "Точка_росы_avg_C", "Атм_давление_Дельта_12ч", "Атм_давление_Дельта_24ч",
     "Освещенность_ч_сутки", "Индекс_когнитивной_нагрузки", "ACWR_Garmin", "ACWR_Status",
-    "Garmin_устройство",
+    "Garmin_устройство", "Провал_без_движения_мин", "Плавание_было",
 ]
+
+# 2026-09-23 (по запросу Влада): порог "день прошёл правильно" по движению —
+# калиброван на 117 днях реальной истории (94/117 при 40 мин; последние 14
+# дней — 71%, значит достижимо, не генератор тревоги на пустом месте). Не
+# хранится отдельным bool-столбцом ("День_движения_ок") — храним только сырое
+# число (минуты самого длинного провала), порог живёт здесь и на дашборде,
+# чтобы менять его в одном месте, не гоняясь за уже записанными строками.
+MOVEMENT_GAP_OK_THRESHOLD_MIN = 40
+MOVEMENT_DAY_START_HOUR = 7   # 2026-09-23: фиксированное окно "обычно не сплю" —
+MOVEMENT_DAY_END_HOUR = 23    # сознательное упрощение v1, не берём вчерашний
+                              # подъём/сегодняшний отбой (см. докстринг ниже)
+
+
+def longest_sedentary_gap_minutes(
+    movement_minutes: Optional[list], threshold: float = 0.3,
+    day_start_hour: int = MOVEMENT_DAY_START_HOUR, day_end_hour: int = MOVEMENT_DAY_END_HOUR,
+) -> Optional[float]:
+    """Самый длинный НЕПРЕРЫВНЫЙ провал без движения (минуты) за день, только
+    внутри окна [day_start_hour, day_end_hour) по местному времени.
+
+    2026-09-23, ОСОЗНАННОЕ упрощение v1: правильнее было бы брать окно
+    бодрствования по факту (от вчерашнего подъёма до сегодняшнего отбоя), но
+    вчерашний подъём — это запись ПРЕДЫДУЩЕГО дня, сюда не долетает без
+    отдельного запроса к health.daily_trends. Фиксированное окно 07:00-23:00
+    откалибровано на 117 днях реальной истории Влада (см. AGENT_SYNC) и даёт
+    разумный результат — не идеально, но лучше, чем считать провалы во сне
+    как "не двигался"."""
+    if not movement_minutes:
+        return None
+    pts = sorted((m for m in movement_minutes if day_start_hour * 60 <= m[0] < day_end_hour * 60),
+                 key=lambda m: m[0])
+    if not pts:
+        return None
+    max_gap = 0.0
+    gap_start = None
+    prev_minute = pts[0][0]
+    for minute, val in pts:
+        if val <= threshold:
+            if gap_start is None:
+                gap_start = minute
+        else:
+            if gap_start is not None:
+                max_gap = max(max_gap, minute - gap_start)
+                gap_start = None
+        prev_minute = minute
+    if gap_start is not None:
+        max_gap = max(max_gap, prev_minute - gap_start)
+    return round(max_gap)
 
 # app.nutrition_reports.py / app.food_diary.py уже используют _js_round для того
 # же самого JS Math.round-vs-Python-round расхождения (round-half-up vs banker's
@@ -137,6 +185,12 @@ class BiohackingPayload(BaseModel):
     garmin_device: Optional[str] = None
     deep1_min: Optional[float] = None
     deep2_min: Optional[float] = None
+    swam_yesterday: Optional[bool] = None
+    # 2026-09-23 (по запросу Влада): [минута_от_полуночи_ВЛ, интенсивность_движения]
+    # на каждую минуту вчерашнего дня — "move bar" самого Garmin, посекундный сигнал
+    # "было ли движение", раньше нигде не собирался (см. app/doctor докстрин про
+    # разбор грыжи L5/S1 — «основной инструмент — ходьба каждые 30 мин»).
+    movement_minutes: Optional[list[list[float]]] = None
 
 
 def _js_str(v) -> str:
@@ -460,6 +514,8 @@ def build_daily_trends_row(
         "ACWR_Garmin": garmin.get("acwr_garmin"),
         "ACWR_Status": garmin.get("acwr_status"),
         "Garmin_устройство": garmin.get("garmin_device"),
+        "Провал_без_движения_мин": longest_sedentary_gap_minutes(garmin.get("movement_minutes")),
+        "Плавание_было": "Да" if garmin.get("swam_yesterday") else "Нет",
     }
 
     if not row["Дата"]:

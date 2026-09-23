@@ -142,6 +142,48 @@ def _base_garmin(**overrides) -> dict:
     return g
 
 
+# --- longest_sedentary_gap_minutes / "Провал_без_движения_мин" / "Плавание_было" ---
+# 2026-09-23, по запросу Влада: "основной инструмент — ходьба каждые 30 мин",
+# после разбора грыжи L5/S1 по нескольким специальностям.
+
+def test_longest_sedentary_gap_finds_the_worst_gap():
+    # окно 07:00-23:00 = минуты 420-1380. Провал 480->600 (120 мин) — худший,
+    # провал 700->750 (50 мин) — короче, не он.
+    pts = [[420, 1], [480, 0], [540, 0], [600, 1], [700, 0.2], [750, 1]]
+    assert bi.longest_sedentary_gap_minutes(pts) == 120
+
+
+def test_longest_sedentary_gap_ignores_movement_outside_the_day_window():
+    # провал в 3 часа ночи (минута 180) — вне окна 07:00-23:00, не считается
+    pts = [[180, 0], [181, 0], [420, 1], [421, 1]]
+    assert bi.longest_sedentary_gap_minutes(pts) == 0
+
+
+def test_longest_sedentary_gap_open_ended_gap_counts_to_last_point():
+    pts = [[420, 1], [500, 0], [560, 0]]  # провал с минуты 500 до конца данных (560)
+    assert bi.longest_sedentary_gap_minutes(pts) == 60
+
+
+def test_longest_sedentary_gap_none_when_no_data():
+    assert bi.longest_sedentary_gap_minutes(None) is None
+    assert bi.longest_sedentary_gap_minutes([]) is None
+
+
+def test_build_row_includes_movement_gap_and_swim_flag():
+    row = bi.build_daily_trends_row(
+        _base_garmin(swam_yesterday=True, movement_minutes=[[420, 1], [480, 0], [560, 0], [600, 1]]),
+        [], [], [], [], {}, {},
+    )
+    assert row["Провал_без_движения_мин"] == 120
+    assert row["Плавание_было"] == "Да"
+
+
+def test_build_row_no_swim_and_no_movement_data():
+    row = bi.build_daily_trends_row(_base_garmin(), [], [], [], [], {}, {})
+    assert row["Плавание_было"] == "Нет"
+    assert "Провал_без_движения_мин" not in row  # None -> отфильтрован, как остальные пустые поля
+
+
 def test_build_row_raises_on_empty_date():
     with pytest.raises(ValueError):
         bi.build_daily_trends_row(_base_garmin(date=""), [], [], [], [], {}, {})
