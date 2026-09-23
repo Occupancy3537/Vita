@@ -48,6 +48,7 @@ import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import BaseModel
@@ -639,15 +640,26 @@ def fetch_weather() -> dict:
 
 
 def compute_pressure_deltas(weather: dict) -> dict:
-    """Порт "Перепады давления"."""
+    """Порт "Перепады давления".
+
+    L6 (аудит логики, 2026-09-23, найдено по пути): fetch_weather() запрашивает
+    Open-Meteo с `timezone=home_tz_name()` — hourly.time приходит НАИВНЫМИ
+    строками в ДОМАШНЕМ местном времени (Владивосток), без суффикса зоны (тот
+    же формат, что и avg_night_pressure ниже по файлу уже парсит правильно,
+    через "+10:00"). Эта функция трактовала те же строки как UTC (+00:00) —
+    якорь "текущего часа" уезжал примерно на 10 часов, idx почти никогда не
+    совпадал с реальным "сейчас", код тихо падал в fallback "середина массива"
+    (idx = len(times)//2) — Атм_давление_Дельта_12ч/24ч считались от
+    произвольного часа, не от реального "сейчас"."""
     hourly = weather.get("hourly") or {}
     pressure, times = hourly.get("surface_pressure") or [], hourly.get("time") or []
     if not pressure or not times:
         return {}
-    now = datetime.now(timezone.utc)
+    home_tz = ZoneInfo(timeutil.home_tz_name())
+    now = datetime.now(timezone.utc).astimezone(home_tz)
     idx = next((i for i, t in enumerate(times)
-                if datetime.fromisoformat(str(t) + "+00:00").replace(tzinfo=timezone.utc).hour == now.hour
-                and datetime.fromisoformat(str(t) + "+00:00").date() == now.date()), -1)
+                if datetime.fromisoformat(str(t)).replace(tzinfo=home_tz).hour == now.hour
+                and datetime.fromisoformat(str(t)).date() == now.date()), -1)
     if idx == -1:
         idx = len(times) // 2
     if idx < 24:

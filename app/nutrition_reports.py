@@ -99,10 +99,21 @@ def _format_meals(items: list[str]) -> str:
 # Дневной отчёт (порт n8n "Reports" / Daily Report)
 # =====================================================================
 
-def build_daily_report(cur) -> Optional[dict]:
-    now_vl = timeutil.now_local()
-    start_vl = now_vl.replace(hour=0, minute=0, second=0, microsecond=0)
-    meals = _fetch_meals(cur, start_vl, now_vl)
+def build_daily_report(cur, for_date=None) -> Optional[dict]:
+    """for_date=None (по умолчанию) — текущий, ЧАСТИЧНЫЙ день [00:00, сейчас) —
+    для вечернего Telegram-отчёта в 21:45, как раньше. for_date=<дата> —
+    ПОЛНЫЙ календарный день [00:00, следующий день 00:00) — использует
+    finalize_yesterday() ниже (L6, аудит логики, 2026-09-23)."""
+    if for_date is not None:
+        start_vl = datetime.combine(for_date, datetime.min.time(), tzinfo=timeutil.person_tz())
+        until_vl = start_vl + timedelta(days=1)
+        target_date_str = for_date.isoformat()
+    else:
+        now_vl = timeutil.now_local()
+        start_vl = now_vl.replace(hour=0, minute=0, second=0, microsecond=0)
+        until_vl = now_vl
+        target_date_str = now_vl.strftime("%Y-%m-%d")
+    meals = _fetch_meals(cur, start_vl, until_vl)
     if not meals:
         return None
 
@@ -132,15 +143,15 @@ def build_daily_report(cur) -> Optional[dict]:
     days = len(dates_seen) or 1
     result = {f: round(sums[f] / days) for f in FIELDS}
     result["daysTracked"] = days
-    result["Target_Date"] = now_vl.strftime("%Y-%m-%d")
+    result["Target_Date"] = target_date_str
     result["User_ID"] = TARGET_USER
     result["Breakfast_Meals"] = _format_meals(meal_lists["breakfast"])
     result["Lunch_Meals"] = _format_meals(meal_lists["lunch"])
     result["Snack_Meals"] = _format_meals(meal_lists["snack"])
     result["Dinner_Meals"] = _format_meals(meal_lists["dinner"])
     result["Ultra_Processed_Today"] = _format_meals(meal_lists["ultra"])
-    result["season"] = SEASONS[now_vl.month - 1]
-    result["month"] = now_vl.month
+    result["season"] = SEASONS[start_vl.month - 1]
+    result["month"] = start_vl.month
     return result
 
 
@@ -227,6 +238,34 @@ def run_daily() -> None:
     if text:
         telegram.send_message(CHAT_ID, text)
 
+    with get_conn() as conn, conn.cursor() as cur:
+        _write_day_sum(cur, d)
+        conn.commit()
+    _sync_nutrition_to_card(d)
+
+
+def finalize_yesterday() -> None:
+    """L6 (аудит логики, 2026-09-23, ВАЖНО): дневной отчёт выше пишет day_sum/
+    card.fact по окну [00:00, 21:45) — блюдо, записанное ПОСЛЕ 21:45 (поздний
+    ужин), не попадало никуда: не в сегодняшний прогон (уже прошёл к моменту
+    записи), не в завтрашний (у него своё окно [00:00, 21:45) уже СЛЕДУЮЩЕГО
+    дня) — тихая потеря данных навсегда, не разовая, каждый день.
+
+    Досчитывает ВЧЕРАШНИЙ день целиком (00:00-24:00) и перезаписывает
+    day_sum/card.fact тем же идемпотентным UPSERT (ON CONFLICT("Date")), что
+    и обычный прогон. Вечерний Telegram-текст (LLM-комментарий за 21:45) НЕ
+    переотправляется и не переписывается — это вечерний check-in про частичный
+    день, ему положено быть по частичным данным; здесь исправляются только
+    ХРАНИМЫЕ данные (day_sum/card.fact — источник для weekly-отчёта и истории),
+    которые обязаны отражать день целиком.
+
+    Вызывается из run_daily_scheduler() ПЕРЕД run_daily() каждого следующего
+    дня — к этому моменту "вчера" уже полностью закончилось."""
+    yesterday = timeutil.today() - timedelta(days=1)
+    with get_conn() as conn, conn.cursor() as cur:
+        d = build_daily_report(cur, for_date=yesterday)
+    if d is None:
+        return  # вчера не было записей — нечего досчитывать
     with get_conn() as conn, conn.cursor() as cur:
         _write_day_sum(cur, d)
         conn.commit()
@@ -336,6 +375,14 @@ def run_daily_scheduler() -> None:
     while True:
         try:
             _sleep_until(DAILY_HOUR_VL, DAILY_MINUTE_VL)
+            # L6: досчитать ВЧЕРАШНИЙ день целиком (см. finalize_yesterday) ДО
+            # сегодняшнего частичного отчёта — порядок не важен для сегодняшних
+            # данных (разные даты), но так оба шага логически в одном месте.
+            # Своя защита от сбоя: не должна блокировать сегодняшний отчёт.
+            try:
+                finalize_yesterday()
+            except Exception:
+                logger.exception("nutrition_reports: finalize_yesterday упал — сегодняшний отчёт всё равно идёт")
             run_daily()
             run_log.mark_run("nutrition_reports_daily")
         except Exception as e:

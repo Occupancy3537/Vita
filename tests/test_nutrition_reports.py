@@ -51,6 +51,66 @@ def test_build_daily_report_non_ultra_meal_not_in_ultra_list(monkeypatch):
     assert d["Ultra_Processed_Today"] == "Нет данных"
 
 
+def test_build_daily_report_for_date_covers_full_calendar_day(monkeypatch):
+    """L6 (аудит логики, 2026-09-23): for_date=<дата> — окно ПОЛНОГО дня
+    [00:00, следующий день 00:00), не [00:00, сейчас) — иначе поздний ужин
+    (после 21:45, когда обычный прогон уже прошёл) не попал бы и сюда."""
+    target = (datetime.now(timeutil.person_tz()) - timedelta(days=1)).date()
+    captured = {}
+
+    def fake_fetch(cur, since, until):
+        captured["since"], captured["until"] = since, until
+        late_dinner = datetime.combine(target, datetime.min.time(), tzinfo=timeutil.person_tz()).replace(hour=22, minute=30)
+        return [{"Date": late_dinner, "Meal_description": "поздний ужин", "NOVA": "1",
+                 "Calories": "600", **{f: "" for f in nr.FIELDS if f != "Calories"}}]
+
+    monkeypatch.setattr(nr, "_fetch_meals", fake_fetch)
+    d = nr.build_daily_report(None, for_date=target)
+
+    assert d is not None
+    assert d["Calories"] == 600
+    assert d["Target_Date"] == target.isoformat()
+    assert "поздний ужин" in d["Dinner_Meals"]
+    assert captured["since"].date() == target
+    assert captured["until"].date() == target + timedelta(days=1)
+    assert captured["until"].hour == 0  # полночь СЛЕДУЮЩЕГО дня, не "сейчас"
+
+
+def test_finalize_yesterday_writes_day_sum_for_full_day(monkeypatch):
+    """L6: поздний ужин (после 21:45, когда обычный run_daily() уже прошёл)
+    раньше не попадал НИКУДА — ни в сегодняшний прогон (окно уже закрыто), ни
+    в завтрашний (у него своё окно с полуночи). finalize_yesterday досчитывает
+    вчерашний день целиком и перезаписывает day_sum idempotent UPSERT'ом.
+
+    _write_day_sum замокан НАМЕРЕННО: yesterday — настоящая календарная дата,
+    под ней в health.day_sum почти наверняка уже лежит настоящая строка
+    Влада за вчера — писать/удалять по этому ключу в тесте нельзя (тихая
+    потеря/порча боевых данных, CLAUDE.md)."""
+    yesterday = timeutil.today() - timedelta(days=1)
+    late_dinner = datetime.combine(yesterday, datetime.min.time(), tzinfo=timeutil.person_tz()).replace(hour=22, minute=30)
+    monkeypatch.setattr(nr, "_fetch_meals", lambda cur, since, until: [
+        {"Date": late_dinner, "Meal_description": "поздний ужин", "NOVA": "1",
+         "Calories": "600", **{f: "" for f in nr.FIELDS if f != "Calories"}},
+    ])
+    written = []
+    monkeypatch.setattr(nr, "_write_day_sum", lambda cur, d: written.append(d))
+    synced = []
+    monkeypatch.setattr(nr, "_sync_nutrition_to_card", lambda d: synced.append(d))
+
+    nr.finalize_yesterday()
+
+    assert written and written[0]["Calories"] == 600 and written[0]["Target_Date"] == yesterday.isoformat()
+    assert synced and synced[0]["Target_Date"] == yesterday.isoformat()
+
+
+def test_finalize_yesterday_no_meals_is_no_op(monkeypatch):
+    monkeypatch.setattr(nr, "_fetch_meals", lambda cur, since, until: [])
+    synced = []
+    monkeypatch.setattr(nr, "_sync_nutrition_to_card", lambda d: synced.append(d))
+    nr.finalize_yesterday()  # не бросает, ничего не пишет
+    assert synced == []
+
+
 # --- build_weekly_report --------------------------------------------------
 
 def test_build_weekly_report_none_when_no_meals(monkeypatch):

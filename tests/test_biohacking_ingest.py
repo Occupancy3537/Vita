@@ -3,10 +3,13 @@
 build_upsert_sql (null-clobber защита) + process_ingest оркестрация
 (все внешние вызовы замокан)."""
 import math
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from app import biohacking_ingest as bi
+from app import timeutil
 from app.db import get_conn
 
 
@@ -292,6 +295,29 @@ def test_build_row_no_workout_defaults_to_net(monkeypatch=None):
 
 
 # --- compute_pressure_deltas -------------------------------------------------
+
+def test_compute_pressure_deltas_uses_home_tz_not_utc():
+    """L6 (аудит логики, 2026-09-23): fetch_weather() запрашивает Open-Meteo с
+    timezone=home_tz_name() — hourly.time приходит наивными строками в ДОМАШНЕМ
+    местном времени, без суффикса зоны. Раньше эта функция трактовала их как
+    UTC — якорь "сейчас" уезжал на ~10ч (смещение Владивостока), idx почти
+    никогда не совпадал с реальным часом и падал в fallback (середина массива).
+    Здесь строим синтетический ряд с ПРЕДСКАЗУЕМЫМ градиентом давления и
+    проверяем, что найденный индекс — правда "сейчас" по домашней зоне."""
+    home_tz = ZoneInfo(timeutil.home_tz_name())
+    now_home = datetime.now(timezone.utc).astimezone(home_tz).replace(minute=0, second=0, microsecond=0)
+    start = now_home - timedelta(hours=30)
+    times = [(start + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M") for i in range(48)]
+    pressure = [1000.0 + i for i in range(48)]  # растёт на 1 гПа/час — дельты предсказуемы
+    weather = {"hourly": {"time": times, "surface_pressure": pressure}}
+
+    result = bi.compute_pressure_deltas(weather)
+
+    now_idx = 30  # start = now_home - 30ч -> "сейчас" это индекс 30
+    assert result["current_pressure"] == pressure[now_idx]
+    assert result["pressure_delta_24h"] == pytest.approx(pressure[now_idx] - pressure[now_idx - 24])
+    assert result["pressure_delta_12h"] == pytest.approx(pressure[now_idx] - pressure[now_idx - 12])
+
 
 def test_compute_pressure_deltas_empty_weather_returns_empty():
     assert bi.compute_pressure_deltas({}) == {}
