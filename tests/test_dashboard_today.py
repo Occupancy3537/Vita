@@ -10,6 +10,7 @@ from app.dashboard import (
     _ALCOHOL_TRACE_THRESHOLD_G,
     _action_id,
     _alcohol_effective_g,
+    _garmin_data_confirmed_stale,
     _hhmm,
     _load_gate,
     _parse_actions,
@@ -20,6 +21,28 @@ from app.dashboard import (
 from app.main import app
 
 client = TestClient(app)
+
+
+# --- _garmin_data_confirmed_stale: живая жалоба 2026-09-24 (забыл часы) ----
+
+def test_garmin_stale_no_gap_same_date_never_stale():
+    """last_date == today_iso — нечего подтверждать, свежие данные есть."""
+    assert _garmin_data_confirmed_stale("2026-09-24", "2026-09-24", 9) is False
+    assert _garmin_data_confirmed_stale("2026-09-24", "2026-09-24", 20) is False
+
+
+def test_garmin_stale_gap_before_window_close_not_yet_confirmed():
+    """Разрыв дат утром/днём — окно попыток garminbot (07:00-16:00 ВЛ) ещё
+    не закрылось, "ещё не пришло" — не то же самое, что "не придёт"."""
+    assert _garmin_data_confirmed_stale("2026-09-23", "2026-09-24", 9) is False
+    assert _garmin_data_confirmed_stale("2026-09-23", "2026-09-24", 15) is False
+
+
+def test_garmin_stale_gap_after_window_close_confirmed():
+    """После закрытия окна (>=16:00 ВЛ) разрыв дат — подтверждённый пропуск
+    (живой случай: часы забыли надеть на ночь)."""
+    assert _garmin_data_confirmed_stale("2026-09-23", "2026-09-24", 16) is True
+    assert _garmin_data_confirmed_stale("2026-09-23", "2026-09-24", 22) is True
 
 
 # --- _load_gate: инвариант безопасности (грыжа L5/S1), A6 fail-safe --------

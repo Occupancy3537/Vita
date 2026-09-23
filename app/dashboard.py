@@ -121,6 +121,23 @@ def _dkey(d) -> str:
     return str(d or "")[:10]
 
 
+# Окно ночного сбора garminbot (check_and_run.sh, отдельный хост) — cron
+# "23,0-8" по берлинскому времени = 07:00-16:00 ВЛ. До закрытия окна
+# отсутствие сегодняшней строки в health.daily_trends — НОРМАЛЬНОЕ "ещё не
+# пришло", не повод пугать (2026-09-24, живая жалоба Влада на забытые на
+# ночь часы — фикс должен ловить ПОДТВЕРЖДЁННЫЙ пропуск, не каждое обычное
+# утро, пока garminbot ещё пытается синхронизироваться).
+GARMIN_SYNC_WINDOW_CLOSE_HOUR_VL = 16
+
+
+def _garmin_data_confirmed_stale(last_date: str, today_iso: str, now_hour_vl: int) -> bool:
+    """last_date — дата самой свежей строки health.daily_trends, today_iso —
+    сегодня по местному времени человека, now_hour_vl — текущий час (0-23)
+    по тому же поясу. True — только если разрыв дат подтверждён закрытием
+    окна попыток синхронизации, не просто "ещё рано с утра"."""
+    return last_date != today_iso and now_hour_vl >= GARMIN_SYNC_WINDOW_CLOSE_HOUR_VL
+
+
 def _judge(direction, delta_abs, min_abs_delta):
     if direction == "neutral":
         return "neutral"
@@ -881,7 +898,20 @@ def get_today_dashboard(cur) -> dict:
     if bb is not None:
         hrv_bad = hrv_delta is not None and hrv_delta <= -6
         readiness = 4 if (bb >= 70 and not hrv_bad and not load_high) else (3 if (bb >= 40 and not load_high) else 1)
-    no_garmin_today = bb is None and hrv is None and _num(last.get("Чистый_сон_мин")) is None
+    # 2026-09-24 (баг, найден по живой жалобе Влада — забыл часы на ночь,
+    # Гармин вообще не прислал строку за сегодня): раньше no_garmin_today
+    # смотрел ТОЛЬКО на то, пустые ли поля в last — а last, когда строки за
+    # сегодня попросту НЕТ, это последняя ИМЕВШАЯСЯ строка (позавчерашняя,
+    # с настоящими, непустыми значениями) — проверка не срабатывала, и
+    # дашборд показывал день-двухдневной давности как "сегодня", без единой
+    # пометки о свежести ("data_date" в ответе уже отдавал эту дату отдельно
+    # от "date", просто раньше это никак не влияло на verdict/note). См.
+    # _garmin_data_confirmed_stale() выше про то, почему разрыв дат сам по
+    # себе не повод пугать (окно попыток синхронизации).
+    no_garmin_today = (
+        _garmin_data_confirmed_stale(last_date, today_iso, now_vl.hour)
+        or (bb is None and hrv is None and _num(last.get("Чистый_сон_мин")) is None)
+    )
 
     if no_garmin_today:
         final_cap = min(gate["cap"] if gate["blocked"] else 2, 2)
