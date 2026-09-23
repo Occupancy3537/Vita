@@ -99,6 +99,7 @@ import app.card_processor as card_processor
 import app.phenoage_calc as phenoage_calc
 import app.yandex_climate as yandex_climate
 import app.host_metrics as host_metrics
+import app.medpassport as medpassport
 import app.people as people
 import app.system_status as system_status
 import app.err_dedup as err_dedup
@@ -300,6 +301,18 @@ def dashboard_weekly_nutrition(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return get_weekly_nutrition(cur)
+
+
+@app.get("/dashboard/medpassport")
+def dashboard_medpassport(token: str = Query(default="")) -> dict:
+    """Медпаспорт на вынос (стратегический разбор 2026-09-23) — одностраничная
+    выжимка для показа живому врачу: аллергии, хронические ограничения,
+    активные лекарства, последние лабы с динамикой. Ни одного нового
+    источника данных — см. app/medpassport.py."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return medpassport.build_medpassport(cur)
 
 
 @app.get("/dashboard/system-status")
