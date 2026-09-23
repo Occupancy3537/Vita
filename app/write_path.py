@@ -8,6 +8,7 @@ Phase 2: дедуп эпизодов по таблице решений §3.3, �
 """
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -42,13 +43,42 @@ def prov(origin: str, extra: Optional[dict] = None) -> str:
     return json.dumps(base)
 
 
+# Живой инцидент 2026-09-23: Влад процитировал СВОЮ ЖЕ старую рекомендацию
+# доктора («Добавь омега-3 ... но не минтай — аллергия») с вопросом про
+# питание/резорбцию — «минтай» голым substring-совпадением дал bracelet_hits
+# -> мгновенный L3 «анафилаксия» и emergency-заглушку вместо ответа на
+# нормальный вопрос. Причина: в отличие от слоя A (redflag.py), паттерны
+# которого сконструированы так, чтобы не ловить прошлое/отрицание/гипотезу
+# (см. докстринг level_for), браслетная проверка была ГОЛЫМ substring-ом без
+# единого признака контекста. Не полная модальность слоя B (это MVP,
+# см. докстринг redflag_union.py "честно об объёме") — только отрицание
+# прямо перед словом ("не/нет/без минтай..."), т.к. это и есть конкретный
+# сломавшийся случай. НЕ трогает срабатывания без отрицания — «врач предложил
+# новокаин», «съел минтай на обед» по-прежнему бьют тревогу немедленно, как
+# и задумано (F7 — лучше ложный алярм, чем пропущенная анафилаксия).
+_BRACELET_NEGATION_WORDS = {"не", "нет", "без", "никогда"}
+
+
+def _has_non_negated_mention(lowered_text: str, word: str) -> bool:
+    for m in re.finditer(re.escape(word), lowered_text):
+        preceding = lowered_text[:m.start()].rstrip(" \t\n-—,.()«»\"'")
+        prev_words = preceding.split()
+        if not prev_words or prev_words[-1] not in _BRACELET_NEGATION_WORDS:
+            return True
+    return False
+
+
 def check_bracelet_intersection(text: str) -> list[str]:
     """F7-подобная проверка (П5, упрощённо для Phase 2): есть ли в тексте упоминание
-    сущности из браслета. Возвращает список задетых bracelet-ключей."""
+    сущности из браслета. Возвращает список задетых bracelet-ключей. Отрицание
+    прямо перед словом ("не минтай") подавляет срабатывание — см. комментарий
+    выше про живой инцидент 2026-09-23; отрицание ДАЛЬШЕ одного слова
+    ("нет аллергии на новокаин") сознательно не ловится — не путать с полной
+    модальностью слоя B."""
     lowered = text.lower()
     hits = []
     for key, words in BRACELET_KEYWORDS.items():
-        if any(w in lowered for w in words):
+        if any(_has_non_negated_mention(lowered, w) for w in words):
             hits.append(key)
     return hits
 

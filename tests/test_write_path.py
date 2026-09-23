@@ -25,6 +25,22 @@ def test_bracelet_intersection_detects_known_allergen():
     assert check_bracelet_intersection("обычный день, всё хорошо") == []
 
 
+def test_bracelet_intersection_negation_does_not_trigger():
+    """Живой инцидент 2026-09-23: Влад процитировал старую рекомендацию доктора
+    («Добавь омега-3 ... но не минтай — аллергия») с вопросом про питание —
+    голое substring-совпадение слова «минтай» дало bracelet_hits и мгновенный
+    L3-эмердженси вместо ответа на нормальный вопрос."""
+    text = ('ты рекомендовал - "6. Питание против воспаления\n'
+            'У тебя в карте активная рекомендация «насыщенные жиры ≤28 г/день» — '
+            'продолжай. Добавь омега-3 (жирная рыба 2-3 р/нед, но не минтай — '
+            'аллергия)." - я поискал, резорбция мне нужна, это и есть уменьшение '
+            'грыжи, основа резорбции - это воспаление. Насколько правильный совет '
+            'ты даешь?')
+    assert check_bracelet_intersection(text) == []
+    assert check_bracelet_intersection("нет, новокаин мне не давали") == []
+    assert check_bracelet_intersection("без новокаина в этот раз") == []
+
+
 def test_process_creates_new_episode():
     src_id = _ingest("болит голова с утра")
     with patch("app.write_path.extract", return_value=_mock_extract([
