@@ -320,6 +320,44 @@ def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch, _preserve_ano
             conn.commit()
 
 
+# --- _append_digest_row: постепенный отказ от Sheets (2026-09-23, категория A) —
+# health.digest_log вместо append_row в Google Sheets ---------------------------
+
+def test_append_digest_row_writes_to_postgres_and_upserts():
+    d = {
+        "period_start": "1999-12-25", "period_end": "1999-12-31",
+        "days_with_data": 7, "total_anomalies": 3, "strong_anomalies": 1,
+        "metric_summary_lines": ["Сон: аномалия 2× за неделю (1999-12-26, 1999-12-27)"],
+        "days_detail": [{"date": "1999-12-26", "anomaly_count": 1, "anomalies": []}],
+    }
+    try:
+        ad._append_digest_row(d)
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT period_end, days_with_data, total_anomalies, strong_anomalies, metric_summary, days_detail "
+                "FROM health.digest_log WHERE period_start = %s", (d["period_start"],),
+            )
+            row = cur.fetchone()
+        assert row[0].isoformat() == d["period_end"]
+        assert row[1:4] == (7, 3, 1)
+        assert "Сон" in row[4]
+        assert row[5][0]["date"] == "1999-12-26"
+
+        # Повторный прогон той же недели — UPSERT, не дубль-строка (period_start — PK).
+        d["total_anomalies"] = 5
+        ad._append_digest_row(d)
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT count(*), max(total_anomalies) FROM health.digest_log WHERE period_start = %s",
+                        (d["period_start"],))
+            count, total = cur.fetchone()
+        assert count == 1
+        assert total == 5
+    finally:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM health.digest_log WHERE period_start = %s", (d["period_start"],))
+            conn.commit()
+
+
 def test_run_weekly_digest_no_data_sends_nothing(monkeypatch):
     monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: ([], METRICS))
     sent = []

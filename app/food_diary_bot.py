@@ -8,7 +8,7 @@
 Вся чистая логика (классификация сообщений, промпты, парсинг JSON, SQL для
 health.meals, статистика) — в app/food_diary.py, полностью протестирована
 там. Этот модуль — только проводка: приём апдейтов, вызовы Telegram/
-OpenRouter/Sheets API, персистентный offset (card.telegram_poll_state,
+OpenRouter API, персистентный offset (card.telegram_poll_state,
 id='food_diary' — отдельная строка от доктора, id='singleton').
 
 ФИКС (2026-09-21, по решению Влада «чини»): оригинал никогда не вставлял тег
@@ -20,9 +20,7 @@ id='food_diary' — отдельная строка от доктора, id='sin
 
 РЕШЕНО остаться как в оригинале (по прямому ответу Влада): порядок
 приоритета classify_message() (reply > command > фото+текст > текст > фото)
-вместо независимых условий n8n Switch — оставлено как реализовано; дубль-
-запись в health.meals в Google Sheets (Nutrition!Meals) — оставлена
-навсегда, не только на переходный период.
+вместо независимых условий n8n Switch — оставлено как реализовано.
 
 2026-09-22 (по запросу Влада): call_text_llm/call_photo_llm теперь оба
 используют fd.MODEL (единая google/gemini-3.1-flash-lite — GLM 5.3 Flash
@@ -30,8 +28,14 @@ id='food_diary' — отдельная строка от доктора, id='sin
 fd.parse_json_from_ai(raw), сразу дозаполняют NOVA/veg_g/.../plants через
 fd.normalize_food_group_tags() — это то, что раньше делал ОТДЕЛЬНЫЙ,
 запускавшийся до 15 минут спустя app/diet_tagger.py (удалён при слиянии,
-см. докстринг app/food_diary.py). Побочный эффект: _sync_to_sheet() теперь
-дублирует и эти поля в Sheets — раньше туда попадали только нутриенты."""
+см. докстринг app/food_diary.py).
+
+2026-09-23 (постепенный отказ от Sheets, категория A, по запросу Влада:
+"с нокодб я могу смотреть данные прямо в постгре"): дубль-запись в
+health.meals в Google Sheets (Nutrition!Meals) — СНЯТА. Была явно решена
+"оставить навсегда" 2026-09-21 (см. историю выше) — решение пересмотрено
+тем же человеком с появлением NocoDB, health.meals и так был единственным
+каноном."""
 import base64
 import logging
 import os
@@ -55,10 +59,6 @@ _FILE_BASE = "https://api.telegram.org/file/bot{token}/{file_path}"
 POLL_TIMEOUT = 30
 POLL_STATE_ID = "food_diary"
 OWNER_CHAT_ID = "8956401"  # 2026-09-22 (внешний аудит, K5): единственный, чьи сообщения обрабатываем
-
-NUTRITION_SHEET_ID = "1NCiBHlbl-nx99kRe8uaqpsAdVV_i6MTw6Bl43LMbCkU"
-MEALS_SHEET_TITLE = "Meals"
-MEALS_SHEET_GID = 403788598
 
 
 def _token() -> str:
@@ -202,29 +202,11 @@ def call_photo_llm(user_prompt: str, image_bytes: bytes, timeout: float = 30.0) 
         return ""
 
 
-# =====================================================================
-# Двойная запись (Postgres канон + Sheets дубль — оставлен навсегда)
-# =====================================================================
-
-def _sync_to_sheet(entry_id: str, user_id: str, date_iso: Optional[str], parsed: dict) -> None:
-    from app.sheets_client import append_or_update_row
-    row = {**parsed, "Entry_ID": entry_id, "User_ID": user_id}
-    if date_iso:
-        row["Date"] = date_iso
-    try:
-        append_or_update_row(NUTRITION_SHEET_ID, MEALS_SHEET_TITLE, "Entry_ID", row)
-    except Exception:
-        logger.exception("food_diary_bot: не удалось продублировать запись %s в Sheets (Postgres уже записан)", entry_id)
-
-
-def _delete_from_sheet(entry_id: str) -> None:
-    from app.sheets_client import find_row_by_column, delete_row
-    try:
-        idx = find_row_by_column(NUTRITION_SHEET_ID, MEALS_SHEET_TITLE, "Entry_ID", entry_id)
-        if idx is not None:
-            delete_row(NUTRITION_SHEET_ID, MEALS_SHEET_GID, idx)
-    except Exception:
-        logger.exception("food_diary_bot: не удалось удалить запись %s из Sheets (Postgres уже удалён)", entry_id)
+# Двойная запись в Google Sheets (Nutrition!Meals) — СНЯТА 2026-09-23
+# (постепенный отказ от Sheets, категория A, по запросу Влада: "с нокодб
+# я могу смотреть данные прямо в постгре"). Было решено "оставить навсегда"
+# 2026-09-21 — решение пересмотрено тем же человеком с появлением NocoDB,
+# не изменено втихую: health.meals и так был единственным каноном.
 
 
 def _confirmation_text(parsed: dict, entry_id: str) -> str:
@@ -265,7 +247,6 @@ def handle_callback(callback_query: dict) -> None:
             with get_conn() as conn, conn.cursor() as cur:
                 fd.delete_meal(cur, row_id)
                 conn.commit()
-            _delete_from_sheet(row_id)
     elif action == "edit":
         send_message(chat_id, original_text + f"\n\n⚖️ Введите новые данные\n[ID:{row_id}]", force_reply=True)
 
@@ -313,7 +294,6 @@ def _handle_new_entry(message: dict, msg_type: str) -> None:
     with get_conn() as conn, conn.cursor() as cur:
         fd.insert_meal(cur, entry_id, user_id, date_iso, parsed)
         conn.commit()
-    _sync_to_sheet(entry_id, user_id, date_iso, parsed)
 
     send_message(message["chat"]["id"], _confirmation_text(parsed, entry_id), reply_markup=_confirmation_buttons(entry_id))
 
@@ -342,7 +322,6 @@ def _handle_edit_reply(message: dict) -> None:
     with get_conn() as conn, conn.cursor() as cur:
         fd.update_meal(cur, entry_id, user_id, parsed)
         conn.commit()
-    _sync_to_sheet(entry_id, user_id, None, parsed)
 
     send_message(message["chat"]["id"], _confirmation_text(parsed, entry_id), reply_markup=_confirmation_buttons(entry_id))
 

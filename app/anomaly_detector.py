@@ -52,11 +52,12 @@ weekly_advisor.py), Sheets-копия Anomalies_Log СНЯТА. Убирает �
 детект. Если этот Sheets-лист всё же кому-то ещё нужен глазами — восстановить
 несложно, скажи.
 
-Digest_Log (недельный дайджест) остаётся в Google Sheets, как и в
-оригинале, — его никто не читает программно (в отличие от Anomalies_Log,
-который стал единственным источником для weekly_advisor.py), заводить
-для него Postgres-таблицу ради таблицы, которую никто не читает, — не по
-бюджету сложности."""
+Digest_Log (недельный дайджест) раньше писался ТОЛЬКО в Google Sheets — на
+момент решения выше заводить Postgres-таблицу ради того, что никто
+программно не читает, было не по бюджету сложности. 2026-09-23 (постепенный
+отказ от Sheets, категория A — Влад: "с нокодб я могу смотреть данные прямо
+в постгре"): недостающая причина исчезла — теперь `health.digest_log`,
+смотреть через NocoDB так же, как раньше смотрели в лист."""
 import json
 import logging
 import math
@@ -81,7 +82,6 @@ DAILY_MINUTE_VL = 15
 WEEKLY_HOUR_VL = 11
 
 HEALTH_DB_SHEET_ID = "1M8focgZBHCbhLEQb4GoyxTYxedA-FcdjQ_XakX5SG2w"
-DIGEST_LOG_SHEET_TITLE = "Digest_Log"
 ANOMALY_ALERT_KEEP_DAYS = 3
 
 _FALLBACK_METRICS = [
@@ -408,14 +408,26 @@ def build_weekly_digest(days: list[dict]) -> Optional[dict]:
 
 
 def _append_digest_row(d: dict) -> None:
-    from app.sheets_client import append_row
+    """2026-09-23 (постепенный отказ от Sheets, категория A): было append_row
+    в Google Sheets — теперь UPSERT в health.digest_log (period_start — PK,
+    идемпотентно на случай повторного запуска той же недели)."""
     try:
-        append_row(HEALTH_DB_SHEET_ID, DIGEST_LOG_SHEET_TITLE, [
-            d["period_start"], d["period_end"], d["days_with_data"], d["total_anomalies"],
-            d["strong_anomalies"], " | ".join(d["metric_summary_lines"]), json.dumps(d["days_detail"], ensure_ascii=False),
-        ])
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO health.digest_log "
+                "(period_start, period_end, days_with_data, total_anomalies, strong_anomalies, "
+                "metric_summary, days_detail) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) "
+                "ON CONFLICT (period_start) DO UPDATE SET "
+                "period_end = EXCLUDED.period_end, days_with_data = EXCLUDED.days_with_data, "
+                "total_anomalies = EXCLUDED.total_anomalies, strong_anomalies = EXCLUDED.strong_anomalies, "
+                "metric_summary = EXCLUDED.metric_summary, days_detail = EXCLUDED.days_detail",
+                (d["period_start"], d["period_end"], d["days_with_data"], d["total_anomalies"],
+                 d["strong_anomalies"], " | ".join(d["metric_summary_lines"]),
+                 json.dumps(d["days_detail"], ensure_ascii=False)),
+            )
+            conn.commit()
     except Exception:
-        logger.exception("anomaly_detector: не удалось дописать Digest_Log (не блокирует Telegram)")
+        logger.exception("anomaly_detector: не удалось записать health.digest_log (не блокирует Telegram)")
 
 
 def run_weekly_digest() -> None:

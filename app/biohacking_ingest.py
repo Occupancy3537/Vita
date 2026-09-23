@@ -20,10 +20,12 @@ Calendar, лекарства по ключевым словам в назван�
 (экранное время) + погода (Open-Meteo, без ключа) → одна строка
 health.daily_trends (динамический UPSERT, только присутствующие поля —
 "Дата" НИКОГДА не входит в исключаемые, остальное как решил "Code in
-JavaScript") + дубль в Google Sheets (тот же лист Daily_Trends, тем же
-"appendOrUpdate" по колонке "Дата" — см. app/sheets_client.py) + синхрон
-части метрик в card-service facts (теперь ПРЯМОЙ вызов в процессе, а не
-HTTP POST на самого себя, каким он был у n8n) + вызов anomaly_detector.
+JavaScript") + синхрон части метрик в card-service facts (теперь ПРЯМОЙ
+вызов в процессе, а не HTTP POST на самого себя, каким он был у n8n) +
+вызов anomaly_detector. Дубль в Google Sheets (sync_to_sheets) — СНЯТ
+2026-09-23 (постепенный отказ от Sheets, категория A): health.daily_trends
+и так был единственным каноном, Sheets был чистым зеркалом для глаз — NocoDB
+закрывает ту же потребность прямо на Postgres.
 
 НАЙДЕНО при переносе, реальный баг, не нужно чинить отдельно — порт САМ
 его устраняет: "Write DT PG" в оригинале падал 11 и 12 сентября с
@@ -55,8 +57,6 @@ from app.db import get_conn
 
 logger = logging.getLogger(__name__)
 
-HEALTH_DB_SHEET_ID = "1M8focgZBHCbhLEQb4GoyxTYxedA-FcdjQ_XakX5SG2w"
-DAILY_TRENDS_SHEET_TITLE = "Daily_Trends"
 MICROCLIMATE_SHEET_ID = "1wejYO7GKnizGQ9QIMzPua4NxY8uGKwRIcJxBDvyfcqw"
 MICROCLIMATE_RANGE = "Лист1"
 CALENDAR_ID = "vasukvladislav@gmail.com"
@@ -670,13 +670,11 @@ def write_daily_trends(cur, row: dict) -> None:
     cur.execute(query, params)
 
 
-def sync_to_sheets(row: dict) -> None:
-    from app.sheets_client import append_or_update_row
-    try:
-        append_or_update_row(HEALTH_DB_SHEET_ID, DAILY_TRENDS_SHEET_TITLE, "Дата", row)
-    except Exception:
-        logger.exception("biohacking_ingest: не удалось продублировать строку в Google Sheets (Postgres уже записан)")
-
+# sync_to_sheets() — УДАЛЕНА 2026-09-23 (постепенный отказ от Sheets,
+# категория A, по запросу Влада: "с нокодб я могу смотреть данные прямо в
+# постгре"). health.daily_trends и так был единственным каноном (Sheets —
+# чистое зеркало для глаз, appendOrUpdate по "Дата") — NocoDB закрывает
+# ровно ту же потребность прямо на Postgres.
 
 # METRIC_COLS — тот же справочник, что в оригинальном "Build DT PG" (device-факты
 # baseline/reference + расширение 14.09.2026), перенесён без изменений порядка/состава.
@@ -798,7 +796,6 @@ def _build_and_write(garmin: dict) -> dict:
         conn.commit()
 
     sync_device_facts(row)
-    sync_to_sheets(row)
 
     from app import anomaly_detector
     try:

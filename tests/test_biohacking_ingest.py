@@ -323,7 +323,6 @@ def test_process_ingest_writes_row_and_calls_dependents(monkeypatch):
     monkeypatch.setattr(bi, "fetch_weather", lambda: {})
     monkeypatch.setattr(bi, "compute_pressure_deltas", lambda w: {})
     monkeypatch.setattr(bi, "sync_device_facts", lambda row: None)
-    monkeypatch.setattr(bi, "sync_to_sheets", lambda row: None)
 
     import app.anomaly_detector as ad
     called = []
@@ -352,7 +351,6 @@ def test_process_ingest_survives_climate_and_calendar_failures(monkeypatch):
     monkeypatch.setattr(bi, "fetch_rescuetime", lambda d: [])
     monkeypatch.setattr(bi, "fetch_weather", lambda: (_ for _ in ()).throw(ConnectionError("нет сети")))
     monkeypatch.setattr(bi, "sync_device_facts", lambda row: None)
-    monkeypatch.setattr(bi, "sync_to_sheets", lambda row: None)
 
     import app.anomaly_detector as ad
     monkeypatch.setattr(ad, "run_daily_check", lambda: None)
@@ -372,7 +370,6 @@ def _stub_external(monkeypatch):
     monkeypatch.setattr(bi, "fetch_weather", lambda: {})
     monkeypatch.setattr(bi, "compute_pressure_deltas", lambda w: {})
     monkeypatch.setattr(bi, "sync_device_facts", lambda row: None)
-    monkeypatch.setattr(bi, "sync_to_sheets", lambda row: None)
     import app.anomaly_detector as ad
     monkeypatch.setattr(ad, "run_daily_check", lambda: None)
 

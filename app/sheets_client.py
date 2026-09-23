@@ -4,9 +4,11 @@ n8n посередине (2026-09-20, группа 3). Тот же принци�
 здесь то же самое на httpx, чтобы card-service мог читать/писать Sheets
 сам, когда таблица недоступна как Postgres-зеркало 1:1 (MicroClimate нужен
 построчно за конкретные часы сна — дневной агрегат health.microclimate
-для этого не годится; Metric_Config/Digest_Log/Anomalies_Log — низкочастотные
-чтения/записи, заводить для них отдельный Postgres-путь не по бюджету
-сложности).
+для этого не годится). 2026-09-23 (постепенный отказ от Sheets, категория A,
+по запросу Влада — NocoDB даёт то же самое "смотреть глазами" прямо на
+Postgres): Daily_Trends/Meals-дубли и Digest_Log сняты (последний теперь
+health.digest_log). Metric_Config/PhenoAge_Config остаются в Sheets —
+следующий шаг (категория B, разовый перенос конфига).
 
 Два разных OAuth-credential (оба Google, но разный refresh_token —
 consent давался раздельно на Sheets и на Calendar):
@@ -84,73 +86,10 @@ def append_row(spreadsheet_id: str, sheet_title: str, values: list, kind: str = 
     resp.raise_for_status()
 
 
-def append_or_update_row(spreadsheet_id: str, sheet_title: str, key_col: str, row: dict, kind: str = "sheets") -> None:
-    """Порт n8n Google Sheets "appendOrUpdate" (matchingColumns=[key_col],
-    mappingMode=autoMapInputData): читает шапку + существующие строки,
-    находит строку по key_col — если нашёл, обновляет только те колонки,
-    ключи которых ЕСТЬ в `row` (autoMapInputData так и работает — маппит
-    только присутствующие в item поля); колонки, которых в `row` вообще НЕТ
-    как ключа, остаются НЕТРОНУТЫМИ (сохраняют то, что уже было в ячейке).
-    Если ключ в `row` есть, но значение None/'' — ячейка ЗАТИРАЕТСЯ пустой
-    строкой (это и есть задокументированный «Garmin null-clobber»: вызывающий
-    обязан сам выкинуть пустые ключи ДО вызова, если хочет их сохранить —
-    Code in JavaScript в оригинале делает это явно, biohacking_ingest.py
-    делает то же самое). Если строка не найдена — добавляется новая, поля не
-    указанные в `row` остаются пустыми (для новой строки "сохранять" нечего).
-    Колонки, которых нет в шапке вообще, молча пропускаются — таблицы уже
-    содержат нужные заголовки, добавление новых колонок сюда — ручная задача,
-    как и было до переноса."""
-    token = _get_access_token(kind)
-    all_values = get_values(spreadsheet_id, sheet_title, kind=kind)
-    if not all_values:
-        raise RuntimeError(f"sheets_client: лист {sheet_title!r} пуст, нет шапки — не пишу")
-    header = all_values[0]
-    try:
-        key_idx = header.index(key_col)
-    except ValueError:
-        raise RuntimeError(f"sheets_client: колонки {key_col!r} нет в шапке {sheet_title!r}")
-
-    key_val = str(row.get(key_col, ""))
-    match_row_num: Optional[int] = None  # 1-based, включая шапку (строка 2 = первая данных)
-    existing: list = []
-    for i, r in enumerate(all_values[1:], start=2):
-        if len(r) > key_idx and str(r[key_idx]) == key_val:
-            match_row_num, existing = i, r
-            break
-
-    out_row = []
-    for j, h in enumerate(header):
-        if h in row:
-            v = row[h]
-            out_row.append("" if v is None else str(v))
-        else:
-            out_row.append(existing[j] if j < len(existing) else "")
-    end_col = _col_letter(len(header))
-    if match_row_num:
-        rng = f"{sheet_title}!A{match_row_num}:{end_col}{match_row_num}"
-        resp = httpx.put(
-            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{rng}",
-            params={"valueInputOption": "USER_ENTERED"},
-            headers={"Authorization": f"Bearer {token}"},
-            json={"values": [out_row]}, timeout=20.0,
-        )
-    else:
-        resp = httpx.post(
-            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{sheet_title}:append",
-            params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
-            headers={"Authorization": f"Bearer {token}"},
-            json={"values": [out_row]}, timeout=20.0,
-        )
-    resp.raise_for_status()
-
-
-def _col_letter(n: int) -> str:
-    """1 -> A, 26 -> Z, 27 -> AA, ..."""
-    s = ""
-    while n > 0:
-        n, rem = divmod(n - 1, 26)
-        s = chr(65 + rem) + s
-    return s
+# append_or_update_row()/_col_letter() — УДАЛЕНЫ 2026-09-23 (постепенный
+# отказ от Sheets, категория A): были только для Daily_Trends/Meals-дублей,
+# оба сняты (biohacking_ingest.py/food_diary_bot.py). Мёртвый код хуже
+# отсутствующего — снесено, не оставлено "на всякий случай".
 
 
 def get_calendar_events(calendar_id: str, time_min: str, time_max: str) -> list[dict]:
@@ -165,37 +104,6 @@ def get_calendar_events(calendar_id: str, time_min: str, time_max: str) -> list[
     return resp.json().get("items", [])
 
 
-def find_row_by_column(spreadsheet_id: str, sheet_title: str, column: str, value: str, kind: str = "sheets") -> Optional[int]:
-    """Порт "find row" (googleSheets lookup by column) — возвращает 0-based
-    индекс СТРОКИ ДАННЫХ (без шапки, как ожидает delete_row) или None."""
-    all_values = get_values(spreadsheet_id, sheet_title, kind=kind)
-    if not all_values:
-        return None
-    header = all_values[0]
-    try:
-        col_idx = header.index(column)
-    except ValueError:
-        return None
-    target = str(value)
-    for i, r in enumerate(all_values[1:]):
-        if len(r) > col_idx and str(r[col_idx]) == target:
-            return i
-    return None
-
-
-def delete_row(spreadsheet_id: str, sheet_gid: int, data_row_index: int, kind: str = "sheets") -> None:
-    """Порт "del" (googleSheets delete by row_number) — batchUpdate
-    deleteDimension. `data_row_index` — 0-based индекс СТРОКИ ДАННЫХ (как
-    возвращает find_row_by_column), +1 внутри для учёта шапки."""
-    token = _get_access_token(kind)
-    sheet_row = data_row_index + 1  # +1 за шапку; deleteDimension индексы 0-based от начала листа
-    resp = httpx.post(
-        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"requests": [{"deleteDimension": {"range": {
-            "sheetId": sheet_gid, "dimension": "ROWS",
-            "startIndex": sheet_row, "endIndex": sheet_row + 1,
-        }}}]},
-        timeout=20.0,
-    )
-    resp.raise_for_status()
+# find_row_by_column()/delete_row() — УДАЛЕНЫ 2026-09-23 (тот же повод, что
+# выше): были только для удаления записи из Meals-дубля (food_diary_bot.py),
+# дубль снят.

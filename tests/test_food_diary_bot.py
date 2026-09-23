@@ -1,7 +1,8 @@
 """app/food_diary_bot.py — проводка живого бота Food diary_v5 (2026-09-21).
-Всё внешнее (Telegram/OpenRouter/Sheets) замокано — эти тесты проверяют
-оркестрацию (какие функции зовутся с какими аргументами), не реальные API.
-Живая проверка (реальный вызов бота/LLM) — отдельным шагом перед cutover."""
+Всё внешнее (Telegram/OpenRouter) замокано — эти тесты проверяют оркестрацию
+(какие функции зовутся с какими аргументами), не реальные API. Sheets-дубль
+снят 2026-09-23 (постепенный отказ от Sheets, категория A). Живая проверка
+(реальный вызов бота/LLM) — отдельным шагом перед cutover."""
 import pytest
 
 from app import food_diary_bot as bot
@@ -56,21 +57,20 @@ def test_handle_callback_confirm_edits_message(monkeypatch):
     assert "✅ *Подтверждено*" in calls[1][1]
 
 
-def test_handle_callback_delete_removes_from_pg_and_sheets(monkeypatch):
+def test_handle_callback_delete_removes_from_pg(monkeypatch):
+    """2026-09-23: Sheets-дубль снят (постепенный отказ от Sheets, категория A) —
+    удаление теперь только в Postgres."""
     monkeypatch.setattr(bot, "answer_callback_query", lambda *a: None)
     edits = []
     monkeypatch.setattr(bot, "edit_message_text", lambda chat_id, msg_id, text: edits.append(text))
     deleted_pg = []
-    deleted_sheet = []
     monkeypatch.setattr("app.food_diary.delete_meal", lambda cur, entry_id: deleted_pg.append(entry_id))
-    monkeypatch.setattr(bot, "_delete_from_sheet", lambda entry_id: deleted_sheet.append(entry_id))
 
     cq = {"id": "cbq2", "data": "delete|999", "message": {"chat": {"id": 111}, "message_id": 222, "text": "✅ Записано!"}}
     bot.handle_callback(cq)
 
     assert "❌ *Удалено*" in edits[0]
     assert deleted_pg == ["999"]
-    assert deleted_sheet == ["999"]
 
 
 def test_handle_callback_edit_sends_force_reply_prompt(monkeypatch):
@@ -114,7 +114,6 @@ def _cleanup():
 
 def test_handle_message_text_inserts_meal_and_sends_confirmation(monkeypatch):
     monkeypatch.setattr(bot, "call_text_llm", lambda prompt, timeout=30.0: '```json\n{"Meal_description": "Тест, 100г", "Calories": 300, "Proteins": 10, "Carbs": 20, "Fats": 5}\n```')
-    monkeypatch.setattr(bot, "_sync_to_sheet", lambda *a, **kw: None)
     sent = []
     monkeypatch.setattr(bot, "send_message", lambda chat_id, text, reply_markup=None, force_reply=False: sent.append((chat_id, text, reply_markup)))
 
@@ -156,7 +155,6 @@ def test_handle_message_photo_downloads_and_calls_photo_llm(monkeypatch):
         return '```json\n{"Meal_description": "Фото-блюдо, 150г", "Calories": 400, "Proteins": 20, "Carbs": 30, "Fats": 10}\n```'
 
     monkeypatch.setattr(bot, "call_photo_llm", fake_photo_llm)
-    monkeypatch.setattr(bot, "_sync_to_sheet", lambda *a, **kw: None)
     monkeypatch.setattr(bot, "send_message", lambda *a, **kw: None)
 
     msg = {"chat": {"id": 111}, "from": {"first_name": "Влад"}, "photo": [{"file_id": "small"}, {"file_id": "big"}],
@@ -179,7 +177,6 @@ def test_handle_edit_reply_updates_existing_meal(monkeypatch):
         conn.commit()
 
     monkeypatch.setattr(bot, "call_text_llm", lambda prompt, timeout=30.0: '```json\n{"Meal_description": "Новое, 200г", "Calories": 500, "Proteins": 25, "Carbs": 40, "Fats": 15}\n```')
-    monkeypatch.setattr(bot, "_sync_to_sheet", lambda *a, **kw: None)
     sent = []
     monkeypatch.setattr(bot, "send_message", lambda chat_id, text, reply_markup=None, force_reply=False: sent.append(text))
 

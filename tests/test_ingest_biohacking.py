@@ -20,7 +20,6 @@ def _stub_all(monkeypatch):
     monkeypatch.setattr(bi, "fetch_weather", lambda: {})
     monkeypatch.setattr(bi, "compute_pressure_deltas", lambda w: {})
     monkeypatch.setattr(bi, "sync_device_facts", lambda row: None)
-    monkeypatch.setattr(bi, "sync_to_sheets", lambda row: None)
     import app.anomaly_detector as ad
     monkeypatch.setattr(ad, "run_daily_check", lambda: None)
 
