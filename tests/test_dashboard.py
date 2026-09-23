@@ -6,12 +6,13 @@ commit.py). Здесь это не проблема: функция только
 тесты мокают курсор (детерминированно, без прод-данных), а тест эндпоинта бьёт по
 реальной БД и проверяет только форму ответа, не конкретные цифры (они меняются
 каждый день по определению фичи)."""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
 from app.dashboard import _baseline_for, _judge, _r_smart, get_today_live_metrics
+from app.db import get_conn, schema
 from app.main import app
 
 client = TestClient(app)
@@ -164,15 +165,47 @@ def test_dashboard_health_endpoint_shape():
     body = r.json()
     for key in ("updated_at", "today", "metrics", "days_14", "trends",
                 "investigations", "medical_notes_recent", "anomalies",
-                "correlations", "experiments", "experiments_note"):
+                "action_loops", "correlations", "experiments", "experiments_note"):
         assert key in body
     assert isinstance(body["metrics"], list) and len(body["metrics"]) > 0
     assert isinstance(body["days_14"], list)
+    # D9 (аудит логики, 2026-09-23): action_loops был мёртвым полем — фронт его
+    # ждал (блок "Прижилось"), бэкенд никогда не отдавал. Список, не падает.
+    assert isinstance(body["action_loops"], list)
     keys = {m["key"] for m in body["metrics"]}
     assert "hrv" in keys and "steps_today_live" in keys
     assert body["anomalies"]["status"] in ("flagged", "clean", "not_run")
     assert body["correlations"] == {"computed": None, "disabled": True, "priority": [], "discovery": []}
     assert body["experiments"] == []
+
+
+def test_dashboard_health_surfaces_action_loops():
+    """D9: /dashboard/health реально прокидывает get_loops() — не только
+    отдаёт пустой список по умолчанию, а видит то, что там появилось."""
+    started = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    with get_conn() as conn, conn.cursor() as cur:
+        for i in range(1, 8):
+            cur.execute(
+                f"INSERT INTO {schema()}.fact (id, ts_event, provenance, verification, metric_key, value_num) "
+                f"VALUES (%s, %s, %s, 'confirmed', %s, %s)",
+                (f"f_seed_dloop_{i}", started - timedelta(days=i), '{"origin":"device"}', "test_dashboard_loop", 40),
+            )
+        for i in range(0, 7):
+            cur.execute(
+                f"INSERT INTO {schema()}.fact (id, ts_event, provenance, verification, metric_key, value_num) "
+                f"VALUES (%s, %s, %s, 'confirmed', %s, %s)",
+                (f"f_seed_dloop_after_{i}", started + timedelta(days=i), '{"origin":"device"}', "test_dashboard_loop", 46),
+            )
+        conn.commit()
+    sync_r = client.post("/recommendations/sync", json={
+        "title": "Тестовый цикл дашборда", "rationale": "проверка D9", "source_ref": "rec_test_dashboard_loop",
+        "started_ts": started.isoformat(), "metric_key": "test_dashboard_loop",
+        "direction": "up", "magnitude": 6, "window_days": 7, "lag_days": 0,
+    })
+    client.post(f"/recommendations/{sync_r.json()['id']}/evaluate")
+
+    body = client.get("/dashboard/health", params={"token": "test-dashboard-token-not-prod"}).json()
+    assert any(l.get("metric") == "test_dashboard_loop" for l in body["action_loops"])
 
 
 def test_dashboard_health_wrong_token_forbidden():

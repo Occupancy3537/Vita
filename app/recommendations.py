@@ -8,6 +8,8 @@ Phase 3 — рекомендации как объекты (П3). Закрыва
 - loops: отдать дашборду то же самое, что раньше строил парсер прозы — но из rv_.
 """
 import json
+import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -15,6 +17,7 @@ from psycopg import sql
 from pydantic import BaseModel
 from ulid import ULID
 
+from app import run_log
 from app.db import get_conn, schema
 from app.memory import create_clinical_note
 from app.gates import (
@@ -27,7 +30,10 @@ from app.gates import (
     gate6_priority,
 )
 from app.journal import write_journal
+from app.scheduler_alert import alert_on_failure
 from app.verdict_engine import Expectation, Fact, evaluate as run_verdict_engine
+
+logger = logging.getLogger(__name__)
 
 
 class RecommendationSyncRequest(BaseModel):
@@ -300,3 +306,65 @@ def get_loops(limit: int = 3) -> list[ActionLoop]:
             status=_STATUS_TEXT.get(verdict, verdict), expect=rationale or "",
         ))
     return loops
+
+
+# =====================================================================
+# Автоматическая оценка (петля исходов, аудит логики 2026-09-23)
+# =====================================================================
+# НАХОДКА: весь движок (evaluate_recommendation/verdict_engine) был построен
+# и даже имел собственный HTTP-эндпоинт (/recommendations/{id}/evaluate) —
+# но НИЧТО его не вызывало само. Единственный способ получить вердикт был
+# дёрнуть эндпоинт руками. За всё время (8 рекомендаций от Weekly Advisor,
+# 1 измеримая) вердикт посчитан один раз, вручную, при отладке. "Петля
+# исходов" не была мёртвой из-за отсутствия кода — она была мёртвой
+# потому, что никто не нажимал на спусковой крючок. Теперь нажимает сам.
+
+EVAL_INTERVAL_SECONDS = 24 * 3600  # раз в сутки — окна оценки день-гранулярные, чаще не нужно
+
+
+def find_due_recommendations(cur) -> list[str]:
+    """Измеримые активные рекомендации, чьё окно оценки (lag_days + window_days
+    от started_ts) уже закрылось, и у которых ещё нет текущего НЕ-data_gap
+    вердикта того же цикла — либо вердикта не было вовсе, либо в прошлый раз
+    не хватило данных (data_gap) и стоит попробовать снова, вдруг подъехали."""
+    cur.execute(
+        sql.SQL(
+            "SELECT rc.id FROM {rc} rc "
+            "JOIN {ex} ex ON ex.rec_id = rc.id AND ex.role = 'primary' AND ex.cycle = rc.cycle "
+            "WHERE rc.status = 'active' AND rc.started_ts IS NOT NULL "
+            "AND now() >= rc.started_ts + (COALESCE(ex.lag_days, 0) + COALESCE(ex.window_days, 7)) * interval '1 day' "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM {rv} rv WHERE rv.rec_id = rc.id AND rv.cycle = rc.cycle "
+            "  AND rv.status = 'current' AND rv.verdict != 'data_gap'"
+            ")"
+        ).format(rc=sql.Identifier(schema(), "recommendation"),
+                 ex=sql.Identifier(schema(), "expectation"),
+                 rv=sql.Identifier(schema(), "recommendation_verdict")),
+    )
+    return [r[0] for r in cur.fetchall()]
+
+
+def run_once() -> None:
+    with get_conn() as conn, conn.cursor() as cur:
+        due = find_due_recommendations(cur)
+    ok = 0
+    for rec_id in due:
+        try:
+            evaluate_recommendation(rec_id)
+            ok += 1
+        except Exception:
+            logger.exception("recommendations: evaluate_recommendation упал для %s — попробуем на следующем тике", rec_id)
+    if due:
+        logger.info("recommendations: авто-оценка — %d/%d рекомендаций посчитано", ok, len(due))
+
+
+def run_scheduler() -> None:
+    logger.info("recommendations auto-evaluate scheduler: старт (каждые %d ч)", EVAL_INTERVAL_SECONDS // 3600)
+    while True:
+        try:
+            run_once()
+            run_log.mark_run("recommendations_evaluate")
+        except Exception as e:
+            logger.exception("recommendations: run_once упал целиком — повтор через обычный интервал")
+            alert_on_failure("recommendations_evaluate", e)
+        time.sleep(EVAL_INTERVAL_SECONDS)

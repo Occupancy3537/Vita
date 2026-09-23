@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
+from app import recommendations as rec
 from app.db import get_conn, schema
 from app.main import app
 
@@ -98,6 +99,106 @@ def test_loops_excludes_data_gap_verdicts():
     client.post(f"/recommendations/{sync_r.json()['id']}/evaluate")  # нет фактов -> data_gap
     loops = client.get("/recommendations/loops").json()
     assert not any(l["metric"] == "test_gap_metric" for l in loops)
+
+
+# ─────── Автоматическая оценка (петля исходов, аудит логики 2026-09-23) ───────
+# НАХОДКА: движок был построен целиком, но ничто его не вызывало — только
+# ручной POST /recommendations/{id}/evaluate. find_due_recommendations()/
+# run_once() — то, что теперь дёргает его само.
+
+def test_find_due_recommendations_includes_closed_window_no_verdict():
+    sync_r = client.post("/recommendations/sync", json={
+        "title": "Due1", "source_ref": "rec_test_due1", "started_ts": STARTED.isoformat(),
+        "metric_key": "test_due1", "direction": "up", "magnitude": 5, "window_days": 7, "lag_days": 0,
+    })
+    rec_id = sync_r.json()["id"]
+    with get_conn() as conn, conn.cursor() as cur:
+        due = rec.find_due_recommendations(cur)
+    assert rec_id in due
+
+
+def test_find_due_recommendations_excludes_open_window():
+    sync_r = client.post("/recommendations/sync", json={
+        "title": "NotDue", "source_ref": "rec_test_notdue", "started_ts": datetime.now(timezone.utc).isoformat(),
+        "metric_key": "test_notdue", "direction": "up", "magnitude": 5, "window_days": 7, "lag_days": 1,
+    })
+    rec_id = sync_r.json()["id"]
+    with get_conn() as conn, conn.cursor() as cur:
+        due = rec.find_due_recommendations(cur)
+    assert rec_id not in due
+
+
+def test_find_due_recommendations_excludes_already_evaluated():
+    _seed_facts("test_due_eval", [(-i, 40) for i in range(1, 8)] + [(i, 46) for i in range(0, 7)])
+    sync_r = client.post("/recommendations/sync", json={
+        "title": "Evaluated", "source_ref": "rec_test_due_eval", "started_ts": STARTED.isoformat(),
+        "metric_key": "test_due_eval", "direction": "up", "magnitude": 6, "window_days": 7, "lag_days": 0,
+    })
+    rec_id = sync_r.json()["id"]
+    client.post(f"/recommendations/{rec_id}/evaluate")
+    with get_conn() as conn, conn.cursor() as cur:
+        due = rec.find_due_recommendations(cur)
+    assert rec_id not in due
+
+
+def test_find_due_recommendations_retries_data_gap():
+    """data_gap — не хватило данных на момент прошлой попытки, а не "готово
+    навсегда" — должна остаться в очереди на повтор."""
+    sync_r = client.post("/recommendations/sync", json={
+        "title": "GapRetry", "source_ref": "rec_test_gap_retry", "started_ts": STARTED.isoformat(),
+        "metric_key": "test_gap_retry_metric", "direction": "up", "magnitude": 5,
+    })
+    rec_id = sync_r.json()["id"]
+    client.post(f"/recommendations/{rec_id}/evaluate")  # нет фактов -> data_gap
+    with get_conn() as conn, conn.cursor() as cur:
+        due = rec.find_due_recommendations(cur)
+    assert rec_id in due
+
+
+def test_run_once_evaluates_due_recommendations():
+    _seed_facts("test_run_once", [(-i, 40) for i in range(1, 8)] + [(i, 46) for i in range(0, 7)])
+    sync_r = client.post("/recommendations/sync", json={
+        "title": "RunOnce", "source_ref": "rec_test_run_once", "started_ts": STARTED.isoformat(),
+        "metric_key": "test_run_once", "direction": "up", "magnitude": 6, "window_days": 7, "lag_days": 0,
+    })
+    rec_id = sync_r.json()["id"]
+
+    rec.run_once()
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT verdict FROM {schema()}.recommendation_verdict WHERE rec_id = %s AND status = 'current'", (rec_id,))
+        row = cur.fetchone()
+    assert row is not None and row[0] == "effective"
+
+
+def test_run_once_one_failure_does_not_block_others(monkeypatch):
+    """Сбой оценки одной рекомендации не должен ронять весь тик — остальные
+    due-рекомендации всё равно считаются."""
+    _seed_facts("test_run_once_ok", [(-i, 40) for i in range(1, 8)] + [(i, 46) for i in range(0, 7)])
+    ok_r = client.post("/recommendations/sync", json={
+        "title": "RunOnceOK", "source_ref": "rec_test_run_once_ok", "started_ts": STARTED.isoformat(),
+        "metric_key": "test_run_once_ok", "direction": "up", "magnitude": 6, "window_days": 7, "lag_days": 0,
+    })
+    ok_id = ok_r.json()["id"]
+
+    real_evaluate = rec.evaluate_recommendation
+
+    def flaky(rec_id):
+        if rec_id != ok_id:
+            raise RuntimeError("бум")
+        return real_evaluate(rec_id)
+
+    monkeypatch.setattr(rec, "evaluate_recommendation", flaky)
+    bad_r = client.post("/recommendations/sync", json={
+        "title": "RunOnceBad", "source_ref": "rec_test_run_once_bad", "started_ts": STARTED.isoformat(),
+        "metric_key": "test_run_once_bad", "direction": "up", "magnitude": 6, "window_days": 7, "lag_days": 0,
+    })
+
+    rec.run_once()  # не бросает, несмотря на flaky() для bad_r
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {schema()}.recommendation_verdict WHERE rec_id = %s", (ok_id,))
+        assert cur.fetchone()[0] == 1
 
 
 def test_reevaluate_supersedes_previous_verdict_not_duplicates():

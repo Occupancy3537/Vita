@@ -30,6 +30,7 @@ from datetime import date, datetime, timedelta, timezone
 from app import timeutil
 from app.biohacking_ingest import MOVEMENT_GAP_OK_THRESHOLD_MIN
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
+from app.recommendations import get_loops
 
 # --- «Здоровье»-экран: порт n8n Code-ноды "Build Health JSON" (2026-09-16) ---
 #
@@ -320,6 +321,17 @@ def get_health_dashboard(cur) -> dict:
     else:
         anomalies = {"report_date": None, "count": 0, "strong_count": 0, "items": [], "status": "not_run"}
 
+    # D9 (аудит логики, 2026-09-23): фронт годами ждал action_loops
+    # (блок "Прижилось") — бэкенд его никогда не отдавал, хотя вся машина
+    # (recommendation/expectation/recommendation_verdict, verdict_engine,
+    # get_loops()) уже была построена и даже имела отдельный HTTP-эндпоинт
+    # (/recommendations/loops) — просто не была подключена сюда. Как и
+    # nutrition_loops выше по функции: сбой не должен ронять весь дашборд.
+    try:
+        action_loops = [l.model_dump() for l in get_loops()]
+    except Exception as e:
+        action_loops = [{"error": str(e)}]
+
     result = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "window": {"from": days_14[0]["date"] if days_14 else None, "to": _dkey(last_date)},
@@ -330,6 +342,7 @@ def get_health_dashboard(cur) -> dict:
         "investigations": investigations,
         "medical_notes_recent": medical_notes_recent,
         "anomalies": anomalies,
+        "action_loops": action_loops,
         "correlations": _DISABLED_CORRELATIONS,
         "experiments": [],
         "experiments_note": _EXPERIMENTS_NOTE,

@@ -79,6 +79,11 @@
 # чувствительные данные, чем ячейки таблицы). RESCUETIME_API_KEY раньше
 # лежал открытым текстом в параметрах n8n-ноды — вынесен в переменную
 # окружения (гигиена, не поведенческое отличие).
+# 2026-09-23 (аудит логики, "петля исходов"): RECOMMENDATIONS_EVAL_ENABLED —
+# app/recommendations.py::run_scheduler(), раз в сутки считает вердикт для
+# рекомендаций, у которых закрылось окно оценки. Движок (verdict_engine)
+# существовал давно, но ничто его не вызывало — единственный способ получить
+# вердикт был дёрнуть /recommendations/{id}/evaluate руками.
 # 2026-09-21 (#38/#46, аудит ZCode): set -e без -u пропускал незаданную
 # переменную молча — `-e CARD_PG_PASSWORD=""` собирает контейнер, /health
 # отдаёт 200, а сбой (пустой пароль БД, пустой токен бота и т.п.) всплывает
@@ -141,6 +146,7 @@ sudo docker run -d \
   -e PHENOAGE_CALC_ENABLED=1 \
   -e YANDEX_CLIMATE_ENABLED=1 \
   -e HOST_METRICS_ENABLED=1 \
+  -e RECOMMENDATIONS_EVAL_ENABLED=1 \
   -e YANDEX_IOT_TOKEN="$YANDEX_IOT_TOKEN" \
   -e CARD_GOOGLE_CLIENT_ID="$CARD_GOOGLE_CLIENT_ID" \
   -e CARD_GOOGLE_CLIENT_SECRET="$CARD_GOOGLE_CLIENT_SECRET" \

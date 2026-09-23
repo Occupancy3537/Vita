@@ -69,6 +69,7 @@ from app.memory import get_context, get_object, index_entity, run_pre_archive_ch
 from app.redflag_b import LayerBResult, classify as redflag_classify_b
 from app.redflag_c import run_layer_c
 from app.redflag_union import evaluate_and_record, record_rf_event
+import app.recommendations as recommendations
 from app.recommendations import (
     ActionLoop,
     EvaluateResponse,
@@ -160,6 +161,12 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # 2026-09-22 (страница «Настройки»): коллектор хостовых метрик (load/память/
     # swap раз в 5 минут) — из истории считается «пик за сутки» для страницы.
     ("HOST_METRICS_ENABLED", lambda: host_metrics.run_scheduler(), "host-metrics-scheduler"),
+    # 2026-09-23 (аудит логики, "петля исходов"): движок вердиктов
+    # (verdict_engine + evaluate_recommendation) был построен целиком, но
+    # ничто его не вызывало — единственный способ получить вердикт был
+    # дёрнуть /recommendations/{id}/evaluate руками. Теперь сам находит
+    # рекомендации с закрывшимся окном оценки и считает вердикт раз в сутки.
+    ("RECOMMENDATIONS_EVAL_ENABLED", lambda: recommendations.run_scheduler(), "recommendations-evaluate-scheduler"),
 ]
 
 
