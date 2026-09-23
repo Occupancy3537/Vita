@@ -9,13 +9,25 @@
 2. Приём ответов: реплай на сообщение с тегом #A## диспетчер маршрутизирует сюда
    (детерминированно, без LLM) — запись ответа и подтверждение «Записал ✅».
    До этого пересылка в выключенный Capitan молча теряла ответы (риск №1).
-"""
+
+2026-09-23 (реальный алерт Влада: "relation card.anamnesis does not exist"):
+все четыре SQL-запроса ниже с самого порта (2026-09-17) писали
+f'{schema()}.anamnesis' вместо литерального 'health.anamnesis' — card.anamnesis
+никогда не существовал, только health.anamnesis (как и написано в докстринге
+выше с самого начала — schema() был прямой ошибкой копипаста, не осознанным
+решением). Планировщик падал на КАЖДОМ ежедневном прогоне с самого порта;
+не был замечен раньше по двум причинам: (1) tests/test_doctor_anamnesis.py
+целиком мокает get_conn() фейковыми объектами — текст SQL-запроса не
+проверялся НИ РАЗУМ ни одним тестом; (2) до app/issue_log.py (2026-09-23,
+Шаг 1 «петли самоулучшения») сбой уходил только в Telegram-алерт раз в
+сутки, который легко потерять в ленте. Фикс — литеральный 'health.anamnesis'
+везде, из импортов убран schema() (был нужен только этим четырём строкам)."""
 import logging
 import re
 import time
 from datetime import datetime
 
-from app.db import get_conn, schema
+from app.db import get_conn
 from app.doctor import telegram
 from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
@@ -110,8 +122,8 @@ def pick_next(rows: list[dict], today: str) -> dict:
 
 def _fetch_rows(cur) -> list[dict]:
     cur.execute(
-        f'SELECT "Q_ID","Category","Question","Status","Asked_Date","Answer","Answered_Date","Attempts" '
-        f'FROM {schema()}.anamnesis'
+        'SELECT "Q_ID","Category","Question","Status","Asked_Date","Answer","Answered_Date","Attempts" '
+        'FROM health.anamnesis'
     )
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -124,13 +136,13 @@ def ask_daily() -> dict:
         if res["action"] == "ask":
             telegram.send_message(CHAT_ID, res["text"], force_reply=True)
             cur.execute(
-                f'UPDATE {schema()}.anamnesis SET "Status"=\'asked\', "Asked_Date"=%s, "Attempts"=%s '
-                f'WHERE "Q_ID"=%s',
+                'UPDATE health.anamnesis SET "Status"=\'asked\', "Asked_Date"=%s, "Attempts"=%s '
+                'WHERE "Q_ID"=%s',
                 (_vl_today(), res["attempt"], res["q_id"]),
             )
         if res.get("skip_q_id"):
             cur.execute(
-                f'UPDATE {schema()}.anamnesis SET "Status"=\'skipped\' WHERE "Q_ID"=%s AND "Status"=\'asked\'',
+                'UPDATE health.anamnesis SET "Status"=\'skipped\' WHERE "Q_ID"=%s AND "Status"=\'asked\'',
                 (res["skip_q_id"],),
             )
         conn.commit()
@@ -161,7 +173,7 @@ def handle_reply(update: dict) -> None:
         return
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            f'UPDATE {schema()}.anamnesis SET "Answer"=%s, "Answered_Date"=%s, "Status"=\'answered\' '
+            'UPDATE health.anamnesis SET "Answer"=%s, "Answered_Date"=%s, "Status"=\'answered\' '
             f'WHERE "Q_ID"=%s AND "Status" != \'answered\' RETURNING "Q_ID"',
             (text, _vl_today(), q_id),
         )

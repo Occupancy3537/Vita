@@ -135,3 +135,74 @@ class TestHandleReply:
         assert exe, "ответ должен быть записан"
         assert exe[0][1][0] == "мне 44 года"  # тег вырезан из текста ответа
         assert sent and "Записал ✅ (A05)" in sent[0][1]
+
+
+# --- Реальная health.anamnesis (2026-09-23) --------------------------------
+# 2026-09-23, реальный алерт Влада: "relation card.anamnesis does not
+# exist" — все SQL выше в модуле писали f'{schema()}.anamnesis' вместо
+# 'health.anamnesis' с самого порта (2026-09-17), падали КАЖДЫЙ день, и ни
+# один тест этого не поймал — все тесты класса TestPickNext/TestHandleReply
+# мокают get_conn() целиком, текст SQL никогда не исполнялся по-настоящему.
+# Эти тесты бьют по реальной health.anamnesis (тестовый Q_ID) — именно
+# чтобы поймать регрессию вида "не тот schema/таблица в SQL-тексте",
+# которую моки по конструкции поймать не могут.
+#
+# Cleanup — НЕ DELETE: при разборе выяснилось, что у роли card_service на
+# health.anamnesis есть SELECT/INSERT/UPDATE, но НЕТ DELETE (ровно то, что
+# нужно продовому коду — он тоже никогда не удаляет строки; заводить лишний
+# грант ради одних только тестов не по бюджету сложности). Вместо удаления
+# тестовая строка каждый раз переводится в терминальный "answered" — не
+# участвует в pick_next() ни при каких обстоятельствах (мёртвый статус),
+# просто остаётся в таблице как безвредный, явно помеченный "тест" фикстур.
+from app.db import get_conn
+
+TEST_Q_ID = "TEST-anamnesis-999"
+
+
+def _neutralize_test_row(cur):
+    cur.execute(
+        'UPDATE health.anamnesis SET "Status"=\'answered\', "Answer"=\'тест — авто-нейтрализовано\' '
+        'WHERE "Q_ID"=%s',
+        (TEST_Q_ID,),
+    )
+
+
+def test_fetch_rows_reads_real_health_anamnesis_table():
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            'INSERT INTO health.anamnesis ("Q_ID", "Category", "Question", "Status", "Attempts") '
+            "VALUES (%s, %s, %s, %s, %s) "
+            'ON CONFLICT ("Q_ID") DO UPDATE SET "Category" = EXCLUDED."Category"',
+            (TEST_Q_ID, "тест", "Тестовый вопрос?", "pending", 0),
+        )
+        conn.commit()
+        rows = anamnesis._fetch_rows(cur)
+        _neutralize_test_row(cur)
+        conn.commit()
+    assert any(r["Q_ID"] == TEST_Q_ID for r in rows)
+
+
+def test_ask_daily_update_writes_to_real_health_anamnesis_table():
+    """Та же UPDATE-строка, что ask_daily() исполняет при action='ask' —
+    проверена напрямую по СВОЕМУ Q_ID (не через pick_next()/ask_daily()
+    целиком: в health.anamnesis сейчас 19 настоящих pending-вопросов, и
+    выбор приоритета мог бы задеть реальный вопрос вместо тестового —
+    это не тот риск, ради которого стоит писать регрессионный тест)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            'INSERT INTO health.anamnesis ("Q_ID", "Category", "Question", "Status", "Attempts") '
+            "VALUES (%s, %s, %s, %s, %s) "
+            'ON CONFLICT ("Q_ID") DO UPDATE SET "Status" = EXCLUDED."Status", "Attempts" = EXCLUDED."Attempts"',
+            (TEST_Q_ID, "тест", "Тестовый вопрос?", "pending", 0),
+        )
+        conn.commit()
+        cur.execute(
+            'UPDATE health.anamnesis SET "Status"=\'asked\', "Asked_Date"=%s, "Attempts"=%s WHERE "Q_ID"=%s',
+            ("2026-09-23", 1, TEST_Q_ID),
+        )
+        conn.commit()
+        cur.execute('SELECT "Status", "Asked_Date" FROM health.anamnesis WHERE "Q_ID" = %s', (TEST_Q_ID,))
+        status, asked = cur.fetchone()
+        _neutralize_test_row(cur)
+        conn.commit()
+    assert status == "asked" and asked == "2026-09-23"
