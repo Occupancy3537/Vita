@@ -978,9 +978,11 @@ def get_today_dashboard(cur) -> dict:
         return sums
 
     def _limit_streak_days(col, cap):
+        # 2026-09-24: тот же off-by-one, что у алкоголя/движения ниже —
+        # rows[-1] это уже полностью записанное "сегодня", не черновик.
         sums = _daily_meal_sums(col)
         streak = 0
-        for r in reversed(rows[:-1]):
+        for r in reversed(past_rows):
             day = r.get("Дата")
             if not day or day not in sums:
                 break
@@ -1000,8 +1002,15 @@ def get_today_dashboard(cur) -> dict:
         if s > 0:
             streaks.append({"label": streak_label, "count": s, "unit": "дней"})
 
+    # 2026-09-24 (баг, найден при разборе жалобы на серии движения/плавания —
+    # тот же паттерн здесь, обнаружен заодно): было reversed(rows[:-1]).
+    # rows[-1] — последняя строка health.daily_trends, уже полностью
+    # записанная ночным прогоном (то же "сегодня", что last/last_date выше
+    # используют для всего остального дашборда) — не черновик, который нужно
+    # пропустить. [:-1] тихо недосчитывал ровно один (самый свежий) день серии
+    # каждый раз — не заметно на глаз, но реальная ошибка на -1 всегда.
     alcohol_streak_days = 0
-    for r in reversed(rows[:-1]):
+    for r in reversed(past_rows):
         g = _num(r.get("Алкоголь_гр"))
         # Следовые количества (кефир и т.п.) не считаются как "выпил" —
         # тот же порог, что и в источнике дня для биовозраста, см.
@@ -1019,8 +1028,18 @@ def get_today_dashboard(cur) -> dict:
     # источник — Garmin "move bar", раньше нигде не собирался). Порог тот же,
     # что при записи (MOVEMENT_GAP_OK_THRESHOLD_MIN=40) — единое число, не
     # дублируем магическую константу.
+    # 2026-09-24 (баг, найден по живой жалобе Влада — "не появилось на дашборде
+    # плавание/движение"): было reversed(rows[:-1]) — тот же паттерн, что у
+    # alcohol_streak_days выше, скопирован не глядя. rows[-1] — это НЕ
+    # "сегодня, ещё не готово": это последняя строка health.daily_trends,
+    # уже полностью записанная ночным прогоном (ей ровно так же пользуется
+    # весь остальной дашборд как "сегодня" — last/last_date выше). [:-1]
+    # выбрасывал единственный день с реальными данными (23.09) из подсчёта,
+    # если следующая ночь ещё не синхронизировалась — серия была НАВСЕГДА
+    # на день позади того, что реально есть в базе. past_rows (уже посчитан
+    # выше) — те же строки, без нижней подрезки.
     movement_streak_days = 0
-    for r in reversed(rows[:-1]):
+    for r in reversed(past_rows):
         gap = _num(r.get("Провал_без_движения_мин"))
         if gap is None or gap > MOVEMENT_GAP_OK_THRESHOLD_MIN:
             break
@@ -1033,7 +1052,7 @@ def get_today_dashboard(cur) -> dict:
     # читается чуть криво для недельного счётчика, но переиспользует готовый
     # виджет вместо нового — обсудить с Владом, если захочет отдельную
     # галочку вместо этого).
-    swim_week_count = sum(1 for r in rows[-7:] if r.get("Плавание_было") == "Да")
+    swim_week_count = sum(1 for r in past_rows[-7:] if r.get("Плавание_было") == "Да")
     if swim_week_count > 0:
         streaks.append({"label": "Плавание на неделе", "count": swim_week_count, "unit": "раз"})
 
