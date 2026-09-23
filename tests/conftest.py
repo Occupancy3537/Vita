@@ -113,6 +113,7 @@ TABLES_TO_CLEAN = [
     "symptom_log", "doctor_notes", "investigations", "lab_plan",  # двойники health.* для commit.py
     "scheduler_run_log", "host_metrics",  # статус-страница (run_log/host_metrics)
     "llm_usage",  # учёт стоимости LLM вне доктора
+    "issue_log",  # бэклог продуктовых находок (2026-09-23, Шаг 1 «петли самоулучшения»)
 ]
 
 

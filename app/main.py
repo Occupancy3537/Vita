@@ -91,6 +91,7 @@ import app.weekly_advisor as weekly_advisor
 import app.anomaly_detector as anomaly_detector
 import app.meds_from_calendar as meds_from_calendar
 import app.monthly_trend as monthly_trend
+import app.issue_review as issue_review
 import app.food_diary_bot as food_diary_bot
 import app.card_processor as card_processor
 import app.phenoage_calc as phenoage_calc
@@ -137,6 +138,11 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     ("MEDS_FROM_CALENDAR_ENABLED", lambda: meds_from_calendar.run_scheduler(), "meds-from-calendar-scheduler"),
     # 2026-09-21 (группа 1, закрывает её целиком): Monthly_Trend_Wellness.
     ("MONTHLY_TREND_ENABLED", lambda: monthly_trend.run_scheduler(), "monthly-trend-scheduler"),
+    # 2026-09-23: еженедельный разбор card.issue_log (Шаг 3 «петли самоулучшения»,
+    # версия 2 — по прямому запросу Влада после инцидента с ложными
+    # предупреждениями: не критичные, нерешённые находки — раз в неделю, не
+    # ежедневно и не на экране «Настройки» постоянно). См. app/issue_review.py.
+    ("ISSUE_REVIEW_ENABLED", lambda: issue_review.run_scheduler(), "issue-review-scheduler"),
     # 2026-09-21: Food diary_v5 — свой бот (vlad_health), свой polling-цикл,
     # независимый от доктора (Hermes Agent). Решение Влада: опрос, не вебхук.
     ("FOOD_DIARY_BOT_ENABLED", lambda: food_diary_bot.run_polling_loop(), "food-diary-bot-poller"),

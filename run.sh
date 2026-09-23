@@ -51,6 +51,11 @@
 # Calendar-credential, что и группа 3 (1/2).
 # 2026-09-21: MONTHLY_TREND_ENABLED — app/monthly_trend.py (1-е число месяца,
 # 10:00 VL), порт n8n Monthly_Trend_Wellness — закрывает группу 1 целиком.
+# 2026-09-23: ISSUE_REVIEW_ENABLED — app/issue_review.py (по воскресеньям
+# 19:00 VL) — еженедельный дайджест нерешённых НЕ-критичных находок
+# card.issue_log. Молчит, если решать нечего (см. её докстринг) — не новый
+# постоянный источник шума, ответ на прямую просьбу Влада после инцидента с
+# ложными предупреждениями на «Настройках».
 # 2026-09-21: FOOD_DIARY_BOT_ENABLED + FOOD_DIARY_BOT_TOKEN — порт n8n
 # Food diary_v5 (последний воркфлоу миграции). Свой бот "vlad_health"
 # (credential 8CKBKo8CXTaLD3YI в n8n), СВОЙ long-polling цикл — по решению
@@ -129,6 +134,7 @@ sudo docker run -d \
   -e ANOMALY_DETECTOR_ENABLED=1 \
   -e MEDS_FROM_CALENDAR_ENABLED=1 \
   -e MONTHLY_TREND_ENABLED=1 \
+  -e ISSUE_REVIEW_ENABLED=1 \
   -e FOOD_DIARY_BOT_ENABLED=1 \
   -e FOOD_DIARY_BOT_TOKEN="$FOOD_DIARY_BOT_TOKEN" \
   -e CARD_PROCESSOR_ENABLED=1 \
