@@ -402,19 +402,22 @@ def run_polling_loop() -> None:
     # 2026-09-23 (по запросу Влада — «сама отлавливает ошибки, которые ничего
     # не сломают»): единичный обрыв long-polling переживается retry'ем ниже
     # за 5с сам — алертить на КАЖДЫЙ такой обрыв было чистым шумом. См.
-    # app/scheduler_alert.py::alert_on_sustained_failure и app/doctor/
-    # poller.py (тот же фикс, тот же день, тот же класс шума).
-    consecutive_failures = 0
+    # app/scheduler_alert.py::alert_on_sustained_failure (версия 2, тот же
+    # день — считает реальное непрерывное время, не число попыток, см. её
+    # докстринг про живой 4-минутный инцидент) и app/doctor/poller.py.
+    failing_since = None
     while True:
         try:
             updates = get_updates(offset)
         except Exception as e:
-            consecutive_failures += 1
+            now = datetime.now(timezone.utc)
+            if failing_since is None:
+                failing_since = now
             logger.exception("food_diary_bot: getUpdates упал, повтор через 5с")
-            alert_on_sustained_failure("food_diary_bot_poller", e, consecutive_failures)
+            alert_on_sustained_failure("food_diary_bot_poller", e, failing_since)
             time.sleep(5)
             continue
-        consecutive_failures = 0
+        failing_since = None
 
         run_log.mark_run("food_diary_bot_poller", min_interval_seconds=300)
         for update in updates:

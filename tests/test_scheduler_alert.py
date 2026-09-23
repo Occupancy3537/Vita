@@ -52,26 +52,33 @@ def test_alert_on_failure_never_raises_when_db_unavailable(monkeypatch):
 
 
 # --- alert_on_sustained_failure (2026-09-23, по запросу Влада: не шуметь на --
-# единичный сетевой обрыв long-polling, который retry-цикл сам переживает) --
+# единичный/непродолжительный сетевой обрыв long-polling, который retry-цикл
+# сам переживает; версия 2 того же дня — считает РЕАЛЬНОЕ непрерывное время,
+# не число попыток подряд, см. её докстринг про живой 4-минутный инцидент) --
 
-def test_alert_on_sustained_failure_below_threshold_is_silent(monkeypatch):
+def test_alert_on_sustained_failure_recent_start_is_silent(monkeypatch):
+    from datetime import datetime, timedelta, timezone
     calls = []
     monkeypatch.setattr(sa, "alert_on_failure", lambda src, exc: calls.append((src, exc)))
-    sa.alert_on_sustained_failure("test-scheduler-alert-source", ValueError("blip"), consecutive_failures=1)
-    sa.alert_on_sustained_failure("test-scheduler-alert-source", ValueError("blip"), consecutive_failures=2)
-    assert calls == []  # ниже порога (по умолчанию 3) — ни разу не позвал alert_on_failure
+    just_now = datetime.now(timezone.utc) - timedelta(seconds=30)
+    sa.alert_on_sustained_failure("test-scheduler-alert-source", ValueError("blip"), just_now)
+    assert calls == []  # сбой идёт всего 30с (< 5 мин по умолчанию) — не алерчу
 
 
-def test_alert_on_sustained_failure_at_threshold_fires(monkeypatch):
+def test_alert_on_sustained_failure_past_min_duration_fires(monkeypatch):
+    from datetime import datetime, timedelta, timezone
     calls = []
     monkeypatch.setattr(sa, "alert_on_failure", lambda src, exc: calls.append((src, exc)))
-    sa.alert_on_sustained_failure("test-scheduler-alert-source", ValueError("сеть совсем легла"), consecutive_failures=3)
+    long_ago = datetime.now(timezone.utc) - timedelta(minutes=6)
+    sa.alert_on_sustained_failure("test-scheduler-alert-source", ValueError("сеть совсем легла"), long_ago)
     assert len(calls) == 1
     assert calls[0][0] == "test-scheduler-alert-source"
 
 
-def test_alert_on_sustained_failure_custom_threshold(monkeypatch):
+def test_alert_on_sustained_failure_custom_min_duration(monkeypatch):
+    from datetime import datetime, timedelta, timezone
     calls = []
     monkeypatch.setattr(sa, "alert_on_failure", lambda src, exc: calls.append((src, exc)))
-    sa.alert_on_sustained_failure("x", ValueError("y"), consecutive_failures=1, threshold=1)
-    assert len(calls) == 1  # порог=1 — алертит с первого раза, как раньше alert_on_failure
+    ten_seconds_ago = datetime.now(timezone.utc) - timedelta(seconds=10)
+    sa.alert_on_sustained_failure("x", ValueError("y"), ten_seconds_ago, min_duration_seconds=5)
+    assert len(calls) == 1  # порог=5с — 10с сбоя уже достаточно

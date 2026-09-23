@@ -20,12 +20,15 @@ errorWorkflow (_Error Handler → Telegram + Error_Log на любой сбой)
         alert_on_failure("X", e)
 """
 import logging
+from datetime import datetime, timezone
 
 from app import run_log
 from app.db import get_conn
 from app.err_dedup import EXPECTED_TOKEN, run_notify
 
 logger = logging.getLogger(__name__)
+
+MIN_SUSTAINED_SECONDS = 300  # 5 минут — см. alert_on_sustained_failure
 
 
 def alert_on_failure(source: str, exc: BaseException) -> None:
@@ -49,20 +52,31 @@ def alert_on_failure(source: str, exc: BaseException) -> None:
         logger.exception("scheduler_alert: не удалось отправить алерт про %s", source)
 
 
-def alert_on_sustained_failure(source: str, exc: BaseException, consecutive_failures: int, threshold: int = 3) -> None:
-    """Как alert_on_failure(), но только когда сбои идут ПОДРЯД `threshold` раз
-    и больше (2026-09-23, по прямому запросу Влада: «система должна сама
-    отлавливать ошибки, которые ничего не сломают» — единичный сетевой обрыв
-    long-polling ("[Errno 104] Connection reset by peer" и подобные) НИЧЕГО
-    не ломает: retry-цикл сам переживает его за секунды, ничего не потеряно.
-    До этой функции КАЖДЫЙ такой обрыв всё равно шёл полным alert_on_failure —
-    Telegram-алерт (пока не подавлен 60-мин дедупом), запись в
-    card.scheduler_run_log (видна на «Настройках»), запись в card.issue_log
-    (Шаг 1 «петли самоулучшения») — три источника шума на то, что само
-    прошло за 5 секунд. Ниже порога — ни один из этих трёх следов не
-    появляется вообще, поднимать шум стоит, только когда сбои реально не
-    проходят сами."""
-    if consecutive_failures < threshold:
-        logger.info("%s: сбой %s/%s подряд (%s) — транзиентно, не алерчу", source, consecutive_failures, threshold, exc)
+def alert_on_sustained_failure(source: str, exc: BaseException, failing_since: datetime,
+                                min_duration_seconds: float = MIN_SUSTAINED_SECONDS) -> None:
+    """Как alert_on_failure(), но только когда сбои идут БЕЗ ПЕРЕРЫВА минимум
+    `min_duration_seconds` (по умолчанию 5 мин) — единичные и даже
+    многоминутные сетевые обрывы long-polling НИЧЕГО не ломают: retry-цикл
+    сам их переживает, ничего не потеряно.
+
+    2026-09-23 (по прямому запросу Влада, версия 2 — предыдущая версия
+    считала ПОДРЯД ИДУЩИЕ ПОПЫТКИ, не время; живой инцидент в тот же день
+    показал, чем это плохо: getUpdates ловил ReadTimeout/502/Connection
+    reset НЕПРЕРЫВНО ~4 минуты подряд и само восстановилось — но версия на
+    попытках алертила уже на 3-й (около 15-20с, если сбои быстрые), задолго
+    до того, как стало ясно, что это не мгновенный блип. Число попыток —
+    ненадёжная мера времени: одна попытка может занять от долей секунды
+    (отказ в соединении) до почти полного httpx-таймаута (30с+), так что
+    "3 подряд" означает где угодно от 15с до полутора минут в зависимости
+    от того, КАК именно рвётся соединение. Реальное время — надёжная мера
+    сама по себе.
+
+    failing_since — момент ПЕРВОГО сбоя в текущей НЕПРЕРЫВНОЙ серии (не
+    сбрасывается между повторными попытками, вызывающий обязан сбросить его
+    в None при первом же успехе — см. app/doctor/poller.py/
+    app/food_diary_bot.py)."""
+    elapsed = (datetime.now(timezone.utc) - failing_since).total_seconds()
+    if elapsed < min_duration_seconds:
+        logger.info("%s: сбой идёт %.0fс (< %.0fс) — транзиентно, не алерчу", source, elapsed, min_duration_seconds)
         return
     alert_on_failure(source, exc)

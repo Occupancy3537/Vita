@@ -31,6 +31,7 @@ Telegram-webhook (иначе getUpdates отвечает 409) — disable_telegr
 """
 import logging
 import time
+from datetime import datetime, timezone
 
 import httpx
 
@@ -254,18 +255,22 @@ def run_polling_loop() -> None:
     # не сломают»): единичный обрыв long-polling ("Connection reset by peer" и
     # подобное) переживается retry'ем ниже за 5с сам — алертить на КАЖДЫЙ такой
     # обрыв было чистым шумом (Telegram + Настройки + бэклог на то, что уже
-    # прошло). alert_on_sustained_failure молчит, пока сбои не пойдут подряд.
-    consecutive_failures = 0
+    # прошло). alert_on_sustained_failure молчит, пока сбои не идут непрерывно
+    # дольше MIN_SUSTAINED_SECONDS (версия 2 того же дня — считает реальное
+    # время, не число попыток, см. её докстринг про живой 4-минутный инцидент).
+    failing_since = None
     while True:
         try:
             updates = get_updates(offset)
         except Exception as e:
-            consecutive_failures += 1
+            now = datetime.now(timezone.utc)
+            if failing_since is None:
+                failing_since = now
             logger.exception("getUpdates failed, retrying in 5s")
-            alert_on_sustained_failure("doctor_poller", e, consecutive_failures)
+            alert_on_sustained_failure("doctor_poller", e, failing_since)
             time.sleep(5)
             continue
-        consecutive_failures = 0
+        failing_since = None
 
         run_log.mark_run("doctor_poller", min_interval_seconds=300)
         for update in updates:
