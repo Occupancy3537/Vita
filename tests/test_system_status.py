@@ -102,6 +102,28 @@ def test_fmt_moment_utc_and_dates(monkeypatch):
     assert system_status._fmt_moment("не дата вовсе")[0] == "не дата вовсе"
 
 
+def test_fmt_moment_parses_iso_t_separated_text_timestamp():
+    """2026-09-23, реальная находка Влада: health.microclimate."Дата" — text-
+    колонка, yandex_climate.py пишет datetime.now(UTC).isoformat() (формат с
+    "T"). Старый парсер понимал только форматы с пробелом, падал до
+    date-only и трактовал UTC-полночь как ЛОКАЛЬНУЮ (Владивосток) — данные
+    возрастом ~22ч показывались как ~34ч и ложно горели просроченными.
+    Свежая (несколько минут назад) метка ДОЛЖНА остаться "свежей", не
+    ложно состариваться на часовой пояс."""
+    from datetime import datetime, timedelta, timezone
+    almost_now = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    name, age = system_status._fmt_moment(almost_now)
+    assert name.startswith("сегодня")
+    assert age is not None and age < 1.0  # НЕ ~10ч (сдвиг на пояс Владивостока)
+
+
+def test_fmt_moment_iso_t_timestamp_22h_old_is_not_falsely_34h():
+    from datetime import datetime, timedelta, timezone
+    ts = (datetime.now(timezone.utc) - timedelta(hours=22)).isoformat()
+    _, age = system_status._fmt_moment(ts)
+    assert 21.5 <= age <= 22.5  # не ~32-34ч, как было бы со старым багом
+
+
 def test_nightly_backup_reflects_state(monkeypatch):
     """Ночная секция честно отражает состояние пинга бэкапа (ок → ok, нет строки → warn)."""
     class FakeCur:
@@ -157,3 +179,49 @@ def test_issues_returns_only_open_sorted_by_severity_then_recency():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(f"DELETE FROM {schema()}.issue_log WHERE natural_key LIKE 'test:sysstatus:%'")
             conn.commit()
+
+
+# --- _loops: error_is_current (2026-09-23, реальная находка Влада) ----------
+# scheduler_run_log очищается автоматически перед каждым тестом (conftest.py
+# TABLES_TO_CLEAN) — свой cleanup не нужен. Ключ должен быть из
+# system_status.LOOPS (_loops() смотрит только зарегистрированные ключи).
+
+def test_loops_error_before_later_success_is_not_current():
+    from datetime import datetime, timedelta, timezone
+    from app.db import schema
+    now = datetime.now(timezone.utc)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.scheduler_run_log (name, last_ok_at, last_error, last_error_at) "
+            "VALUES ('doctor_poller', %s, %s, %s)",
+            (now - timedelta(minutes=5), "[Errno 104] Connection reset by peer", now - timedelta(hours=6)),
+        )
+        conn.commit()
+        out = system_status._loops(cur)
+    row = next(l for l in out if l["key"] == "doctor_poller")
+    assert row["error_is_current"] is False  # успех был ПОСЛЕ ошибки — цикл оправился
+    assert row["last_error"] == "[Errno 104] Connection reset by peer"  # текст истории не стёрт
+
+
+def test_loops_error_after_last_success_is_current():
+    from datetime import datetime, timedelta, timezone
+    from app.db import schema
+    now = datetime.now(timezone.utc)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.scheduler_run_log (name, last_ok_at, last_error, last_error_at) "
+            "VALUES ('doctor_poller', %s, %s, %s)",
+            (now - timedelta(hours=6), "боевой сбой", now - timedelta(minutes=5)),
+        )
+        conn.commit()
+        out = system_status._loops(cur)
+    row = next(l for l in out if l["key"] == "doctor_poller")
+    assert row["error_is_current"] is True  # ошибка новее последнего успеха — реально ещё сломан
+
+
+def test_loops_never_ran_and_never_failed():
+    with get_conn() as conn, conn.cursor() as cur:
+        out = system_status._loops(cur)
+    row = next(l for l in out if l["key"] == "doctor_poller")
+    assert row["error_is_current"] is False
+    assert row["last_ok_h"] is None

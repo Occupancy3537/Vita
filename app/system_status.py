@@ -226,14 +226,24 @@ def _loops(cur) -> list[dict]:
     out = []
     for spec in LOOPS:
         r = rows.get(spec["key"])
-        last_ok_h = None
-        if r and r[1] is not None:
-            last_ok_h = round((now - r[1]).total_seconds() / 3600, 1)
+        last_ok_at = r[1] if r else None
+        last_error_at = r[3] if r else None
+        last_ok_h = round((now - last_ok_at).total_seconds() / 3600, 1) if last_ok_at is not None else None
+        # 2026-09-23 (реальная находка Влада — ложные предупреждения на
+        # "Настройках"): run_log.mark_error() нарочно НЕ стирает last_error
+        # успешным прогоном (история "ошибка была, потом ок" — см. run_log.py),
+        # но без этого флага страница вечно подсвечивала уже пережитый сбой
+        # как ТЕКУЩУЮ проблему часами/сутками после того, как цикл
+        # восстановился. current — true, только если ошибка новее последнего
+        # успеха (или успеха не было вообще) — то есть цикл ДЕЙСТВИТЕЛЬНО ещё
+        # не оправился, а не просто "когда-то падал".
+        error_is_current = last_error_at is not None and (last_ok_at is None or last_error_at > last_ok_at)
         out.append({
             "key": spec["key"], "n": spec["n"], "s": spec["s"], "flag": spec["flag"],
             "last_ok_h": last_ok_h,
             "last_error": (r[2] if r else None),
-            "last_error_h": (round((now - r[3]).total_seconds() / 3600, 1) if r and r[3] else None),
+            "last_error_h": (round((now - last_error_at).total_seconds() / 3600, 1) if last_error_at else None),
+            "error_is_current": error_is_current,
         })
     return out
 
@@ -251,12 +261,29 @@ def _fmt_moment(raw) -> tuple[Optional[str], Optional[float]]:
         dt = datetime(raw.year, raw.month, raw.day, tzinfo=tz)
     else:
         s = str(raw).strip()
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-            try:
-                dt = datetime.strptime(s[:len(fmt) + 2].strip(), fmt).replace(tzinfo=tz)
-                break
-            except ValueError:
-                continue
+        # 2026-09-23 (реальная находка Влада — "Климат в спальне" ложно горел
+        # "вчера 00:00"/stale): health.microclimate."Дата" — text-колонка,
+        # yandex_climate.py пишет datetime.now(UTC).isoformat(), т.е.
+        # "2026-09-22T02:05:08.107999+00:00" — формат с "T", который старый
+        # цикл strptime() ниже ни разу не пробовал (только форматы с пробелом
+        # между датой и временем), поэтому ВСЕГДА проваливался до последнего
+        # "%Y-%m-%d" — терял час/минуты И трактовал полученную полночь как
+        # ЛОКАЛЬНУЮ (Владивосток, UTC+10), а не UTC. На реальных данных это
+        # раздувало возраст на ~12-22 часа — свежие (22ч) данные показывались
+        # старше порога (26ч) и горели предупреждением без всякой причины.
+        # fromisoformat() (3.11+) понимает и "T", и пробел, и одну дату —
+        # пробуем его первым, старый цикл — фолбэк на случай других форматов.
+        try:
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=tz)
+        except ValueError:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    dt = datetime.strptime(s[:len(fmt) + 2].strip(), fmt).replace(tzinfo=tz)
+                    break
+                except ValueError:
+                    continue
     if dt is None:
         return str(raw)[:16], None
     age_h = max(0.0, (now - dt).total_seconds() / 3600)
