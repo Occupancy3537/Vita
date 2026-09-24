@@ -245,7 +245,7 @@ def test_call_model_no_api_key_returns_empty(monkeypatch):
 def test_run_once_no_fire_sends_nothing(monkeypatch):
     monkeypatch.setattr(hw, "detect", lambda cur: {"fire": False, "_new_last_read_fail_notice": None})
     calls = []
-    monkeypatch.setattr(hw.telegram, "send_message", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(hw.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     hw.run_once()
     assert calls == []
 
@@ -259,10 +259,10 @@ def test_run_once_fires_sends_telegram_and_marks_state(monkeypatch):
     monkeypatch.setattr(hw, "detect", lambda cur: d)
     monkeypatch.setattr(hw, "call_model", lambda prompt: "текст уведомления")
     calls = []
-    monkeypatch.setattr(hw.telegram, "send_message", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(hw.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     hw.run_once()
     assert len(calls) == 1
-    assert calls[0][0] == (hw.CHAT_ID, "текст уведомления")
+    assert calls[0][0] == ("health_watchdog", "normal", "текст уведомления")
     with get_conn() as conn, conn.cursor() as cur:
         nudged, _, _ = hw._load_state(cur)
     assert nudged.get(TEST_KEY) == "2026-09-20"

@@ -144,7 +144,7 @@ def test_ingest_test_message_uses_caption_when_no_text():
 def test_ingest_test_message_no_text_notifies_owner(monkeypatch, notify_capture):
     poller.ingest_test_message({"update_id": 102, "message": {}})
     assert len(notify_capture) == 1
-    assert "НЕ сохранено" in notify_capture[0][1]
+    assert "НЕ сохранено" in notify_capture[0][2]
 
 
 def test_ingest_test_message_ingest_failure_notifies_owner(monkeypatch, notify_capture):
@@ -153,20 +153,21 @@ def test_ingest_test_message_ingest_failure_notifies_owner(monkeypatch, notify_c
     monkeypatch.setattr("app.main.ingest", boom)
     poller.ingest_test_message({"update_id": 103, "message": {"text": "тест_poller_ingest_fail"}})
     assert len(notify_capture) == 1
-    assert "тест_poller_ingest_fail" in notify_capture[0][1]
+    assert "тест_poller_ingest_fail" in notify_capture[0][2]
 
 
 # ─────────────────────────── Волна 1 (A3, 2026-09-17) ───────────────────────────
 
 @pytest.fixture()
 def notify_capture(monkeypatch):
-    """Мок telegram.send_message: пишем (chat_id, text) в список; сбрасываем анти-спам."""
+    """Мок notify.notify (ROADMAP 5.1, 2026-09-24 — раньше был telegram.send_message
+    напрямую): пишем (source, priority, text) в список; сбрасываем анти-спам."""
     sent = []
 
-    def fake_send(chat_id, text, *a, **k):
-        sent.append((chat_id, text))
+    def fake_notify(source, priority, text, *a, **k):
+        sent.append((source, priority, text))
 
-    monkeypatch.setattr(poller.telegram, "send_message", fake_send)
+    monkeypatch.setattr(poller.notify, "notify", fake_notify)
     poller._last_loss_notify_ts = 0.0
     yield sent
     poller._last_loss_notify_ts = 0.0
@@ -206,15 +207,15 @@ def test_safe_process_passes_update_through(monkeypatch):
 def test_notify_owner_lost_includes_summary(notify_capture):
     poller._notify_owner_lost({"update_id": 20, "message": {"text": "завтрак: овсянка с ягодами и семенами льна, чай"}})
     assert len(notify_capture) == 1
-    chat_id, text = notify_capture[0]
-    assert chat_id == "8956401"
+    source, priority, text = notify_capture[0]
+    assert source == "doctor_poller_lost_update" and priority == "critical"
     assert "НЕ сохранено" in text
     assert "овсянка" in text
 
 
 def test_notify_owner_lost_photo_summary(notify_capture):
     poller._notify_owner_lost({"update_id": 21, "message": {"photo": [{"file_id": "p"}]}})
-    chat_id, text = notify_capture[0]
+    source, priority, text = notify_capture[0]
     assert "фото" in text
 
 
@@ -234,10 +235,10 @@ def test_notify_owner_send_failure_never_raises(monkeypatch, caplog):
     """Падение самой отправки нотификации не должно ронять цикл."""
     poller._last_loss_notify_ts = 0.0
 
-    def boom(chat_id, text, *a, **k):
+    def boom(source, priority, text, *a, **k):
         raise RuntimeError("telegram down")
 
-    monkeypatch.setattr(poller.telegram, "send_message", boom)
+    monkeypatch.setattr(poller.notify, "notify", boom)
     poller._notify_owner_lost({"update_id": 50, "message": {"text": "x"}})  # не бросает
     poller._last_loss_notify_ts = 0.0
 
@@ -349,14 +350,14 @@ def test_recover_pending_turns_notifies_and_clears(monkeypatch):
 
     pending_id = intake_module._mark_turn_pending("222", 9, 77, "текст потерянного хода")
     sent = []
-    monkeypatch.setattr(poller.telegram, "send_message",
-                        lambda chat_id, text, **k: sent.append((chat_id, text)))
+    monkeypatch.setattr(poller.notify, "notify",
+                        lambda source, priority, text, **k: sent.append((source, priority, text)))
 
     poller.recover_pending_turns()
 
     assert len(sent) == 1
-    assert sent[0][0] == "222"
-    assert "текст потерянного хода" in sent[0][1]
+    assert sent[0][0] == "doctor_poller_pending_turn_lost" and sent[0][1] == "critical"
+    assert "текст потерянного хода" in sent[0][2]
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(f"SELECT count(*) FROM {schema()}.doctor_pending_turn WHERE id = %s", (pending_id,))
         assert cur.fetchone()[0] == 0
@@ -366,7 +367,7 @@ def test_recover_pending_turns_no_op_when_empty(monkeypatch):
     """Штатный случай (чистое завершение всех прошлых ходов) — тишина, без
     единого сообщения владельцу."""
     sent = []
-    monkeypatch.setattr(poller.telegram, "send_message", lambda chat_id, text, **k: sent.append((chat_id, text)))
+    monkeypatch.setattr(poller.notify, "notify", lambda source, priority, text, **k: sent.append((source, priority, text)))
     poller.recover_pending_turns()
     assert sent == []
 
@@ -378,10 +379,10 @@ def test_recover_pending_turns_notify_failure_still_clears(monkeypatch):
 
     pending_id = intake_module._mark_turn_pending("333", None, 88, "ещё один потерянный")
 
-    def boom(chat_id, text, **k):
+    def boom(source, priority, text, **k):
         raise RuntimeError("telegram down")
 
-    monkeypatch.setattr(poller.telegram, "send_message", boom)
+    monkeypatch.setattr(poller.notify, "notify", boom)
     poller.recover_pending_turns()  # не бросает
 
     with get_conn() as conn, conn.cursor() as cur:

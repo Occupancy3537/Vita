@@ -42,7 +42,7 @@ import httpx
 from app import llm_usage
 from app.ai_models import DEFAULT_MODEL
 from app.db import get_conn
-from app.doctor import telegram
+from app import notify
 from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
@@ -525,7 +525,7 @@ def run_once() -> dict:
 
     llm_text = call_model(build_prompt(d))
     extra = f"\n\n#SYM:{d['stale_thread']['id']}" if d.get("stale_thread") else ""
-    telegram.send_message(CHAT_ID, llm_text + extra, parse_mode="HTML")
+    notify.notify("health_watchdog", "normal", llm_text + extra, parse_mode="HTML")
 
     nudge_updates = {a["key"]: d["today"] for a in d["new_abnormal"]}
     nudge_updates.update({a["key"]: d["today"] for a in d["new_sym_alerts"]})

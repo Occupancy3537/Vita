@@ -13,7 +13,7 @@ import logging
 import time
 
 from app.db import get_conn
-from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
+from app import notify
 from app.memory import run_pre_archive_check
 from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
@@ -56,7 +56,7 @@ def _build_alert() -> str:
 def run_once() -> None:
     alert = _build_alert()
     if alert:
-        telegram.send_message(CHAT_ID, alert, parse_mode="HTML")
+        notify.notify("memory_archive_check", "normal", alert, parse_mode="HTML")
 
 
 def run_scheduler() -> None:

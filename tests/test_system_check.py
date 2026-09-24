@@ -228,9 +228,20 @@ def test_build_message_surfaces_a_problem(monkeypatch):
     assert "ГЕЙТ НАГРУЗКИ ОТКРЫТ" in msg["message"]
 
 
-def test_run_once_sends_telegram_message(monkeypatch):
+def test_run_once_silent_when_no_problems(monkeypatch):
+    """ROADMAP 5.4 (2026-09-24, по прямому запросу Влада): "✅ Система в норме"
+    больше не шлётся вообще — факт прогона виден в scheduler_run_log/
+    странице «Настройки», а не отдельным сообщением каждый день."""
     monkeypatch.setattr(system_check, "build_message", lambda: {"message": "тест", "has_problems": False, "problems": [], "notes": []})
     calls = []
-    monkeypatch.setattr(system_check.telegram, "send_message", lambda chat_id, text, parse_mode=None: calls.append((chat_id, text, parse_mode)))
+    monkeypatch.setattr(system_check.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     system_check.run_once()
-    assert calls == [(system_check.CHAT_ID, "тест", "HTML")]
+    assert calls == []
+
+
+def test_run_once_sends_critical_when_problems(monkeypatch):
+    monkeypatch.setattr(system_check, "build_message", lambda: {"message": "тест", "has_problems": True, "problems": ["x"], "notes": []})
+    calls = []
+    monkeypatch.setattr(system_check.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
+    system_check.run_once()
+    assert calls == [(("system_check", "critical", "тест"), {"parse_mode": "HTML"})]

@@ -97,9 +97,17 @@ def run_notify(cur, wf: str, node: str, telegram_text: str, silent: bool, token:
         from app import issue_log
         issue_log.record_issue(cur, f"errdedup:{wf}:{node}", source=wf, summary=telegram_text or f"{wf}/{node}")
     if result["send"]:
-        from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes (см. app/hermes_telegram.py)
+        # 2026-09-24 (ROADMAP 5.1): через notify() (priority=critical), не
+        # напрямую в Telegram — это ЕДИНАЯ точка отправки для scheduler_alert
+        # (все фоновые циклы) И трёх ночных cron-скриптов на Node.js
+        # (/err-dedup — они вне card-service, но зовут этот же путь), и
+        # restore_drill.sh. Дедуп (60 мин на пару wf+node, уже отработал выше)
+        # — отдельная, дополняющая защита от повтора ОДНОЙ и той же ошибки;
+        # дневной бюджет critical — защита от общего числа разных срочных
+        # штук за день. Раньше все они слали независимо от бюджета вообще.
+        from app import notify
         try:
-            telegram.send_message(CHAT_ID, result["text"], parse_mode="HTML")
+            notify.notify(f"errdedup_{wf}", "critical", result["text"], parse_mode="HTML")
         except Exception:
             logger.exception("err_dedup: не удалось отправить Telegram-алерт (wf=%s node=%s)", wf, node)
     return result

@@ -187,13 +187,14 @@ def test_run_once_sends_telegram_when_trends_found(monkeypatch):
     monkeypatch.setattr(mt, "compute_trend", lambda rows: fake_trend if rows and rows[0]["domain"] == "nutrition" else [])
 
     sent = []
-    from app import hermes_telegram  # 2026-09-21: алерты -> Hermes, не бот доктора
-    monkeypatch.setattr(hermes_telegram, "send_message", lambda chat_id, text: sent.append((chat_id, text)))
+    from app import notify
+    monkeypatch.setattr(notify, "notify", lambda source, priority, text: sent.append((source, priority, text)))
 
     mt.run_once()
 
     assert len(sent) == 1
-    assert TEST_MONTH in sent[0][1]
+    assert sent[0][0] == "monthly_trend" and sent[0][1] == "normal"
+    assert TEST_MONTH in sent[0][2]
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM health.monthly_trend_log WHERE period_month = %s", (TEST_MONTH,))

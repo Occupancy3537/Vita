@@ -87,8 +87,8 @@ def test_failed_processing_counts_attempts_then_dead_letter(monkeypatch):
     """F7: неудачи считаются; после MAX_ATTEMPTS — dead-letter (status='failed',
     выпадает из очереди) и один алерт владельцу; до лимита — без алерта."""
     alerts = []
-    monkeypatch.setattr(cp.hermes_telegram, "send_message",
-                        lambda chat_id, text, **k: alerts.append(text))
+    monkeypatch.setattr(cp.notify, "notify",
+                        lambda source, priority, text: alerts.append(text))
     monkeypatch.setattr("app.write_path.process",
                         lambda source_id: (_ for _ in ()).throw(RuntimeError("boom")))
 

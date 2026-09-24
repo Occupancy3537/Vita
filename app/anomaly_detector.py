@@ -70,7 +70,7 @@ from typing import Optional
 import httpx
 
 from app.db import get_conn
-from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
+from app import notify
 from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
@@ -366,8 +366,19 @@ def run_daily_check() -> None:
 
     if not unsent:
         return  # все аномалии за этот день уже отправлялись — молча не дублируем
-    lines = [_format_line(a) for a in unsent]
-    telegram.send_message(CHAT_ID, f"🚨 Обнаружены аномалии за {day}\n\n" + "\n".join(lines))
+
+    # ROADMAP 5.1 (2026-09-24): сильные (strong) — critical, немедленно (в
+    # рамках дневного бюджета); умеренные (moderate, "жёлтые") — normal, в
+    # вечерний дайджест. Раньше слались ОДНИМ сообщением независимо от
+    # состава — жёлтая находка была так же громкой, как сильная.
+    strong = [a for a in unsent if a["severity"] == "strong"]
+    moderate = [a for a in unsent if a["severity"] != "strong"]
+    if strong:
+        lines = [_format_line(a) for a in strong]
+        notify.notify("anomaly_detector", "critical", f"🚨 Обнаружены аномалии за {day}\n\n" + "\n".join(lines))
+    if moderate:
+        lines = [_format_line(a) for a in moderate]
+        notify.notify("anomaly_detector", "normal", f"🟡 Умеренные отклонения за {day}\n\n" + "\n".join(lines))
 
 
 # =====================================================================
@@ -442,8 +453,8 @@ def run_weekly_digest() -> None:
     _append_digest_row(digest)
 
     lines = "\n".join(digest["metric_summary_lines"])
-    telegram.send_message(
-        CHAT_ID,
+    notify.notify(
+        "anomaly_detector_weekly", "normal",
         f"📊 Недельный дайджест ({digest['period_start']} — {digest['period_end']})\n"
         f"Дней с данными: {digest['days_with_data']}\n"
         f"Всего аномалий: {digest['total_anomalies']} (сильных: {digest['strong_anomalies']})\n\n{lines}",

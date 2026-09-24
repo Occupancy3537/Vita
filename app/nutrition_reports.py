@@ -38,7 +38,7 @@ from app import llm_usage
 from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _num, _rows_as_dicts
 from app.db import get_conn
-from app import nutrition_telegram as telegram  # 2026-09-21: отчёты о питании -> @vvk_gemini_bot, не бот доктора (см. app/nutrition_telegram.py)
+from app import notify
 from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
@@ -228,15 +228,18 @@ def _sync_nutrition_to_card(d: dict) -> None:
 
 
 def run_daily() -> None:
+    """2026-09-24 (ROADMAP 5.5): больше не шлёт сам — копит через notify()
+    (priority=normal), вечерний дайджест (app/digest.py) забирает как
+    вторую секцию (после вопроса анамнеза)."""
     with get_conn() as conn, conn.cursor() as cur:
         d = build_daily_report(cur)
     if d is None:
-        telegram.send_message(CHAT_ID, "⚠️ За сегодня не найдено записей о питании. Не забудь поесть и записать!")
+        notify.notify("nutrition_reports", "normal", "⚠️ За сегодня не найдено записей о питании. Не забудь поесть и записать!")
         return
 
     text = call_model(build_daily_prompt(d), max_tokens=1800, reasoning_tokens=700, temperature=0.3)
     if text:
-        telegram.send_message(CHAT_ID, text)
+        notify.notify("nutrition_reports", "normal", text)
 
     with get_conn() as conn, conn.cursor() as cur:
         _write_day_sum(cur, d)
@@ -325,14 +328,17 @@ def build_weekly_prompt(d: dict) -> str:
 
 
 def run_weekly() -> None:
+    """2026-09-24 (ROADMAP 5.5): source отдельный от run_daily() —
+    "недельный отчёт в свой день" в дайджесте, не вытесняет и не сливается
+    со "сводкой питания" (2-й фиксированный блок дайджеста)."""
     with get_conn() as conn, conn.cursor() as cur:
         d = build_weekly_report(cur)
     if d is None:
-        telegram.send_message(CHAT_ID, "⚠️ За последнюю неделю не найдено записей о питании.")
+        notify.notify("nutrition_reports_weekly", "normal", "⚠️ За последнюю неделю не найдено записей о питании.")
         return
     text = call_model(build_weekly_prompt(d), max_tokens=1800, reasoning_tokens=700, temperature=0.3)
     if text:
-        telegram.send_message(CHAT_ID, text)
+        notify.notify("nutrition_reports_weekly", "normal", text)
 
 
 # =====================================================================

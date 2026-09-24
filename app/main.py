@@ -60,9 +60,9 @@ from app.dashboard import (
 )
 from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
-from app.doctor import anamnesis as doctor_anamnesis
+from app import digest
 from app.doctor import poller as doctor_poller
-from app import hermes_telegram
+from app import notify
 from app import timeutil
 from app.journal import write_journal
 from app.memory import get_context, get_object, index_entity, run_pre_archive_check
@@ -120,7 +120,7 @@ app = FastAPI(title="card-service", version="0.0.1")
 # сегодняшней конфигурации run.sh (все флаги=1) не меняется.
 _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     ("TELEGRAM_POLLING_ENABLED", lambda: doctor_poller.run_polling_loop(), "telegram-poller"),
-    ("ANAMNESIS_SCHEDULER_ENABLED", lambda: doctor_anamnesis.run_scheduler(), "anamnesis-scheduler"),
+    ("DIGEST_SCHEDULER_ENABLED", lambda: digest.run_scheduler(), "digest-scheduler"),
     ("SYSTEM_CHECK_ENABLED", lambda: system_check.run_scheduler(), "system-check-scheduler"),
     ("GATE_WATCH_ENABLED", lambda: gate_watch.run_scheduler(), "gate-watch-scheduler"),
     ("SMALL_ALERTS_ENABLED", lambda: memory_archive_check.run_scheduler(), "memory-archive-check-scheduler"),
@@ -403,7 +403,7 @@ def backup_status_endpoint(req: BackupStatusRequest) -> dict:
     """Порт n8n `_Backup Alert` (webhook-часть) — пинг от nightly_backup.sh."""
     alert = backup_alert.handle_ping(req.token, req.result, req.detail, req.ts)
     if alert:
-        hermes_telegram.send_message(backup_alert.CHAT_ID, alert, parse_mode="HTML")
+        notify.notify("backup_alert", "critical", alert, parse_mode="HTML")
     return {"ok": True}
 
 

@@ -14,7 +14,7 @@ from typing import Optional
 
 from ulid import ULID
 
-from app import hermes_telegram, redflag
+from app import notify, redflag
 from app.db import get_conn, schema
 from app.extraction import Draft, extract, PROMPT_VERSION
 from app.journal import write_journal
@@ -179,7 +179,7 @@ def _alert_owner_redflag(rf: dict, raw_text: str, source_id: str) -> None:
                 f"{rf.get('category')}: {', '.join(rf.get('matched') or [])}\n\n"
                 f"Текст: {raw_text[:200]}\n\n"
                 f"Возможно, стоило отвечать как на неотложку (source={source_id}).")
-        hermes_telegram.send_message(hermes_telegram.CHAT_ID, text)
+        notify.notify("write_path_redflag", "red_flag", text)
         logger.warning("write_path: красный флаг на TEST-пути — алерт владельцу отправлен (source=%s)", source_id)
     except Exception:
         logger.exception("write_path: не удалось отправить алерт о красном флаге (source=%s)", source_id)

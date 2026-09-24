@@ -21,7 +21,7 @@ import logging
 import time
 from datetime import date
 
-from app import hermes_telegram as telegram  # алерты -> Hermes, не бот доктора
+from app import notify
 from app import run_log, timeutil
 from app.db import get_conn, schema
 from app.scheduler_alert import alert_on_failure
@@ -66,7 +66,7 @@ def run_once() -> int:
     if text is None:
         logger.info("issue_review: бэклог решённых вопросов пуст — дайджест не отправлен")
         return 0
-    telegram.send_message(CHAT_ID, text)
+    notify.notify("issue_review", "normal", text)
     return len(rows)
 
 

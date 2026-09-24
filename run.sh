@@ -17,7 +17,9 @@
 # воркфлоу слали через отдельный credential "Hermes Agent" (см. app/hermes_telegram.py).
 # + NUTRITION_BOT_TOKEN (@vvk_gemini_bot) — отчёты о питании (app/nutrition_reports.py,
 # дневной+недельный), в n8n шли через credential "Отчет по питанию" (см. app/nutrition_telegram.py)
-# Волна 2 (B1): ANAMNESIS_SCHEDULER_ENABLED — анамнез-планировщик (ежедневно 11:00 VL)
+# ROADMAP 5.5 (2026-09-24): DIGEST_SCHEDULER_ENABLED — вечерний дайджест
+# (app/digest.py, 21:50 ВЛ) заменил отдельный анамнез-планировщик (Волна 2,
+# B1, был 11:00 ВЛ) — вопрос анамнеза теперь первым блоком того же сообщения.
 # Волна 3 (B2): REGISTRAR_MODEL / REGISTRAR_PDF_MODEL — vision-модели регистратора
 # лаб-документов (app/registrar.py; PDF идёт отдельной моделью — glm-5.3-flash не
 # принимает file-модальность на OpenRouter, дефолт = модель фото-пути Food diary).
@@ -129,7 +131,7 @@ sudo docker run -d \
   -e OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
   -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
   -e TELEGRAM_POLLING_ENABLED=1 \
-  -e ANAMNESIS_SCHEDULER_ENABLED=1 \
+  -e DIGEST_SCHEDULER_ENABLED=1 \
   -e SYSTEM_CHECK_ENABLED=1 \
   -e GATE_WATCH_ENABLED=1 \
   -e SMALL_ALERTS_ENABLED=1 \

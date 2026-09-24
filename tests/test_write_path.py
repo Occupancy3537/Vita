@@ -96,7 +96,7 @@ def test_process_flags_red_flag_independent_of_llm(monkeypatch):
     что содержания нет, красный флаг не теряется. F2 (2026-09-22): алерт
     владельцу мокаем — юнит-тест не должен слать реальный Telegram."""
     import app.write_path as wp
-    monkeypatch.setattr(wp.hermes_telegram, "send_message", lambda *a, **k: None)
+    monkeypatch.setattr(wp.notify, "notify", lambda *a, **k: None)
 
     src_id = _ingest("грудь давит, отдаёт в левую руку, одышка")
     with patch("app.write_path.extract", return_value=_mock_extract(no_medical=True)):
@@ -167,8 +167,8 @@ def test_process_alerts_owner_on_red_flag_test_path(monkeypatch):
     card.extraction.flags_json без потребителя — теперь алерт владельцу."""
     import app.write_path as wp
     alerts = []
-    monkeypatch.setattr(wp.hermes_telegram, "send_message",
-                        lambda chat_id, text, *a, **k: alerts.append((chat_id, text)))
+    monkeypatch.setattr(wp.notify, "notify",
+                        lambda source, priority, text: alerts.append((source, priority, text)))
 
     src_id = _ingest("запиши: сегодня была рвота кровью, кофейной гущей")
     with patch("app.write_path.extract", return_value=_mock_extract(no_medical=True)):
@@ -176,8 +176,8 @@ def test_process_alerts_owner_on_red_flag_test_path(monkeypatch):
 
     assert result["flags"]["red_flag"]["hit"] is True
     assert len(alerts) == 1
-    chat_id, text = alerts[0]
-    assert chat_id == "8956401"
+    source, priority, text = alerts[0]
+    assert priority == "red_flag"
     assert "Красные флаги" in text
     assert "кофейной гущей" in text  # фрагмент исходного текста — владелец видит контекст
 
@@ -189,7 +189,7 @@ def test_process_survives_red_flag_alert_failure(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("hermes down")
 
-    monkeypatch.setattr(wp.hermes_telegram, "send_message", boom)
+    monkeypatch.setattr(wp.notify, "notify", boom)
 
     src_id = _ingest("грудь давит, отдаёт в левую руку, одышка")
     with patch("app.write_path.extract", return_value=_mock_extract(no_medical=True)):

@@ -29,7 +29,7 @@ from typing import Optional
 from psycopg.errors import UniqueViolation
 from ulid import ULID
 
-from app import hermes_telegram
+from app import hermes_telegram, notify
 from app.db import get_conn, schema
 from app.doctor import commit, gate, loop, render, telegram
 from app.doctor.commit import CommitError
@@ -128,10 +128,15 @@ def _deliver_emergency(chat_id: str, message_id: Optional[int], reply_text: str)
     2026-09-23 (L1, аудит логики): сигнатура была (msg: IncomingMessage, ...) —
     сузилась до (chat_id, message_id), т.к. теперь это зовёт не только
     intake.handle_update (есть IncomingMessage), но и poller._check_emergency_gate
-    (есть только сырой update, IncomingMessage строить незачем)."""
+    (есть только сырой update, IncomingMessage строить незачем).
+
+    2026-09-24 (ROADMAP 5.1): подключено к журналу notify.log_external_send()
+    — ТОЛЬКО журнал (priority="red_flag", вне бюджета, как и положено),
+    саму доставку (ретраи + фолбэк выше) не трогаем ни на йоту."""
     for attempt in range(1, EMERGENCY_SEND_ATTEMPTS + 1):
         try:
             telegram.send_message(chat_id, reply_text, reply_to_message_id=message_id)
+            notify.log_external_send("doctor_emergency", "red_flag")
             return True
         except Exception:
             logger.exception("intake: попытка %d/%d доставить эмердженси ботом доктора не удалась",
@@ -142,10 +147,12 @@ def _deliver_emergency(chat_id: str, message_id: Optional[int], reply_text: str)
         hermes_telegram.send_message(chat_id, reply_text)
         logger.warning("intake: эмердженси доставлен фолбэком через Hermes-бот "
                        "(бот доктора не смог; chat=%s)", chat_id)
+        notify.log_external_send("doctor_emergency", "red_flag")
         return True
     except Exception:
         logger.critical("intake: эмердженси НЕ доставлен ни одним ботом (chat=%s) — "
                         "эпизод в карте записан, пациент не уведомлён", chat_id)
+        notify.log_external_send("doctor_emergency_failed", "red_flag")
         return False
 
 

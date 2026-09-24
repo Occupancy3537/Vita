@@ -225,7 +225,7 @@ def test_mark_daily_check_ran_writes_state():
 def test_run_daily_check_no_anomalies_sends_nothing(monkeypatch):
     monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: ([], METRICS))
     sent = []
-    monkeypatch.setattr(ad.telegram, "send_message", lambda *a: sent.append(a))
+    monkeypatch.setattr(ad.notify, "notify", lambda *a: sent.append(a))
     ad.run_daily_check()
     assert sent == []
 
@@ -237,7 +237,7 @@ def test_run_daily_check_clean_day_still_marks_state(monkeypatch):
     rows = _rows(date.today(), [10, 10, 10, 10])
     latest_date = rows[-1]["Дата"]
     monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: (rows, METRICS))
-    monkeypatch.setattr(ad.telegram, "send_message", lambda *a: (_ for _ in ()).throw(AssertionError("не должен слать")))
+    monkeypatch.setattr(ad.notify, "notify", lambda *a: (_ for _ in ()).throw(AssertionError("не должен слать")))
     ad.run_daily_check()
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT last_day_checked FROM card.anomaly_detector_state WHERE id = 1")
@@ -262,7 +262,7 @@ def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch):
     latest_date = rows[-1]["Дата"]
     monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: (rows, METRICS))
     sent = []
-    monkeypatch.setattr(ad.telegram, "send_message", lambda *a: sent.append(a))
+    monkeypatch.setattr(ad.notify, "notify", lambda *a: sent.append(a))
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -276,7 +276,7 @@ def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch):
     try:
         ad.run_daily_check()
         assert len(sent) == 1
-        assert "Метрика" in sent[0][1]
+        assert "Метрика" in sent[0][2]
 
         sent.clear()
         ad.run_daily_check()  # тот же день, та же аномалия — уже отмечена, повтор не шлём
@@ -341,7 +341,7 @@ def test_append_digest_row_writes_to_postgres_and_upserts():
 def test_run_weekly_digest_no_data_sends_nothing(monkeypatch):
     monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: ([], METRICS))
     sent = []
-    monkeypatch.setattr(ad.telegram, "send_message", lambda *a: sent.append(a))
+    monkeypatch.setattr(ad.notify, "notify", lambda *a: sent.append(a))
     ad.run_weekly_digest()
     assert sent == []
 
@@ -353,9 +353,9 @@ def test_run_weekly_digest_sends_and_appends(monkeypatch):
     appended = []
     monkeypatch.setattr(ad, "_append_digest_row", lambda d: appended.append(d))
     sent = []
-    monkeypatch.setattr(ad.telegram, "send_message", lambda *a: sent.append(a))
+    monkeypatch.setattr(ad.notify, "notify", lambda *a: sent.append(a))
 
     ad.run_weekly_digest()
     assert len(sent) == 1
-    assert "Недельный дайджест" in sent[0][1]
+    assert "Недельный дайджест" in sent[0][2]
     assert len(appended) == 1

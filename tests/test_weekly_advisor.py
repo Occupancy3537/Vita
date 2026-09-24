@@ -303,13 +303,13 @@ def test_run_once_sends_telegram_and_writes_log(monkeypatch):
     monkeypatch.setattr(wa, "write_recommendations_log", lambda cur, row: written.update(row))
 
     sent = []
-    monkeypatch.setattr(wa.telegram, "send_message", lambda chat_id, text: sent.append((chat_id, text)))
+    monkeypatch.setattr(wa.notify, "notify", lambda source, priority, text: sent.append((source, priority, text)))
 
     wa.run_once()
 
     assert written["Date"] == "2026-09-20"
-    assert sent and sent[0][0] == wa.CHAT_ID
-    assert "2026-09-20" in sent[0][1]
+    assert sent and sent[0][0] == "weekly_advisor" and sent[0][1] == "normal"
+    assert "2026-09-20" in sent[0][2]
 
 
 def test_run_once_model_silent_skips_write(monkeypatch):
@@ -321,9 +321,9 @@ def test_run_once_model_silent_skips_write(monkeypatch):
     called = []
     monkeypatch.setattr(wa, "write_recommendations_log", lambda cur, row: called.append(row))
     sent = []
-    monkeypatch.setattr(wa.telegram, "send_message", lambda chat_id, text: sent.append(text))
+    monkeypatch.setattr(wa.notify, "notify", lambda source, priority, text: sent.append((source, priority, text)))
 
     wa.run_once()
 
     assert called == []
-    assert sent  # предупредили в Telegram, что модель не ответила
+    assert sent and sent[0][1] == "critical"  # предупредили немедленно, что модель не ответила

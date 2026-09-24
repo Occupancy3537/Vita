@@ -241,7 +241,7 @@ def build_telegram_text(period_month: str, trends: list[dict]) -> str:
 
 def run_once() -> None:
     from app.db import get_conn
-    from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes (см. app/hermes_telegram.py)
+    from app import notify
 
     windows = define_month_windows()
 
@@ -278,7 +278,7 @@ def run_once() -> None:
         conn.commit()
 
     if all_trends:
-        telegram.send_message(CHAT_ID, build_telegram_text(windows["current_month"], all_trends))
+        notify.notify("monthly_trend", "normal", build_telegram_text(windows["current_month"], all_trends))
     logger.info("monthly_trend: готово за %s, сдвигов: %d", windows["current_month"], len(all_trends))
 
 

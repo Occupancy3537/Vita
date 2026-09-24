@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from app import registrar, timeutil
+from app import notify, registrar, timeutil
 from app.db import get_conn, schema
 from app.doctor import anamnesis, dispatch, gate, intake, telegram
 from app import run_log
@@ -108,7 +108,11 @@ def _loss_summary(update: dict) -> str:
 
 def _notify_owner_lost(update: dict) -> None:
     """Видимая потеря: короткое сообщение Владу, что апдейт НЕ сохранён.
-    Анти-спам — не чаще 1 сообщения в 6 ч. Сама отправка обёрнута в try/except:
+    Анти-спам — не чаще 1 сообщения в 6 ч (отдельно от дневного бюджета
+    notify.py — это разные вещи: cooldown защищает от повторов ОДНОГО и
+    того же вида сбоя, бюджет critical — от общего числа разных срочных
+    штук за день). 2026-09-24 (ROADMAP 5.1): доставка — через notify()
+    (priority=critical), сама отправка по-прежнему обёрнута в try/except —
     никогда не должна ронять вызывающий цикл."""
     global _last_loss_notify_ts
     now = time.time()
@@ -116,8 +120,8 @@ def _notify_owner_lost(update: dict) -> None:
         return
     _last_loss_notify_ts = now  # фиксируем ДО отправки: даже упавшая попытка не должна спамить ретраями
     try:
-        telegram.send_message(
-            OWNER_CHAT_ID,
+        notify.notify(
+            "doctor_poller_lost_update", "critical",
             f"⚠️ Не удалось сохранить сообщение — НЕ сохранено: {_loss_summary(update)}",
         )
         logger.error("owner notified about LOST update %s (relay unavailable)", update.get("update_id"))
@@ -310,8 +314,8 @@ def recover_pending_turns() -> None:
             return
         for pending_id, chat_id, text in rows:
             try:
-                telegram.send_message(
-                    chat_id,
+                notify.notify(
+                    "doctor_poller_pending_turn_lost", "critical",
                     "⚠️ Прошлый разбор прервался из-за перезапуска сервиса — вот что не "
                     f"успел обработать:\n«{text}»\nПовтори, пожалуйста, если ещё актуально.",
                 )

@@ -39,7 +39,7 @@ from app import llm_usage
 from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _dkey, _num
 from app.db import get_conn
-from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
+from app import notify
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
 from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
@@ -1057,7 +1057,7 @@ def run_once() -> None:
     raw = call_model(build_prompt(ctx))
     if not raw:
         logger.error("weekly_advisor: модель не ответила, разбор недели пропущен")
-        telegram.send_message(CHAT_ID, "⚠️ Еженедельный разбор: модель не ответила, попробую в следующий раз.")
+        notify.notify("weekly_advisor", "critical", "⚠️ Еженедельный разбор: модель не ответила, попробую в следующий раз.")
         return
 
     row = parse_advisor_response(raw, ctx, src["targets"], prev_weekly)
@@ -1070,7 +1070,7 @@ def run_once() -> None:
         write_recommendations_log(cur, row)
         conn.commit()
 
-    telegram.send_message(CHAT_ID, f"🩺 Еженедельный разбор ({row['Date']})\n\n{row['Telegram_Text']}")
+    notify.notify("weekly_advisor", "normal", f"🩺 Еженедельный разбор ({row['Date']})\n\n{row['Telegram_Text']}")
     logger.info("weekly_advisor: разбор недели %s готов, статус=%s", row["Date"], row["Status"])
 
 

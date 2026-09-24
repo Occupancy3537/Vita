@@ -55,7 +55,7 @@ def test_check_once_no_alert_on_first_ever_run(monkeypatch):
     которого не видели, просто запоминаем текущее состояние."""
     monkeypatch.setattr(gate_watch, "get_today_dashboard", lambda cur: _fake_today(True))
     calls = []
-    monkeypatch.setattr(gate_watch.telegram, "send_message", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(gate_watch.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     gate_watch.check_once()
     assert calls == []
     with get_conn() as conn, conn.cursor() as cur:
@@ -68,11 +68,11 @@ def test_check_once_alerts_on_gate_lifted(monkeypatch):
         conn.commit()
     monkeypatch.setattr(gate_watch, "get_today_dashboard", lambda cur: _fake_today(False, source="ручная правка"))
     calls = []
-    monkeypatch.setattr(gate_watch.telegram, "send_message", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(gate_watch.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     gate_watch.check_once()
     assert len(calls) == 1
-    (chat_id, text), kwargs = calls[0]
-    assert chat_id == gate_watch.CHAT_ID
+    (source, priority, text), kwargs = calls[0]
+    assert source == "gate_watch" and priority == "critical"
     assert "СНЯТ" in text
     assert "ручная правка" in text
     assert kwargs.get("parse_mode") == "HTML"
@@ -86,10 +86,10 @@ def test_check_once_alerts_on_gate_restored(monkeypatch):
         conn.commit()
     monkeypatch.setattr(gate_watch, "get_today_dashboard", lambda cur: _fake_today(True, source="МРТ"))
     calls = []
-    monkeypatch.setattr(gate_watch.telegram, "send_message", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(gate_watch.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     gate_watch.check_once()
     assert len(calls) == 1
-    (chat_id, text), kwargs = calls[0]
+    (source, priority, text), kwargs = calls[0]
     assert "снова активен" in text
     assert "МРТ" in text
 
@@ -100,6 +100,6 @@ def test_check_once_no_alert_when_state_unchanged(monkeypatch):
         conn.commit()
     monkeypatch.setattr(gate_watch, "get_today_dashboard", lambda cur: _fake_today(True))
     calls = []
-    monkeypatch.setattr(gate_watch.telegram, "send_message", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(gate_watch.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     gate_watch.check_once()
     assert calls == []

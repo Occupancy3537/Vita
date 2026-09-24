@@ -51,17 +51,17 @@ def test_run_once_sends_when_backlog_nonempty(monkeypatch):
         issue_log.record_issue(cur, f"{TEST_PREFIX}pending", source="x", summary="ждёт решения", severity="important")
         conn.commit()
     sent = []
-    monkeypatch.setattr(ir.telegram, "send_message", lambda chat_id, text, **kw: sent.append((chat_id, text)))
+    monkeypatch.setattr(ir.notify, "notify", lambda source, priority, text: sent.append((source, priority, text)))
     n = ir.run_once()
     assert n == 1
     assert len(sent) == 1
-    assert sent[0][0] == ir.CHAT_ID
-    assert "ждёт решения" in sent[0][1]
+    assert sent[0][0] == "issue_review" and sent[0][1] == "normal"
+    assert "ждёт решения" in sent[0][2]
 
 
 def test_run_once_silent_when_backlog_empty(monkeypatch):
     sent = []
-    monkeypatch.setattr(ir.telegram, "send_message", lambda chat_id, text, **kw: sent.append(text))
+    monkeypatch.setattr(ir.notify, "notify", lambda source, priority, text: sent.append(text))
     n = ir.run_once()
     assert n == 0
     assert sent == []  # тишина — не новый источник шума

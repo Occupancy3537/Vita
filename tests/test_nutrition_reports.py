@@ -227,18 +227,20 @@ def test_write_day_sum_upserts_by_date():
 def test_run_daily_no_meals_sends_reminder_only(monkeypatch):
     monkeypatch.setattr(nr, "build_daily_report", lambda cur: None)
     calls = []
-    monkeypatch.setattr(nr.telegram, "send_message", lambda *a, **kw: calls.append(a))
+    monkeypatch.setattr(nr.notify, "notify", lambda *a, **kw: calls.append(a))
     nr.run_daily()
     assert len(calls) == 1
-    assert "не забудь" in calls[0][1].lower()
+    assert calls[0][0] == "nutrition_reports" and calls[0][1] == "normal"
+    assert "не забудь" in calls[0][2].lower()
 
 
 def test_run_weekly_no_meals_sends_reminder_only(monkeypatch):
     monkeypatch.setattr(nr, "build_weekly_report", lambda cur: None)
     calls = []
-    monkeypatch.setattr(nr.telegram, "send_message", lambda *a, **kw: calls.append(a))
+    monkeypatch.setattr(nr.notify, "notify", lambda *a, **kw: calls.append(a))
     nr.run_weekly()
     assert len(calls) == 1
+    assert calls[0][0] == "nutrition_reports_weekly"
 
 
 def test_call_model_no_api_key_returns_empty(monkeypatch):

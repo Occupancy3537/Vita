@@ -142,6 +142,14 @@ with get_conn() as _conn, _conn.cursor() as _cur:
           chat_id text PRIMARY KEY, person_id text NOT NULL,
           added_at timestamptz NOT NULL DEFAULT now())
     """)
+    # ROADMAP 5.1 (2026-09-24): журнал инициативных отправок app/notify.py.
+    _cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schema()}.notify_log (
+          id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+          ts timestamptz NOT NULL DEFAULT now(), sent_date date NOT NULL,
+          source text NOT NULL, priority text NOT NULL, immediate boolean NOT NULL,
+          text text, delivered_in_digest boolean NOT NULL DEFAULT false)
+    """)
     _conn.commit()
 
 
@@ -153,7 +161,7 @@ HEALTH_TEST_TABLES_TO_CLEAN = [
 
 # Объектная модель card.* — должна быть 1:1 с боевой card (test_schema_parity).
 TABLES_TO_CLEAN = [
-    "chat_person", "source_message", "extraction", "fact", "episode", "problem", "intervention",
+    "chat_person", "notify_log", "source_message", "extraction", "fact", "episode", "problem", "intervention",
     "opinion", "disagreement", "recommendation", "expectation", "recommendation_verdict",
     "visit", "lab_result", "memory_note", "journal", "entity_index", "metric_coverage",
     "rf_event", "rf_session", "dialog_turn", "agent_step",

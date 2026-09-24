@@ -87,14 +87,14 @@ def test_check_stale_recent_but_failed_result_alerts():
 def test_run_once_sends_only_on_alert(monkeypatch):
     calls = []
     monkeypatch.setattr(ba, "check_stale", lambda: "⚠️ тест")
-    monkeypatch.setattr(ba.telegram, "send_message", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(ba.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     ba.run_once()
-    assert calls == [((ba.CHAT_ID, "⚠️ тест"), {"parse_mode": "HTML"})]
+    assert calls == [(("backup_alert", "critical", "⚠️ тест"), {"parse_mode": "HTML"})]
 
 
 def test_run_once_no_send_when_clean(monkeypatch):
     calls = []
     monkeypatch.setattr(ba, "check_stale", lambda: "")
-    monkeypatch.setattr(ba.telegram, "send_message", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(ba.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     ba.run_once()
     assert calls == []

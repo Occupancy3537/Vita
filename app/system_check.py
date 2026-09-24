@@ -37,7 +37,7 @@ from datetime import date, datetime, timedelta
 import httpx
 
 from app.db import get_conn
-from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
+from app import notify
 from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
@@ -316,20 +316,27 @@ def build_message() -> dict:
         msg = f"⚠️ <b>Система: проблемы ({ts} ВЛ)</b>\n\n• " + "\n• ".join(problems)
         if notes:
             msg += "\n\n<i>" + "; ".join(notes) + "</i>"
-    elif notes:
-        msg = f"✅ Система в норме ({ts} ВЛ), но: " + "; ".join(notes) + "."
     else:
+        # ROADMAP 5.4 (2026-09-24, по прямому запросу Влада): раньше "✅ Система
+        # в норме" слался КАЖДЫЙ день безусловно (в т.ч. когда были только notes
+        # без единой реальной problems) — гарантированный шум. Теперь при
+        # полном порядке НЕ шлём вообще ничего: факт прогона и так виден в
+        # card.scheduler_run_log/странице «Настройки» (run_log.mark_run ниже
+        # срабатывает независимо от того, было ли сообщение). msg всё равно
+        # строим — виден в /dashboard/system-status и в возвращаемом result.
         msg = (
             f"✅ Система в норме ({ts} ВЛ). Дашборд-эндпоинты отвечают без ошибок, "
             "Daily_Trends/day_sum/Meals без дыр за 5 дней, числа в питании парсятся, "
             "детектор аномалий проверял недавно, Garmin-ingest без сбоев за 3 дня, гейт blocked (грыжа)."
+            + ((" Но: " + "; ".join(notes) + ".") if notes else "")
         )
     return {"message": msg, "has_problems": bool(problems), "problems": problems, "notes": notes}
 
 
 def run_once() -> dict:
     result = build_message()
-    telegram.send_message(CHAT_ID, result["message"], parse_mode="HTML")
+    if result["has_problems"]:
+        notify.notify("system_check", "critical", result["message"], parse_mode="HTML")
     return result
 
 

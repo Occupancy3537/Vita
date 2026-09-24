@@ -24,7 +24,7 @@ F7 (внешний аудит логики, 2026-09-22): раньше упавш
 import logging
 import time
 
-from app import hermes_telegram, run_log
+from app import notify, run_log
 from app.db import get_conn, schema
 from app.scheduler_alert import alert_on_failure
 
@@ -68,8 +68,8 @@ def _mark_failure(source_id: str, exc: BaseException) -> int:
 def _alert_dead_letter(source_id: str, attempts: int, exc: BaseException) -> None:
     """Один алерт владельцу при уходе сообщения в dead-letter (fail-safe)."""
     try:
-        hermes_telegram.send_message(
-            hermes_telegram.CHAT_ID,
+        notify.notify(
+            "card_processor_dead_letter", "critical",
             f"💀 Сообщение {source_id} не разобралось за {attempts} попытки — убрано из очереди "
             f"(status=failed), вечного ретрая больше нет.\n"
             f"Последняя ошибка: {str(exc)[:300]}\n"

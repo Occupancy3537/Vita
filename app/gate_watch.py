@@ -16,11 +16,7 @@ import time
 
 from app.dashboard import get_today_dashboard
 from app.db import get_conn
-# 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py).
-# У gate_watch нет n8n-предшественника (добавлен премортемом 2026-09-20,
-# см. модульный докстринг) — прямых исторических данных о боте нет, отнесён
-# к алертам по аналогии с остальными системными проверками.
-from app import hermes_telegram as telegram
+from app import notify
 from app import run_log
 from app.scheduler_alert import alert_on_failure
 
@@ -55,8 +51,8 @@ def check_once() -> None:
         # таблицы — не алертим на переход, которого не видели (нет базы для
         # сравнения), просто запоминаем текущее состояние.
         if prev_blocked is True and now_blocked is False:
-            telegram.send_message(
-                CHAT_ID,
+            notify.notify(
+                "gate_watch", "critical",
                 "🟢➡️ <b>Гейт нагрузки СНЯТ</b>\n\n"
                 "Было ограничение по спине, сейчас — нет. "
                 f"Источник сейчас: {gate.get('source') or 'нет'}.\n\n"
@@ -65,8 +61,8 @@ def check_once() -> None:
                 parse_mode="HTML",
             )
         elif prev_blocked is False and now_blocked is True:
-            telegram.send_message(
-                CHAT_ID,
+            notify.notify(
+                "gate_watch", "critical",
                 f"ℹ️ Гейт нагрузки снова активен (источник: {gate.get('source') or '?'}).",
                 parse_mode="HTML",
             )

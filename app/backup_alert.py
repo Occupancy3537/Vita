@@ -17,7 +17,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from app.db import get_conn
-from app import hermes_telegram as telegram  # 2026-09-21: алерты -> Hermes, не бот доктора (см. app/hermes_telegram.py)
+from app import notify
 from app import run_log
 from app.scheduler_alert import alert_on_failure
 
@@ -97,7 +97,7 @@ def check_stale() -> str:
 def run_once() -> None:
     alert = check_stale()
     if alert:
-        telegram.send_message(CHAT_ID, alert, parse_mode="HTML")
+        notify.notify("backup_alert", "critical", alert, parse_mode="HTML")
 
 
 def run_scheduler() -> None:

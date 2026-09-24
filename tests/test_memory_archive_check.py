@@ -31,16 +31,16 @@ def test_build_alert_lists_w3_questions(monkeypatch):
 def test_run_once_sends_telegram_only_when_alert(monkeypatch):
     calls = []
     monkeypatch.setattr(mac, "_build_alert", lambda: "🗂 тест")
-    monkeypatch.setattr(mac.telegram, "send_message", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(mac.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     mac.run_once()
     assert len(calls) == 1
-    assert calls[0][0] == (mac.CHAT_ID, "🗂 тест")
+    assert calls[0][0] == ("memory_archive_check", "normal", "🗂 тест")
     assert calls[0][1] == {"parse_mode": "HTML"}
 
 
 def test_run_once_no_send_when_no_alert(monkeypatch):
     calls = []
     monkeypatch.setattr(mac, "_build_alert", lambda: "")
-    monkeypatch.setattr(mac.telegram, "send_message", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.setattr(mac.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     mac.run_once()
     assert calls == []
