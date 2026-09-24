@@ -1,13 +1,19 @@
 """Волна 3 (B2, 2026-09-18): регистратор лаб-документов — классификация-ветвление,
 маппинг маркеров (порт ноды Map), запись через внутренние функции /visits/sync +
 /labs/result (идемпотентность), честные отказы. LLM/httpx/telegram мокаются;
-запись идёт в card_test через настоящие app.main.visits_sync/labs_result_sync."""
+запись объектной модели идёт в card_test (schema()), дуал-райт двойников
+health.visits/health.results — в health_test (ROADMAP 0.7/0.2, 2026-09-24:
+card_test/health_test разведены, см. tests/conftest.py) через настоящие
+app.main.visits_sync/labs_result_sync."""
+import os
 from unittest import mock
 
 import pytest
 
 from app import registrar
 from app.db import get_conn, schema
+
+_HEALTH_SCHEMA = os.environ["REGISTRAR_HEALTH_SCHEMA"]
 
 MARKER_ROWS = [
     {"Marker_ID": "M041", "Name": "Гемоглобин"},
@@ -257,7 +263,7 @@ def test_reply_send_failure_does_not_raise(monkeypatch, sent):
 def _health_visits(**vals):
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            f'INSERT INTO {schema()}.visits ("Visit_ID","Date","Age_at_Visit","Lab_Name","Notes") '
+            f'INSERT INTO {_HEALTH_SCHEMA}.visits ("Visit_ID","Date","Age_at_Visit","Lab_Name","Notes") '
             'VALUES (%s,%s,%s,%s,%s) ON CONFLICT ("Visit_ID") DO NOTHING',
             (vals.get("Visit_ID"), vals.get("Date"), vals.get("Age_at_Visit"),
              vals.get("Lab_Name"), vals.get("Notes")))
@@ -268,10 +274,10 @@ def test_dual_write_creates_visit_and_results(lab_doc, sent):
     registrar.handle_update(_photo_update())
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(f'SELECT "Visit_ID","Date","Age_at_Visit","Lab_Name","Notes" FROM {schema()}.visits')
+        cur.execute(f'SELECT "Visit_ID","Date","Age_at_Visit","Lab_Name","Notes" FROM {_HEALTH_SCHEMA}.visits')
         v = cur.fetchall()
         assert v == [("V20260915", "15.09.2026", "44", "Инвитро", "биохимия")]
-        cur.execute(f'SELECT "Marker_ID","Value","Original_Unit","Lab_Min","Lab_Max" FROM {schema()}.results ORDER BY "Marker_ID"')
+        cur.execute(f'SELECT "Marker_ID","Value","Original_Unit","Lab_Min","Lab_Max" FROM {_HEALTH_SCHEMA}.results ORDER BY "Marker_ID"')
         rows = cur.fetchall()
         assert [r[0] for r in rows] == ["M003", "M041"]
         assert rows[1] == ("M041", "145", "г/л", "130", "160")  # Value с запятой/без .0 — формат старого пути
@@ -283,9 +289,9 @@ def test_dual_write_idempotent_both_targets(lab_doc, sent):
     registrar.handle_update(_photo_update())
     registrar.handle_update(_photo_update())
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT count(*) FROM {schema()}.visits")
+        cur.execute(f"SELECT count(*) FROM {_HEALTH_SCHEMA}.visits")
         assert cur.fetchone()[0] == 1
-        cur.execute(f"SELECT count(*) FROM {schema()}.results")
+        cur.execute(f"SELECT count(*) FROM {_HEALTH_SCHEMA}.results")
         assert cur.fetchone()[0] == 2
         cur.execute(f"SELECT count(*) FROM {schema()}.visit WHERE provenance->>'source_ref' = 'V20260915'")
         assert cur.fetchone()[0] == 1
@@ -301,10 +307,10 @@ def test_dual_write_reuses_existing_visit_by_date(lab_doc, sent):
     registrar.handle_update(_photo_update())
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(f'SELECT "Visit_ID","Lab_Name","Notes" FROM {schema()}.visits')
+        cur.execute(f'SELECT "Visit_ID","Lab_Name","Notes" FROM {_HEALTH_SCHEMA}.visits')
         v = cur.fetchall()
         assert v == [("V09", "КДЦ", "старая заметка")]  # старые поля сохранены
-        cur.execute(f'SELECT DISTINCT "Visit_ID" FROM {schema()}.results')
+        cur.execute(f'SELECT DISTINCT "Visit_ID" FROM {_HEALTH_SCHEMA}.results')
         assert cur.fetchall() == [("V09",)]  # результаты под реюзнутым визитом
 
 
@@ -351,7 +357,7 @@ def test_second_document_same_date_different_value_not_overwritten(monkeypatch, 
         cur.execute(f"SELECT value_num FROM {schema()}.lab_result WHERE marker_key = 'M003'")
         rows = cur.fetchall()
         assert len(rows) == 1 and float(rows[0][0]) == 5.2  # первое значение осталось, второй строки нет
-        cur.execute(f'SELECT "Value" FROM {schema()}.results WHERE "Marker_ID" = %s', ("M003",))
+        cur.execute(f'SELECT "Value" FROM {_HEALTH_SCHEMA}.results WHERE "Marker_ID" = %s', ("M003",))
         assert cur.fetchall() == [("5,2",)]  # health.* тоже не перезаписан вторым документом
 
 
@@ -370,7 +376,7 @@ def test_dual_write_failure_visible_card_still_written(lab_doc, sent, monkeypatc
         assert cur.fetchone()[0] == 1
         cur.execute(f"SELECT count(*) FROM {schema()}.lab_result")
         assert cur.fetchone()[0] == 2
-        cur.execute(f"SELECT count(*) FROM {schema()}.results")
+        cur.execute(f"SELECT count(*) FROM {_HEALTH_SCHEMA}.results")
         assert cur.fetchone()[0] == 0  # health-цель не тронута упавшим вызовом
 
 

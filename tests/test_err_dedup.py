@@ -1,24 +1,18 @@
 """app/err_dedup.py — порт n8n _Err Dedup (2026-09-21, последний шаг
 «можно ли полностью убрать n8n»): три ночных cron-скрипта звали этот webhook
 напрямую для алертов, единственная оставшаяся живая причина не выключать
-n8n. Реальная таблица card.err_dedup_state, тестовые ключи, cleanup."""
+n8n. app/err_dedup.py хардкодит card.err_dedup_state буквально (не через
+schema()) — писал в БОЕВОЙ card даже под CARD_PG_SCHEMA=card_test.
+Изолировано через _isolate_real_schema_writes (ROADMAP 0.7, 2026-09-24)."""
 import pytest
 
 from app import err_dedup as ed
 from app.db import get_conn, schema
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
 
 TEST_WF = "test_wf_err_dedup"
 TEST_NODE = "test_node"
-
-
-@pytest.fixture(autouse=True)
-def _cleanup():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM card.err_dedup_state WHERE key LIKE %s", (f"{TEST_WF}%",))
-        cur.execute(f"DELETE FROM {schema()}.issue_log WHERE natural_key LIKE %s", (f"errdedup:{TEST_WF}%",))
-        conn.commit()
 
 
 def test_wrong_token_returns_send_false_silently():

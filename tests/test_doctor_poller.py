@@ -408,7 +408,11 @@ def test_process_one_tz_command_calls_handler(monkeypatch):
 
 def test_handle_tz_command_set_status_reset(monkeypatch):
     """Полный круг: смена зоны → статус → мусорный ввод отклонён → домой.
-    Зона меняется в card_test (people-двойник conftest), восстанавливаем после."""
+    Зона меняется в health_test (people-двойник health.*, REGISTRAR_HEALTH_SCHEMA,
+    ROADMAP 0.7/0.2 2026-09-24 — не card_test, см. tests/conftest.py),
+    восстанавливаем после."""
+    import os
+    health_schema = os.environ["REGISTRAR_HEALTH_SCHEMA"]
     sent = []
     monkeypatch.setattr(poller.telegram, "send_message",
                         lambda chat_id, text, **kw: sent.append(text))
@@ -434,5 +438,5 @@ def test_handle_tz_command_set_status_reset(monkeypatch):
         assert people.get_person()["current_tz"] == saved
     finally:
         with get_conn() as conn, conn.cursor() as cur:
-            cur.execute(f"UPDATE {schema()}.people SET current_tz = %s WHERE id = 'self'", (saved,))
+            cur.execute(f"UPDATE {health_schema}.people SET current_tz = %s WHERE id = 'self'", (saved,))
             conn.commit()

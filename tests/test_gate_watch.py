@@ -1,24 +1,36 @@
 """app/gate_watch.py — алерт на снятие/возврат гейта нагрузки (порт из n8n
 today-dashboard Build Today JSON, 2026-09-20). health.gate_state — реальная
-прод-таблица (1 строка-синглтон, health.* тестовой копии нет, тот же принцип,
-что test_dashboard_bioage.py/test_dashboard_today.py) — сбрасываем строку
-до/после каждого теста, чтобы тесты не зависели от порядка запуска и не
-трогали реальное текущее состояние дольше теста."""
+прод-таблица (1 строка-синглтон, safety-критичная: тот источник, с которым
+сверяется алерт о снятии/возврате гейта при активной грыже L5/S1).
+
+2026-09-24 (ROADMAP 0.7): раньше фикстура ПРОСТО удаляла боевую строку
+до/после каждого теста, без сохранения исходного значения — тот же класс
+бага, что уже стоил инцидентов #54 (health.anomaly_log) и #60
+(health.backup_alert_state), просто этот случай ещё не успел выстрелить
+(живой планировщик тикает раз в 15 мин и обычно успевает переписать
+правильное значение раньше, чем это стало бы заметно — но полагаться на
+удачное совпадение по времени для safety-таблицы нельзя). Теперь —
+`_isolate_real_schema_writes` (tests/conftest.py): соединение с боевой
+базой физически не может закоммитить ничего, что бы тест ни исполнил,
+поэтому реальная health.gate_state вообще не видит эти DELETE/INSERT."""
 import pytest
 
 from app import gate_watch
 from app.db import get_conn
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
+
 
 @pytest.fixture(autouse=True)
-def reset_gate_state():
+def reset_gate_state(_isolate_real_schema_writes):
+    """DELETE здесь — не "уборка на всякий случай", а часть логики теста:
+    test_check_once_no_alert_on_first_ever_run проверяет поведение именно
+    при ОТСУТСТВИИ строки. Под _isolate_real_schema_writes это безопасно —
+    ничего не коммитится, реальная строка не видит этот DELETE вообще."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM health.gate_state WHERE id = 1")
         conn.commit()
     yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM health.gate_state WHERE id = 1")
-        conn.commit()
 
 
 def _fake_today(blocked, source="тест"):

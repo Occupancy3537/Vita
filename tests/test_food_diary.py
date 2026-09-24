@@ -11,6 +11,8 @@ from app import food_diary as fd
 from app import timeutil
 from app.db import get_conn
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
+
 
 # --- классификация сообщений ------------------------------------------------
 
@@ -275,14 +277,6 @@ def test_telegram_user_id_formats_name():
 # --- SQL для health.meals (реальная таблица, тестовые Entry_ID, cleanup) ------
 
 TEST_ENTRY_ID = "test-fd-99999999"
-
-
-@pytest.fixture(autouse=True)
-def _cleanup():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('DELETE FROM health.meals WHERE "Entry_ID" = %s', (TEST_ENTRY_ID,))
-        conn.commit()
 
 
 def _nutrients(calories="500"):

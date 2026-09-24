@@ -154,6 +154,13 @@ class TestHandleReply:
 # тестовая строка каждый раз переводится в терминальный "answered" — не
 # участвует в pick_next() ни при каких обстоятельствах (мёртвый статус),
 # просто остаётся в таблице как безвредный, явно помеченный "тест" фикстур.
+#
+# 2026-09-24 (ROADMAP 0.7): оба теста ниже дополнительно изолированы через
+# _isolate_real_schema_writes (ничего не коммитится по-настоящему). Это НЕ
+# отменяет смысл написанного выше: _isolate_real_schema_writes открывает
+# РЕАЛЬНОЕ соединение теми же credentials (app.db.get_conn), что и прод —
+# у роли card_service по-прежнему физически нет DELETE на health.anamnesis,
+# это свойство роли в Postgres, а не что-то, что можно "изолировать".
 from app.db import get_conn
 
 TEST_Q_ID = "TEST-anamnesis-999"
@@ -167,6 +174,7 @@ def _neutralize_test_row(cur):
     )
 
 
+@pytest.mark.usefixtures("_isolate_real_schema_writes")
 def test_fetch_rows_reads_real_health_anamnesis_table():
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -182,6 +190,7 @@ def test_fetch_rows_reads_real_health_anamnesis_table():
     assert any(r["Q_ID"] == TEST_Q_ID for r in rows)
 
 
+@pytest.mark.usefixtures("_isolate_real_schema_writes")
 def test_ask_daily_update_writes_to_real_health_anamnesis_table():
     """Та же UPDATE-строка, что ask_daily() исполняет при action='ask' —
     проверена напрямую по СВОЕМУ Q_ID (не через pick_next()/ask_daily()

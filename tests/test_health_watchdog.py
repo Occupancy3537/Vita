@@ -7,6 +7,8 @@ import pytest
 from app import health_watchdog as hw
 from app.db import get_conn
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
+
 
 class FakeCursor:
     def __init__(self, queue):
@@ -47,14 +49,6 @@ def test_days_computes_signed_difference():
 # --- watchdog_nudged / watchdog_state (реальные таблицы) --------------------
 
 TEST_KEY = "test:health_watchdog_key"
-
-
-@pytest.fixture(autouse=True)
-def cleanup_state():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM health.watchdog_nudged WHERE key = %s", (TEST_KEY,))
-        conn.commit()
 
 
 def test_store_and_load_nudge_roundtrip():

@@ -1,6 +1,9 @@
 """POST /ingest/biohacking — эндпоинт-обвязка над app.biohacking_ingest
 (логика уже покрыта test_biohacking_ingest.py; здесь — что FastAPI-роут
-действительно вызывает process_ingest и возвращает ожидаемый ответ)."""
+действительно вызывает process_ingest и возвращает ожидаемый ответ).
+Пишет в реальные health.daily_trends/health.garmin_ingest_log (тестовая
+дата) — изолировано через _isolate_real_schema_writes (ROADMAP 0.7)."""
+import pytest
 from fastapi.testclient import TestClient
 
 from app import biohacking_ingest as bi
@@ -8,6 +11,8 @@ from app.db import get_conn
 from app.main import app
 
 client = TestClient(app)
+
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
 
 TEST_DATE = "1999-12-30"
 
@@ -22,13 +27,6 @@ def _stub_all(monkeypatch):
     monkeypatch.setattr(bi, "sync_device_facts", lambda row: None)
     import app.anomaly_detector as ad
     monkeypatch.setattr(ad, "run_daily_check", lambda: None)
-
-
-def teardown_function():
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('DELETE FROM health.daily_trends WHERE "Дата" = %s', (TEST_DATE,))
-        cur.execute("DELETE FROM health.garmin_ingest_log WHERE date = %s", (TEST_DATE,))
-        conn.commit()
 
 
 def test_ingest_biohacking_writes_row_and_returns_date(monkeypatch):

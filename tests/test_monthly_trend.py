@@ -10,6 +10,8 @@ import pytest
 from app import monthly_trend as mt
 from app.db import get_conn
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
+
 
 def test_to_number_handles_comma_and_percent():
     assert mt._to_number("24,3") == 24.3
@@ -131,16 +133,6 @@ def test_build_telegram_text_prefers_strong_over_moderate():
 # --- запись в Postgres (реальные таблицы, тестовый month-ключ, cleanup) -------
 
 TEST_MONTH = "1999-12"
-
-
-@pytest.fixture(autouse=True)
-def _cleanup():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM health.month_sum WHERE month = %s", (TEST_MONTH,))
-        cur.execute("DELETE FROM health.month_wellness_log WHERE month = %s", (TEST_MONTH,))
-        cur.execute("DELETE FROM health.monthly_trend_log WHERE period_month = %s", (TEST_MONTH,))
-        conn.commit()
 
 
 def test_write_month_sum_upserts():

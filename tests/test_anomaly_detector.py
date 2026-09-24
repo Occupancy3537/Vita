@@ -1,7 +1,16 @@
 """app/anomaly_detector.py — порт n8n Anomaly_Detector/Correlations
 (2026-09-20, группа 3). Юниты на чистый z-score движок + сценарии дедупа/
-записи через monkeypatch и реальную health.anomaly_alerted/health.anomaly_log
-(тестовые даты, явный cleanup)."""
+записи через monkeypatch и реальные health.anomaly_alerted/health.anomaly_log/
+health.digest_log/card.anomaly_detector_state (последняя — синглтон,
+хардкожена в app/anomaly_detector.py буквально как "card.", в обход
+schema()/card_test).
+
+2026-09-24 (ROADMAP 0.7): изоляция через `_isolate_real_schema_writes`
+(tests/conftest.py) — раньше здесь были две фикстуры: обычный DELETE по
+тестовым датам (безопасно и так, но задача — не полагаться на "убрал за
+собой") и save/restore для синглтона card.anomaly_detector_state (после
+инцидента с health.anomaly_log в этом же файле). Обе избыточны под
+изоляцией — ничего не коммитится, восстанавливать нечего."""
 import json
 from datetime import date, timedelta
 
@@ -9,6 +18,8 @@ import pytest
 
 from app import anomaly_detector as ad
 from app.db import get_conn
+
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
 
 METRICS = [{"key": "m", "label": "Метрика", "direction": "higher_better", "min_abs_delta": 1}]
 
@@ -127,15 +138,6 @@ def test_load_metrics_fallback_when_sheet_empty(monkeypatch):
 TEST_DAY = "1999-12-31"
 
 
-@pytest.fixture(autouse=True)
-def _cleanup():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM health.anomaly_alerted WHERE alert_date = %s", (TEST_DAY,))
-        cur.execute("DELETE FROM health.anomaly_log WHERE date = %s", (TEST_DAY,))
-        conn.commit()
-
-
 def test_mark_and_check_alerted_roundtrip():
     with get_conn() as conn, conn.cursor() as cur:
         assert ad._already_alerted(cur, TEST_DAY, "Метрика") is False
@@ -194,30 +196,13 @@ def test_build_weekly_digest_excludes_days_outside_window():
 
 
 # --- mark_daily_check_ran -----------------------------------------------------
+# card.anomaly_detector_state — singleton (id=1), хардкожен в
+# app/anomaly_detector.py буквально как "card." (не через schema()), поэтому
+# писал в БОЕВОЙ card даже под CARD_PG_SCHEMA=card_test. До 2026-09-24 здесь
+# был save/restore (после инцидента с health.anomaly_log в этом же файле) —
+# под _isolate_real_schema_writes избыточен, ничего не коммитится.
 
-@pytest.fixture()
-def _preserve_anomaly_detector_state():
-    """card.anomaly_detector_state — singleton (id=1), читает его настоящий
-    прод (system_check._check_anomaly_freshness сверяется с ним каждое утро) —
-    тест обязан вернуть исходное значение, а не оставить тестовую дату
-    (тот же урок, что и инцидент с health.anomaly_log в этом же файле)."""
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT last_run_at, last_day_checked FROM card.anomaly_detector_state WHERE id = 1")
-        original = cur.fetchone()
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        if original:
-            cur.execute(
-                "INSERT INTO card.anomaly_detector_state (id, last_run_at, last_day_checked) VALUES (1, %s, %s) "
-                "ON CONFLICT (id) DO UPDATE SET last_run_at = EXCLUDED.last_run_at, last_day_checked = EXCLUDED.last_day_checked",
-                original,
-            )
-        else:
-            cur.execute("DELETE FROM card.anomaly_detector_state WHERE id = 1")
-        conn.commit()
-
-
-def test_mark_daily_check_ran_writes_state(_preserve_anomaly_detector_state):
+def test_mark_daily_check_ran_writes_state():
     """2026-09-22: отдельная отметка о прогоне (не health.anomaly_log — та
     пишется только при находках) — без неё ложный алерт system_check.py
     после любой 'чистой' серии дней (см. докстринг mark_daily_check_ran)."""
@@ -245,7 +230,7 @@ def test_run_daily_check_no_anomalies_sends_nothing(monkeypatch):
     assert sent == []
 
 
-def test_run_daily_check_clean_day_still_marks_state(monkeypatch, _preserve_anomaly_detector_state):
+def test_run_daily_check_clean_day_still_marks_state(monkeypatch):
     """Регрессия 2026-09-22: 'аномалий нет' — законный итог, но детектор
     ДОЛЖЕН отметиться как проверивший этот день, иначе system_check.py не
     отличит 'чисто' от 'вообще не запускался'."""
@@ -259,7 +244,7 @@ def test_run_daily_check_clean_day_still_marks_state(monkeypatch, _preserve_anom
         assert str(cur.fetchone()[0]) == latest_date
 
 
-def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch, _preserve_anomaly_detector_state):
+def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch):
     # даты должны быть БЛИЗКИ к реальному "сегодня" — _prune_alerted() чистит
     # дедуп-записи старше ANOMALY_ALERT_KEEP_DAYS по РЕАЛЬНОМУ wall-clock now(),
     # что в проде всегда верно (latest = вчера/сегодня), но с искусственно
@@ -330,32 +315,27 @@ def test_append_digest_row_writes_to_postgres_and_upserts():
         "metric_summary_lines": ["Сон: аномалия 2× за неделю (1999-12-26, 1999-12-27)"],
         "days_detail": [{"date": "1999-12-26", "anomaly_count": 1, "anomalies": []}],
     }
-    try:
-        ad._append_digest_row(d)
-        with get_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT period_end, days_with_data, total_anomalies, strong_anomalies, metric_summary, days_detail "
-                "FROM health.digest_log WHERE period_start = %s", (d["period_start"],),
-            )
-            row = cur.fetchone()
-        assert row[0].isoformat() == d["period_end"]
-        assert row[1:4] == (7, 3, 1)
-        assert "Сон" in row[4]
-        assert row[5][0]["date"] == "1999-12-26"
+    ad._append_digest_row(d)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT period_end, days_with_data, total_anomalies, strong_anomalies, metric_summary, days_detail "
+            "FROM health.digest_log WHERE period_start = %s", (d["period_start"],),
+        )
+        row = cur.fetchone()
+    assert row[0].isoformat() == d["period_end"]
+    assert row[1:4] == (7, 3, 1)
+    assert "Сон" in row[4]
+    assert row[5][0]["date"] == "1999-12-26"
 
-        # Повторный прогон той же недели — UPSERT, не дубль-строка (period_start — PK).
-        d["total_anomalies"] = 5
-        ad._append_digest_row(d)
-        with get_conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT count(*), max(total_anomalies) FROM health.digest_log WHERE period_start = %s",
-                        (d["period_start"],))
-            count, total = cur.fetchone()
-        assert count == 1
-        assert total == 5
-    finally:
-        with get_conn() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM health.digest_log WHERE period_start = %s", (d["period_start"],))
-            conn.commit()
+    # Повторный прогон той же недели — UPSERT, не дубль-строка (period_start — PK).
+    d["total_anomalies"] = 5
+    ad._append_digest_row(d)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*), max(total_anomalies) FROM health.digest_log WHERE period_start = %s",
+                    (d["period_start"],))
+        count, total = cur.fetchone()
+    assert count == 1
+    assert total == 5
 
 
 def test_run_weekly_digest_no_data_sends_nothing(monkeypatch):

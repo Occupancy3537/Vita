@@ -1,22 +1,30 @@
 """app/people.py — часовой пояс человека (Фаза 3 плана TIME_AND_MULTIUSER):
-валидация IANA-зоны, смена, возврат домой. Тесты меняют current_tz в card_test;
-фикстура восстанавливает исходное значение после каждого теста."""
+валидация IANA-зоны, смена, возврат домой. app/people.py читает
+REGISTRAR_HEALTH_SCHEMA (двойник health.people — не объектная модель
+card.*, живёт в health_test, см. tests/conftest.py, ROADMAP 0.7/0.2
+2026-09-24: card_test/health_test разведены, чтобы card_test было 1:1
+с боевой card). Тесты меняют current_tz там же; фикстура восстанавливает
+исходное значение после каждого теста."""
+import os
+
 import pytest
 
 from app import people, timeutil
-from app.db import get_conn, schema
+from app.db import get_conn
+
+_HEALTH_SCHEMA = os.environ["REGISTRAR_HEALTH_SCHEMA"]
 
 
 @pytest.fixture(autouse=True)
 def restore_tz():
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT current_tz FROM {schema()}.people WHERE id = 'self'")
+        cur.execute(f"SELECT current_tz FROM {_HEALTH_SCHEMA}.people WHERE id = 'self'")
         row = cur.fetchone()
     saved = row[0] if row else None
     yield
     if saved is not None:
         with get_conn() as conn, conn.cursor() as cur:
-            cur.execute(f"UPDATE {schema()}.people SET current_tz = %s WHERE id = 'self'", (saved,))
+            cur.execute(f"UPDATE {_HEALTH_SCHEMA}.people SET current_tz = %s WHERE id = 'self'", (saved,))
             conn.commit()
 
 

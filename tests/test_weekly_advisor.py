@@ -8,6 +8,8 @@ import pytest
 from app import weekly_advisor as wa
 from app.db import get_conn
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
+
 
 # --- чистые хелперы -----------------------------------------------------------
 
@@ -262,14 +264,6 @@ def test_sync_actions_passes_real_bioage_flags_into_propose_request(monkeypatch)
 # --- write_recommendations_log (интеграционный, реальная таблица) --------------
 
 TEST_DATE = "1999-12-31"
-
-
-@pytest.fixture(autouse=True)
-def _cleanup_test_row():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('DELETE FROM health.recommendations_log WHERE "Date" = %s', (TEST_DATE,))
-        conn.commit()
 
 
 def test_write_recommendations_log_inserts_then_overwrites_same_date():

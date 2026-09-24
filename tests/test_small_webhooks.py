@@ -1,11 +1,14 @@
 """app/small_webhooks.py — три мелких n8n-вебхука без расписания/LLM
 (2026-09-20). check_breakfast — FakeCursor (health.meals не имеет тестовой
 схемы-копии, тот же принцип, что context.py); action_ack пишет в реальный
-health.action_log (прод-таблица), сбрасываем тестовую строку до/после."""
+health.action_log (прод-таблица) — изолировано через
+_isolate_real_schema_writes (ROADMAP 0.7, 2026-09-24)."""
 import pytest
 
 from app import small_webhooks as sw
 from app.db import get_conn
+
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
 
 
 class FakeCursor:
@@ -47,14 +50,6 @@ def test_check_breakfast_false_when_only_older_dates():
 TEST_ACTION_ID = "2026-01-01|тестовое действие для test_small_webhooks"
 
 
-@pytest.fixture(autouse=True)
-def cleanup_test_action():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('DELETE FROM health.action_log WHERE "Action_ID" = %s', (TEST_ACTION_ID,))
-        conn.commit()
-
-
 def test_action_ack_wrong_token_forbidden():
     r = sw.action_ack("wrong", TEST_ACTION_ID, True)
     assert r == {"ok": False, "error": "forbidden"}
@@ -88,15 +83,10 @@ def test_action_ack_upserts_on_repeat_call():
 
 def test_action_ack_title_with_pipe_preserved():
     aid = "2026-01-01|шаг 1 | шаг 2"
-    try:
-        sw.action_ack(sw._ACTION_ACK_TOKEN, aid, True)
-        with get_conn() as conn, conn.cursor() as cur:
-            cur.execute('SELECT "Title" FROM health.action_log WHERE "Action_ID" = %s', (aid,))
-            assert cur.fetchone() == ("шаг 1 | шаг 2",)
-    finally:
-        with get_conn() as conn, conn.cursor() as cur:
-            cur.execute('DELETE FROM health.action_log WHERE "Action_ID" = %s', (aid,))
-            conn.commit()
+    sw.action_ack(sw._ACTION_ACK_TOKEN, aid, True)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute('SELECT "Title" FROM health.action_log WHERE "Action_ID" = %s', (aid,))
+        assert cur.fetchone() == ("шаг 1 | шаг 2",)
 
 
 # --- виджет -------------------------------------------------------------------

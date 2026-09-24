@@ -1,7 +1,9 @@
 """app/biohacking_ingest.py — порт n8n Collect_Biohacking_Data (2026-09-20,
 группа 3). Юниты на чистые хелперы + build_daily_trends_row сценарии +
 build_upsert_sql (null-clobber защита) + process_ingest оркестрация
-(все внешние вызовы замокан)."""
+(все внешние вызовы замокан). process_ingest пишет в реальные
+health.daily_trends/health.garmin_ingest_log (тестовая дата) — изолировано
+через _isolate_real_schema_writes (tests/conftest.py, ROADMAP 0.7, 2026-09-24)."""
 import math
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -11,6 +13,8 @@ import pytest
 from app import biohacking_ingest as bi
 from app import timeutil
 from app.db import get_conn
+
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
 
 
 # --- чистые хелперы -----------------------------------------------------------
@@ -204,6 +208,48 @@ def test_build_row_computes_sleep_efficiency():
     assert row["Эффективность_сна_"] == "95.2%"
 
 
+def test_build_row_missing_sleep_is_absent_not_zero():
+    """2026-09-24 (живая жалоба Влада — часы забыли надеть ночью, "сон 0 —
+    это в том числе 'сон не записан'"): sleep_total_min=None (Гармин не
+    отдал ни строки сна, см. send_to_n8n.py LEFT JOIN) должно означать "нет
+    данных", не "поспал 0 минут" — иначе anomaly_detector.py считает это
+    настоящим обвалом сна (ложная аномалия), а сонные поля вообще не должны
+    попасть в UPSERT (тот же анти-clobber фильтр, что и "Провал_без_движения_мин"
+    в test_build_row_no_swim_and_no_movement_data выше)."""
+    row = bi.build_daily_trends_row(
+        _base_garmin(sleep_total_min=None, sleep_deep_min=None, sleep_rem_min=None,
+                     awake_count=None, awake_time_min=None, restless_moments=None),
+        [], [], [], [], {}, {},
+    )
+    for key in ("Чистый_сон_мин", "Время_в_кровати_мин", "Эффективность_сна_",
+                "Глубокий_сон_мин", "REM_сон_мин", "Легкий_сон_мин",
+                "Пробуждения_кол_во", "Беспокойные_моменты", "Бодрствование_мин"):
+        assert key not in row, f"{key} должен отсутствовать (None), а не быть 0"
+
+
+def test_build_row_breakfast_and_fasting_without_sleep_data():
+    """2026-09-24 (живая жалоба Влада — часы не носили ночью, "не записалось
+    время завтрака и окно голода"): без bedtime/wakeup_time (сна нет) весь
+    расчёт завтрака/голодания раньше пропускался целиком, хотя сама еда за
+    оба дня в nutrition_rows была как обычно — отбой тут вообще ни при чём.
+    "Окно_голода_до_сна_ч" — единственное, что честно остаётся пустым (сам
+    отбой неизвестен, гадать нечем), остальное считается по еде напрямую."""
+    nutrition = [
+        {"Date": "2026-09-23T20:54", "Calories": "934", "Proteins": "40", "Fats": "30", "Carbs": "60"},
+        {"Date": "2026-09-24T08:15", "Calories": "300", "Proteins": "20", "Fats": "5", "Carbs": "30"},
+    ]
+    row = bi.build_daily_trends_row(
+        _base_garmin(date="2026-09-24", bedtime=None, wakeup_time=None,
+                     sleep_total_min=None, sleep_deep_min=None, sleep_rem_min=None,
+                     awake_count=None, awake_time_min=None, restless_moments=None),
+        nutrition, [], [], [], {}, {},
+    )
+    assert row["Ужин_время"] == "2026-09-23T20:54"
+    assert row["Завтрак_время"] == "2026-09-24T08:15"
+    assert row["Длительность_голода_ч"] == 11.4  # 20:54 -> 08:15, честно по еде
+    assert "Окно_голода_до_сна_ч" not in row  # отбой неизвестен — не гадаем
+
+
 def test_build_row_dinner_after_17h_before_bedtime():
     nutrition = [
         {"Date": "2026-09-19T08:00", "Calories": "300", "Proteins": "10", "Fats": "5", "Carbs": "30"},
@@ -330,15 +376,6 @@ def test_compute_pressure_deltas_missing_hourly_returns_empty():
 # --- process_ingest (полностью замоканная оркестрация) -----------------------
 
 TEST_DATE = "1999-12-31"
-
-
-@pytest.fixture(autouse=True)
-def _cleanup():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('DELETE FROM health.daily_trends WHERE "Дата" = %s', (TEST_DATE,))
-        cur.execute("DELETE FROM health.garmin_ingest_log WHERE date = %s", (TEST_DATE,))
-        conn.commit()
 
 
 def test_process_ingest_writes_row_and_calls_dependents(monkeypatch):

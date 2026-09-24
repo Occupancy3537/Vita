@@ -10,6 +10,8 @@ from app import nutrition_reports as nr
 from app import timeutil
 from app.db import get_conn
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
+
 
 # build_daily_report/build_weekly_report тестируются через monkeypatch их
 # собственных _fetch_meals/_fetch_recent_meals (dict-строки, тот же формат,
@@ -191,14 +193,6 @@ def test_build_weekly_prompt_includes_data():
 # --- _write_day_sum: реальная таблица, тестовая дата не пересекается с прод -
 
 TEST_DATE = "2099-01-01"
-
-
-@pytest.fixture(autouse=True)
-def cleanup_day_sum():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('DELETE FROM health.day_sum WHERE "Date" = %s', (TEST_DATE,))
-        conn.commit()
 
 
 def test_write_day_sum_maps_alcohol_column_name():

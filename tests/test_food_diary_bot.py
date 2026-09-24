@@ -8,6 +8,8 @@ import pytest
 from app import food_diary_bot as bot
 from app.db import get_conn
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
+
 
 # --- handle_update chat_id guard (2026-09-22, внешний аудит K5) -------------
 
@@ -102,14 +104,6 @@ def test_handle_message_command_sends_stats(monkeypatch):
 # --- handle_message: новая запись (текст) -------------------------------------
 
 TEST_ENTRY_ID = "test-bot-88888888"
-
-
-@pytest.fixture(autouse=True)
-def _cleanup():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('DELETE FROM health.meals WHERE "Entry_ID" IN (%s, %s)', (TEST_ENTRY_ID, "88888888"))
-        conn.commit()
 
 
 def test_handle_message_text_inserts_meal_and_sends_confirmation(monkeypatch):

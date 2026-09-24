@@ -6,31 +6,27 @@ backup_alert_state — реальная прод-таблица (1 строка-
 реальное состояние последнего пинга бэкапа (тот же класс, что инцидент с
 health.anomaly_log, #54), из-за чего check_stale() после каждого прогона
 тестов честно решал, что «пинга не было никогда», и слал бы ложный алерт.
-Теперь строка СОХРАНЯЕТСЯ и восстанавливается, а не удаляется."""
+Тогда починили save→delete→restore.
+
+2026-09-24 (ROADMAP 0.7): save/restore заменён на `_isolate_real_schema_writes`
+(tests/conftest.py) — соединение с боевой базой физически не может
+закоммитить ничего, поэтому восстанавливать больше нечего: DELETE ниже —
+не риск, а просто способ дать тестам предсказуемую стартовую точку («пинга
+ещё не было») внутри их же незакоммиченной транзакции."""
 import pytest
-from datetime import datetime, timedelta, timezone
 
 from app import backup_alert as ba
 from app.db import get_conn
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
+
 
 @pytest.fixture(autouse=True)
-def preserve_state():
+def start_empty(_isolate_real_schema_writes):
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT ts, result, detail, stamp FROM health.backup_alert_state WHERE id = 1")
-        saved = cur.fetchone()
         cur.execute("DELETE FROM health.backup_alert_state WHERE id = 1")
         conn.commit()
     yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM health.backup_alert_state WHERE id = 1")
-        if saved is not None:
-            cur.execute(
-                "INSERT INTO health.backup_alert_state (id, ts, result, detail, stamp) "
-                "VALUES (1, %s, %s, %s, %s)",
-                saved,
-            )
-        conn.commit()
 
 
 def test_handle_ping_wrong_token_is_silent_and_does_not_store():

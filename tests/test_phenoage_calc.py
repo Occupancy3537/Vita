@@ -8,6 +8,8 @@ import pytest
 from app import phenoage_calc as pa
 from app.db import get_conn
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
+
 
 # --- чистые хелперы -----------------------------------------------------------
 
@@ -141,14 +143,6 @@ def test_compute_phenoage_result_no_visits_returns_empty():
 
 TEST_DATE = "1999-12-25"
 TEST_FORMULA = "test-formula-cleanup"
-
-
-@pytest.fixture(autouse=True)
-def _cleanup():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM health.phenoage_log WHERE date = %s AND formula_version = %s", (TEST_DATE, TEST_FORMULA))
-        conn.commit()
 
 
 def test_write_phenoage_row_skips_when_pk_missing():

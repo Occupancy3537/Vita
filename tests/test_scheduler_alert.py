@@ -1,25 +1,16 @@
 """app/scheduler_alert.py — общий алерт на падение фонового цикла (см.
 докстринг модуля, AGENT_SYNC #38/#40). run_notify реально пишет в
-card.err_dedup_state — cleanup тестового ключа обязателен. 2026-09-23:
-run_notify() дополнительно пишет в card.issue_log (Шаг 1 «петли
-самоулучшения», см. app/issue_log.py) — тот же cleanup нужен и там,
-иначе тестовая находка навсегда остаётся «открытой» в бэклоге."""
+card.err_dedup_state — хардкожена буквально (не через schema()), писала
+в БОЕВОЙ card даже под CARD_PG_SCHEMA=card_test. Изолировано через
+_isolate_real_schema_writes (ROADMAP 0.7, 2026-09-24)."""
 import pytest
 
 from app import scheduler_alert as sa
 from app.db import get_conn, schema
 
+pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
+
 TEST_KEY = "test-scheduler-alert-source|scheduler"
-
-
-@pytest.fixture(autouse=True)
-def _cleanup():
-    yield
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM card.err_dedup_state WHERE key = %s", (TEST_KEY,))
-        cur.execute(f"DELETE FROM {schema()}.issue_log WHERE natural_key = %s",
-                    ("errdedup:test-scheduler-alert-source:scheduler",))
-        conn.commit()
 
 
 def test_alert_on_failure_sends_and_records(monkeypatch):
