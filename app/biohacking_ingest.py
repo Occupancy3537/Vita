@@ -274,6 +274,19 @@ def build_daily_trends_row(
     start_yday_ms = start_today_ms - 24 * 3600 * 1000
     end_yday_ms = start_today_ms
 
+    # 2026-09-24 (живая жалоба Влада — часы забыл надеть на зарядке ночью:
+    # "сон 0 — это в том числе 'сон не записан', это не всегда значит что я
+    # не спал... надо внести исключение"): `sleep_total_min is None` значит
+    # Гармин НЕ отдал ни одной строки sleep за эту ночь (см. send_to_n8n.py —
+    # там теперь LEFT JOIN, не обязательное условие) — это НЕ то же самое,
+    # что "поспал 0 минут". Раньше `or 0` стирал это различие: 0 записывалось
+    # в "Чистый_сон_мин" как будто это измеренный факт, что дальше кормило
+    # anomaly_detector.py (ложная аномалия "сон упал на ~450 мин") и оценку
+    # влияния на биовозраст (ложный штраф "сон короче нормы"). has_sleep_data
+    # ниже гейтит запись сонных полей в builder'е row{} — при отсутствии
+    # данных они не попадают в dict вообще (см. анти-clobber фильтр в конце
+    # функции), UPSERT их не тронет, колонка останется NULL, а не "0".
+    has_sleep_data = garmin.get("sleep_total_min") is not None
     net_sleep = garmin.get("sleep_total_min") or 0
     awake = garmin.get("awake_time_min") or 0
     in_bed = net_sleep + awake
@@ -323,20 +336,37 @@ def build_daily_trends_row(
                     dinner["c"] += float(r.get("Carbs") or r.get("Углеводы") or r.get("Углеводы, гр") or 0)
                 dinner["time"] = dinner_items[-1]["raw_date"]
 
+        # 2026-09-24 (живая жалоба Влада — часы не носили ночью, "не записалось
+        # время завтрака и окно голода"): весь этот блок раньше был ЦЕЛИКОМ за
+        # `if bt_ms > 0`, то есть без известного отбоя (нет сна — bt_ms=wt_ms=0,
+        # см. def выше) завтрак не искали вообще, хотя сама еда за сегодня
+        # лежала в nutrition_rows как обычно — отбой тут вообще ни при чём.
+        # last_meal_ms/breakfast теперь считаются по еде напрямую, с бэкапом
+        # на "любой приём пищи вчера/сегодня", если точное время отбоя/подъёма
+        # неизвестно (тот же принцип фолбэка, что уже был у dinner_items выше).
+        # "Окно_голода_до_сна_ч" (fast_window) — единственное поле, которое
+        # ЧЕСТНО не считается без отбоя: это буквально "от еды до сна", отбой
+        # неизвестен — оставляем None, не гадаем.
+        last_meal_ms = None
         if bt_ms > 0:
             before_sleep_all = [m for m in all_meals if m["ms"] <= bt_ms]
             if before_sleep_all:
-                last_meal = before_sleep_all[-1]
-                last_meal_ms = last_meal["ms"]
+                last_meal_ms = before_sleep_all[-1]["ms"]
                 if 0 < (bt_ms - last_meal_ms) < 24 * 3600 * 1000:
                     dinner["fast_window"] = _js_round1((bt_ms - last_meal_ms) / 3600000)
-                if wt_ms > 0:
-                    after_wake = [m for m in all_meals if m["ms"] >= wt_ms]
-                    if after_wake:
-                        first_meal = after_wake[0]
-                        breakfast_time = first_meal["raw_date"]
-                        if 0 < (first_meal["ms"] - last_meal_ms) < 36 * 3600 * 1000:
-                            dinner["total_fasting"] = _js_round1((first_meal["ms"] - last_meal_ms) / 3600000)
+        elif yesterdays:
+            last_meal_ms = yesterdays[-1]["ms"]
+
+        if last_meal_ms is not None:
+            if wt_ms > 0:
+                after_wake = [m for m in all_meals if m["ms"] >= wt_ms]
+            else:
+                after_wake = [m for m in all_meals if m["ms"] >= start_today_ms]
+            if after_wake:
+                first_meal = after_wake[0]
+                breakfast_time = first_meal["raw_date"]
+                if 0 < (first_meal["ms"] - last_meal_ms) < 36 * 3600 * 1000:
+                    dinner["total_fasting"] = _js_round1((first_meal["ms"] - last_meal_ms) / 3600000)
 
     # ---- тренировки (workouts_raw: "Имя|мин|ккал;;...") ----
     t1_type = t2_type = t3_type = None
@@ -446,18 +476,18 @@ def build_daily_trends_row(
         "Дата": garmin.get("date"),
         "Время_отбоя": garmin.get("bedtime"),
         "Время_подъема": garmin.get("wakeup_time"),
-        "Время_в_кровати_мин": in_bed,
-        "Чистый_сон_мин": net_sleep,
-        "Эффективность_сна_": f"{_js_round1((net_sleep / in_bed) * 100)}%" if in_bed > 0 else None,
+        "Время_в_кровати_мин": in_bed if has_sleep_data else None,
+        "Чистый_сон_мин": net_sleep if has_sleep_data else None,
+        "Эффективность_сна_": f"{_js_round1((net_sleep / in_bed) * 100)}%" if has_sleep_data and in_bed > 0 else None,
         "Оценка_сна_балл": garmin.get("sleep_score"),
-        "Глубокий_сон_мин": garmin.get("sleep_deep_min") or 0,
-        "Глубокий_1_половина_мин": garmin.get("deep1_min") or 0,
-        "Глубокий_2_половина_мин": garmin.get("deep2_min") or 0,
-        "REM_сон_мин": garmin.get("sleep_rem_min") or 0,
-        "Легкий_сон_мин": light_sleep if light_sleep > 0 else 0,
-        "Пробуждения_кол_во": garmin.get("awake_count") or 0,
-        "Беспокойные_моменты": garmin.get("restless_moments") or 0,
-        "Бодрствование_мин": awake,
+        "Глубокий_сон_мин": (garmin.get("sleep_deep_min") or 0) if has_sleep_data else None,
+        "Глубокий_1_половина_мин": (garmin.get("deep1_min") or 0) if has_sleep_data else None,
+        "Глубокий_2_половина_мин": (garmin.get("deep2_min") or 0) if has_sleep_data else None,
+        "REM_сон_мин": (garmin.get("sleep_rem_min") or 0) if has_sleep_data else None,
+        "Легкий_сон_мин": (light_sleep if light_sleep > 0 else 0) if has_sleep_data else None,
+        "Пробуждения_кол_во": (garmin.get("awake_count") or 0) if has_sleep_data else None,
+        "Беспокойные_моменты": (garmin.get("restless_moments") or 0) if has_sleep_data else None,
+        "Бодрствование_мин": awake if has_sleep_data else None,
         "Пульс_ночной_средний": garmin.get("hr_night_avg"),
         "Пульс_ночной_мин": garmin.get("hr_night_min"),
         "Пульс_ночной_макс": garmin.get("hr_night_max"),
