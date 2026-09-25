@@ -103,6 +103,31 @@ def test_read_garmin_history_days_capped_at_180():
     assert cur.calls[0][1][0] == 180
 
 
+def test_search_publications_maps_columns():
+    """«Научный контур» (2026-09-25, Часть 5.2)."""
+    cur = FakeCursor([[
+        ("Vitamin D reduces fall risk", "meta-analysis", None, 2026, None,
+         "у тебя низкий D", "https://pubmed.ncbi.nlm.nih.gov/1/"),
+    ]])
+    r = tools.search_publications(cur, {"query": "vitamin d"})
+    assert r["publications"][0]["title"] == "Vitamin D reduces fall risk"
+    assert r["publications"][0]["design_type"] == "meta-analysis"
+    # query нормализуется в lower() и передаётся в LIKE трижды (title/abstract) + limit
+    assert cur.calls[0][1] == ("vitamin d", "vitamin d", "vitamin d", 10)
+
+
+def test_search_publications_empty_query_returns_recent():
+    cur = FakeCursor([[]])
+    tools.search_publications(cur, {})
+    assert cur.calls[0][1][0] == ""
+
+
+def test_search_publications_limit_capped_at_30():
+    cur = FakeCursor([[]])
+    tools.search_publications(cur, {"limit": 999})
+    assert cur.calls[0][1][-1] == 30
+
+
 def test_get_outdoor_weather_calls_open_meteo(monkeypatch):
     captured = {}
 
@@ -267,7 +292,7 @@ def test_tool_registry_read_and_write_split():
     assert write_names == {"Record_Symptom", "Record_Note", "Open_Investigation",
                             "Update_Investigation", "Close_Investigation", "Plan_Lab",
                             "Close_Recommendation"}
-    assert len(read_names) == 10
+    assert len(read_names) == 11  # +Search_Publications (2026-09-25, «научный контур»)
 
 
 def test_write_tool_stages_valid_args_without_touching_db():

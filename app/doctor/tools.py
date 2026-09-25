@@ -165,6 +165,26 @@ def read_garmin_history(cur, args: dict) -> dict:
     return {"days": len(history), "history": history}
 
 
+def search_publications(cur, args: dict) -> dict:
+    """«Научный контур» (2026-09-25, Часть 5.2) — read-only поиск по card.publication
+    (заголовок/аннотация). Не трогает логику доктора, только новый источник данных
+    поверх уже готовой таблицы (app/research_scan.py собирает, этот инструмент читает)."""
+    query = (args.get("query") or "").strip().lower()
+    limit = min(int(args.get("limit", 10) or 10), 30)
+    q = sql.SQL(
+        "SELECT title, design_type, phase, year, n, why_for_you, url FROM {t} "
+        "WHERE %s = '' OR lower(title) LIKE '%%' || %s || '%%' "
+        "OR lower(coalesce(abstract_raw, '')) LIKE '%%' || %s || '%%' "
+        "ORDER BY ts_recorded DESC LIMIT %s"
+    ).format(t=sql.Identifier(schema(), "publication"))
+    cur.execute(q, (query, query, query, limit))
+    out = []
+    for title, design_type, phase, year, n, why, url in cur.fetchall():
+        out.append({"title": title, "design_type": design_type, "phase": phase,
+                    "year": year, "n": n, "why_for_you": why, "url": url})
+    return {"publications": out}
+
+
 def get_outdoor_weather(cur, args: dict) -> dict:
     resp = httpx.get(OPEN_METEO_URL, timeout=5.0)
     resp.raise_for_status()
@@ -525,6 +545,18 @@ TOOL_REGISTRY = [
             "days": {"type": "integer", "description": "Сколько дней истории вернуть (по умолчанию 30, максимум 180)"},
         }},
         "executor": read_garmin_history, "timeout": 4.0, "read_only": True,
+    },
+    {
+        "name": "Search_Publications",
+        "description": "Поиск по базе научных публикаций, собранных еженедельным сканом по темам "
+                        "пациента (PubMed/ClinicalTrials.gov/medRxiv) — заголовок/аннотация. Используй, "
+                        "если пациент спрашивает про исследования по своей теме или хочешь сослаться "
+                        "на конкретную работу вместо общих слов.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Слово/фраза для поиска (необязательно — пусто вернёт последние по времени)"},
+            "limit": {"type": "integer", "description": "Максимум результатов (по умолчанию 10)"},
+        }},
+        "executor": search_publications, "timeout": 4.0, "read_only": True,
     },
     {
         "name": "Record_Symptom",

@@ -206,6 +206,18 @@ def test_run_once_one_failure_does_not_block_others(monkeypatch):
         assert cur.fetchone()[0] == 1
 
 
+# ─────── publication_id (научный контур, 2026-09-25, часть 5.3) ───────
+
+def test_sync_recommendation_stores_publication_id():
+    r = client.post("/recommendations/sync", json={
+        "title": "Тест: рекомендация из публикации", "source_ref": "rec_pub_linkage_test",
+        "started_ts": STARTED.isoformat(), "publication_id": "pub_test_linkage_002",
+    })
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT publication_id FROM {schema()}.recommendation WHERE id = %s", (r.json()["id"],))
+        assert cur.fetchone()[0] == "pub_test_linkage_002"
+
+
 # ─────── topic_key / supersede / close (петля исходов, часть 4) ───────
 
 def test_topic_key_supersedes_previous_active_recommendation_same_topic():

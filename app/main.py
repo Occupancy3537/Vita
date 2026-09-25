@@ -97,6 +97,7 @@ import app.anomaly_detector as anomaly_detector
 import app.meds_from_calendar as meds_from_calendar
 import app.monthly_trend as monthly_trend
 import app.issue_review as issue_review
+import app.research_scan as research_scan
 import app.food_diary_bot as food_diary_bot
 import app.card_processor as card_processor
 import app.phenoage_calc as phenoage_calc
@@ -152,6 +153,8 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # предупреждениями: не критичные, нерешённые находки — раз в неделю, не
     # ежедневно и не на экране «Настройки» постоянно). См. app/issue_review.py.
     ("ISSUE_REVIEW_ENABLED", lambda: issue_review.run_scheduler(), "issue-review-scheduler"),
+    # «Научный контур» (2026-09-25): единственная цель VISION со статусом «ноль».
+    ("RESEARCH_SCAN_ENABLED", lambda: research_scan.run_scheduler(), "research-scan-scheduler"),
     # 2026-09-21: Food diary_v5 — свой бот (vlad_health), свой polling-цикл,
     # независимый от доктора (TELEGRAM_BOT_TOKEN). Решение Влада: опрос, не вебхук.
     ("FOOD_DIARY_BOT_ENABLED", lambda: food_diary_bot.run_polling_loop(), "food-diary-bot-poller"),
@@ -572,6 +575,7 @@ class InterventionSyncRequest(BaseModel):
     regimen: Optional[str] = None
     started_ts: Optional[datetime] = None
     origin: str = "calendar"
+    publication_id: Optional[str] = None  # «научный контур» 2026-09-25 — трассировка "откуда идея"
 
 
 class InterventionSyncResponse(BaseModel):
@@ -598,12 +602,12 @@ def interventions_sync(req: InterventionSyncRequest) -> InterventionSyncResponse
         with conn.cursor() as cur:
             cur.execute(
                 sql.SQL(
-                    "INSERT INTO {table} (id, ts_event, provenance, verification, kind, name, dose, regimen, started_ts, status, prescriber) "
-                    "VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s, %s, 'active', 'self') "
+                    "INSERT INTO {table} (id, ts_event, provenance, verification, kind, name, dose, regimen, started_ts, status, prescriber, publication_id) "
+                    "VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s, %s, 'active', 'self', %s) "
                     "ON CONFLICT ((provenance->>'source_ref')) DO NOTHING RETURNING id"
                 ).format(table=table),
                 (new_id, req.started_ts or datetime.now(timezone.utc), provenance,
-                 req.kind, req.name, req.dose, req.regimen, req.started_ts),
+                 req.kind, req.name, req.dose, req.regimen, req.started_ts, req.publication_id),
             )
             row = cur.fetchone()
             if row is not None:

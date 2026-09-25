@@ -44,6 +44,17 @@ def mark_run(name: str, min_interval_seconds: float = 0.0) -> None:
         logger.warning("run_log: не удалось отметить прогон %r", name, exc_info=True)
 
 
+def last_ok_at(name: str):
+    """Читающая половина mark_run — когда цикл name в последний раз отработал
+    успешно (None — ни разу). 2026-09-25 (научный контур): нужен для догоняющего
+    прогона пропущенного недельного тика при рестарте контейнера — без этого
+    "молчание недельного цикла" было бы возможно (сорвался тик — жди неделю)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT last_ok_at FROM {schema()}.scheduler_run_log WHERE name = %s", (name,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
 def mark_error(name: str, exc: BaseException) -> None:
     """Записать последнюю ошибку цикла. Текст ошибки НЕ стирается успешным
     прогоном — странице важно видеть «ошибка была тогда-то, потом ок»."""

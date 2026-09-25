@@ -35,7 +35,7 @@ def test_format_dossier_empty_dossier_does_not_crash():
         "garmin_yesterday": None, "garmin_week_trend": {"days": 0},
         "nutrition_today": None, "meals_today": [], "active_meds": [],
         "open_investigations": [], "recent_doctor_notes": [], "labs_out_of_range": [],
-        "planned_labs": [], "room_climate": None,
+        "planned_labs": [], "room_climate": None, "recent_publications": [],
     }
     text = prompt.format_dossier(empty, "2026-09-15")
     assert "2026-09-15" in text
@@ -63,6 +63,8 @@ def test_format_dossier_includes_meals_and_meds():
         "planned_labs": [{"plan_id": "LP-01", "test": "Витамин B12 (сыворотка)",
                            "next_due": "2026-10-18", "reason": "пограничный B12", "source": "AI-доктор"}],
         "room_climate": {"temp_c": 22.0, "humidity_pct": 45, "pm25": 5},
+        "recent_publications": [{"title": "Vitamin D reduces fall risk", "design_type": "meta-analysis",
+                                  "phase": None, "why": "у тебя низкий D", "url": "https://x/1"}],
     }
     text = prompt.format_dossier(dossier, "2026-09-15")
     assert "новокаин — анафилаксия" in text
@@ -73,3 +75,7 @@ def test_format_dossier_includes_meals_and_meds():
     assert "Витамин B12 (сыворотка)" in text
     assert "Глюкоза" in text
     assert "22.0" in text
+    assert "СВЕЖИЕ ПУБЛИКАЦИИ" in text
+    assert "Vitamin D reduces fall risk" in text
+    assert "мета-анализ" in text
+    assert "у тебя низкий D" in text

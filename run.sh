@@ -93,6 +93,10 @@
 # рекомендаций, у которых закрылось окно оценки. Движок (verdict_engine)
 # существовал давно, но ничто его не вызывало — единственный способ получить
 # вердикт был дёрнуть /recommendations/{id}/evaluate руками.
+# 2026-09-25: RESEARCH_SCAN_ENABLED — «научный контур» (app/research_scan.py,
+# по воскресеньям 21:50 ВЛ) — скан PubMed/ClinicalTrials.gov/medRxiv по темам
+# профиля (card.research_topic), новых секретов не требует (публичные API +
+# уже существующий OPENROUTER_API_KEY только для фильтра релевантности).
 # 2026-09-21 (#38/#46, аудит ZCode): set -e без -u пропускал незаданную
 # переменную молча — `-e CARD_PG_PASSWORD=""` собирает контейнер, /health
 # отдаёт 200, а сбой (пустой пароль БД, пустой токен бота и т.п.) всплывает
@@ -149,6 +153,7 @@ sudo docker run -d \
   -e MEDS_FROM_CALENDAR_ENABLED=1 \
   -e MONTHLY_TREND_ENABLED=1 \
   -e ISSUE_REVIEW_ENABLED=1 \
+  -e RESEARCH_SCAN_ENABLED=1 \
   -e FOOD_DIARY_BOT_ENABLED=1 \
   -e FOOD_DIARY_BOT_TOKEN="$FOOD_DIARY_BOT_TOKEN" \
   -e CARD_PROCESSOR_ENABLED=1 \

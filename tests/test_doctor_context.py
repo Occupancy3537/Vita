@@ -141,16 +141,37 @@ def test_room_climate_none_when_no_rows():
     assert context._room_climate(FakeCursor([[]])) is None
 
 
+# --- recent publications (2026-09-25, «научный контур», Часть 5.1) ------------
+
+def test_recent_publications_maps_columns():
+    cur = FakeCursor([[
+        ("Vitamin D supplementation reduces fall risk in elderly", "meta-analysis", None,
+         "у тебя низкий D — та же тема, что твой дефицит", "https://pubmed.ncbi.nlm.nih.gov/1/"),
+    ]])
+    r = context._recent_publications(cur)
+    assert r == [{"title": "Vitamin D supplementation reduces fall risk in elderly",
+                  "design_type": "meta-analysis", "phase": None,
+                  "why": "у тебя низкий D — та же тема, что твой дефицит",
+                  "url": "https://pubmed.ncbi.nlm.nih.gov/1/"}]
+
+
+def test_recent_publications_respects_limit():
+    rows = [(f"T{i}", "trial", "PHASE2", "почему", "u") for i in range(10)]
+    cur = FakeCursor([rows])
+    r = context._recent_publications(cur, limit=5)
+    assert len(r) == 5
+
+
 # --- build_dossier ------------------------------------------------------------
 
 def test_build_dossier_has_all_expected_keys(monkeypatch):
     monkeypatch.setattr(context, "get_context", lambda cur, mode, payload: {"stub": True})
-    cur = FakeCursor([[] for _ in range(10)])  # 10 health.*-запросов внутри build_dossier (room_climate теперь тоже SQL, не httpx)
+    cur = FakeCursor([[] for _ in range(11)])  # 11 health/card.*-запросов внутри build_dossier
 
     d = context.build_dossier(cur, "тест")
     assert set(d.keys()) == {
         "memory", "garmin_yesterday", "garmin_week_trend", "nutrition_today",
         "meals_today", "active_meds", "open_investigations", "recent_doctor_notes",
-        "labs_out_of_range", "planned_labs", "room_climate",
+        "labs_out_of_range", "planned_labs", "room_climate", "recent_publications",
     }
     assert d["memory"] == {"stub": True}

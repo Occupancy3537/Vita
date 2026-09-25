@@ -211,6 +211,33 @@ def _room_climate(cur) -> Optional[dict]:
     return {"temp_c": _num(temp), "humidity_pct": _num(hum), "pm25": _num(pm25), "measured_at": measured_at}
 
 
+def _recent_publications(cur, limit: int = 5) -> list[dict]:
+    """«Научный контур» (2026-09-25, Часть 5.1) — свежие релевантные публикации
+    по темам профиля, чтобы доктор мог сослаться на конкретную работу в разговоре,
+    не выдумывая источник. grade — структурный (design_type/phase из card.publication,
+    не из этого запроса и не от LLM здесь), why — та же строка, что попала в дайджест.
+
+    2026-09-25 (живая проверка тем же днём): простое "top-N по ts_recorded" на
+    скане из 10 тем показывало 5 позиций ИЗ ОДНОЙ темы (какая сканировалась
+    последней) — вопрос про L5/S1 не находил в досье ни одной публикации про
+    L5/S1, доктор был вынужден 3 раунда подряд звать Search_Publications вместо
+    ответа по досье. DISTINCT ON (topic_key) — по одной, самой свежей, публикации
+    С КАЖДОЙ темы, чтобы досье покрывало темы, а не последнюю по времени скана."""
+    cur.execute(
+        sql.SQL(
+            "SELECT title, design_type, phase, why_for_you, url FROM ("
+            "  SELECT DISTINCT ON (topic_key) title, design_type, phase, why_for_you, url, ts_recorded "
+            "  FROM {t} WHERE relevant = true ORDER BY topic_key, ts_recorded DESC"
+            ") per_topic ORDER BY ts_recorded DESC LIMIT %s"
+        ).format(t=sql.Identifier(schema(), "publication")),
+        (limit,),
+    )
+    return [
+        {"title": title, "design_type": design_type, "phase": phase, "why": why, "url": url}
+        for title, design_type, phase, why, url in cur.fetchall()
+    ][:limit]
+
+
 def build_dossier(cur, text: str = "") -> dict:
     """Собирает всё досье одним проходом. Приёмка Phase 3: <300мс (план §4,
     шаг 3) — все запросы дешёвые (индексы/LIMIT), климат — единственный сетевой
@@ -227,4 +254,5 @@ def build_dossier(cur, text: str = "") -> dict:
         "labs_out_of_range": _labs_out_of_range(cur),
         "planned_labs": _planned_labs(cur),
         "room_climate": _room_climate(cur),
+        "recent_publications": _recent_publications(cur),
     }

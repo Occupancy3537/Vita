@@ -132,6 +132,7 @@ def format_dossier(dossier: dict, today: str) -> str:
     labs = dossier.get("labs_out_of_range") or []
     planned_labs = dossier.get("planned_labs") or []
     climate = dossier.get("room_climate")
+    publications = dossier.get("recent_publications") or []
 
     lines = [f"=СЕГОДНЯ: {today} (Владивосток). Все события в данных — прошлое. "
              "Никогда не указывай даты позже сегодняшней.", ""]
@@ -211,6 +212,21 @@ def format_dossier(dossier: dict, today: str) -> str:
         for pl in planned_labs:
             lines.append(f"- {pl['test']} (до {_fmt(pl.get('next_due'), '?')}, "
                           f"{_fmt(pl.get('source'), 'источник неизвестен')}): {_fmt(pl.get('reason'), '')}")
+        lines.append("")
+
+    if publications:
+        # «Научный контур» (2026-09-25, Часть 5.1) — те же русские подписи грейда,
+        # что дайджест (app/research_scan.py::_GRADE_LABEL); не импортируем оттуда
+        # намеренно (app/doctor/ не должен тянуть внутренности другого модуля ради
+        # словаря на 6 строк — граница тикета "только досье-блок и инструмент").
+        grade_label = {"meta-analysis": "мета-анализ", "rct": "РКИ", "observational": "когорта/наблюдение",
+                       "case-report": "клинический случай", "preprint": "препринт", "trial": "испытание"}
+        lines.append("## 🔬 СВЕЖИЕ ПУБЛИКАЦИИ ПО ТВОИМ ТЕМАМ (можешь ссылаться на них в разговоре)")
+        for p in publications:
+            grade = grade_label.get(p.get("design_type"), p.get("design_type") or "тип не определён")
+            if p.get("phase"):
+                grade = f"{grade} ({p['phase']})"
+            lines.append(f"- {p['title']} [{grade}]: {_fmt(p.get('why'), 'без обоснования')}")
         lines.append("")
 
     return "\n".join(lines)
