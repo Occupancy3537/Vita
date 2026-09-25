@@ -99,6 +99,7 @@ import app.monthly_trend as monthly_trend
 import app.issue_review as issue_review
 import app.research_scan as research_scan
 import app.consilium as consilium
+import app.problem as problem
 import app.food_diary_bot as food_diary_bot
 import app.card_processor as card_processor
 import app.phenoage_calc as phenoage_calc
@@ -183,6 +184,10 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # уходит через свой отдельный ThreadPoolExecutor (app.consilium.submit_command,
     # вызывается из app/doctor/intake.py), сюда попадает только расписание.
     ("CONSILIUM_SCHEDULER_ENABLED", lambda: consilium.run_scheduler(), "consilium-monthly-scheduler"),
+    # «Детектив» (2026-09-26): presumed_resolved после 30 дней тишины —
+    # единственная часть тикета на расписании (create/close problem — только
+    # по команде доктора, автопривязка новых эпизодов — синхронно в write_path.py).
+    ("PROBLEM_MAINTENANCE_ENABLED", lambda: problem.run_scheduler(), "problem-maintenance-scheduler"),
 ]
 
 

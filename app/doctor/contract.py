@@ -45,6 +45,7 @@ class StagedWrite(BaseModel):
     kind: Literal[
         "symptom", "note", "investigation_open", "investigation_update",
         "investigation_close", "lab_plan", "recommendation_close", "anomaly_dispose",
+        "problem_create", "problem_close",
     ]
     payload: dict
 
@@ -146,3 +147,31 @@ class DisposeAnomalyArgs(BaseModel):
         default_factory=list,
         description="Только для investigate — 1-3 гипотезы по контексту дня аномалии, у каждой differentiator",
     )
+
+
+class CreateProblemArgs(BaseModel):
+    """«Детектив» (2026-09-26, часть 1.1) — единственный путь родить card.problem:
+    до этого тикета его не существовало вовсе (карточка — одна миграционная
+    строка L5/S1). symptom_keys — ЯВНАЯ связка "эти эпизоды — про эту проблему",
+    источник правды для автопривязки БУДУЩИХ эпизодов с тем же ключом
+    (app/problem.py::link_new_episode) — не обязателен (можно завести проблему
+    без немедленной привязки), но если тема повторяющаяся — впиши хотя бы
+    текущий symptom_id, иначе автопривязка не заработает ни для одного эпизода."""
+    title: str = Field(description="Короткая тема проблемы, например 'Боль в левом подреберье после еды'")
+    icd_hint: Optional[str] = None
+    symptom_keys: list[str] = Field(
+        default_factory=list,
+        description="symptom_id/symptom_key уже записанных эпизодов, которые относятся к этой проблеме",
+    )
+
+
+class CloseProblemArgs(BaseModel):
+    """Часть 1.1/1.3. title — подстрока (та же схема резолва, что
+    CloseRecommendationArgs.title/DisposeAnomalyArgs.metric) среди АКТИВНЫХ
+    проблем — отказ при 0 или >1 совпадений вместо угадывания. summary — что
+    было и чем закончилось, ОБЯЗАТЕЛЕН (закрытие без итога бесполезно для
+    памяти карты, часть 1.3 тикета)."""
+    title: str = Field(description="Слово/фраза из темы проблемы")
+    status: Literal["resolved", "chronic", "obsolete"]
+    summary: str = Field(description="Что было и чем закончилось — уходит в case_summary и память карты")
+    what_helped: Optional[str] = None

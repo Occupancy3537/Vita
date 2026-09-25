@@ -375,6 +375,45 @@ def test_run_once_sends_telegram_and_writes_log(monkeypatch):
     assert "2026-09-20" in sent[0][2]
 
 
+def test_run_once_appends_detective_block_when_present(monkeypatch):
+    """«Детектив» (2026-09-26, часть 3.3) — тот же приём, что и fates_table:
+    добавляется ПОСЛЕ текста модели, не встраивается в prompt."""
+    monkeypatch.setattr(wa, "_fetch_all", lambda cur: {"recs": [], "targets": [], "pheno_log": [], "lab_plan": []})
+    monkeypatch.setattr(wa, "build_context", lambda s: {"window": {"to": "2026-09-20"}})
+    monkeypatch.setattr(wa, "build_prompt", lambda ctx: "промпт")
+    monkeypatch.setattr(wa, "call_model", lambda prompt: "текст\n\n<<<ACTIONS\n{\"actions\": []}\nACTIONS>>>")
+    monkeypatch.setattr(wa, "sync_actions_to_card", lambda actions, date, pheno_log=None, lab_plan=None: "")
+    monkeypatch.setattr(wa.detective, "build_weekly_block", lambda cur: "🕵️ Детектив:\n«Тест»: что-то нашли")
+
+    written = {}
+    monkeypatch.setattr(wa, "write_recommendations_log", lambda cur, row: written.update(row))
+    monkeypatch.setattr(wa.notify, "notify", lambda source, priority, text: None)
+
+    wa.run_once()
+    assert "🕵️ Детектив" in written["Telegram_Text"]
+
+
+def test_run_once_detective_failure_does_not_break_weekly_run(monkeypatch):
+    """Сбой анализа не должен ронять весь недельный разбор — только сам блок
+    молча отсутствует (тот же принцип, что у action_loops в dashboard.py)."""
+    monkeypatch.setattr(wa, "_fetch_all", lambda cur: {"recs": [], "targets": [], "pheno_log": [], "lab_plan": []})
+    monkeypatch.setattr(wa, "build_context", lambda s: {"window": {"to": "2026-09-20"}})
+    monkeypatch.setattr(wa, "build_prompt", lambda ctx: "промпт")
+    monkeypatch.setattr(wa, "call_model", lambda prompt: "текст\n\n<<<ACTIONS\n{\"actions\": []}\nACTIONS>>>")
+    monkeypatch.setattr(wa, "sync_actions_to_card", lambda actions, date, pheno_log=None, lab_plan=None: "")
+
+    def boom(cur):
+        raise RuntimeError("detective упал")
+    monkeypatch.setattr(wa.detective, "build_weekly_block", boom)
+
+    written = {}
+    monkeypatch.setattr(wa, "write_recommendations_log", lambda cur, row: written.update(row))
+    monkeypatch.setattr(wa.notify, "notify", lambda source, priority, text: None)
+
+    wa.run_once()  # не бросает, несмотря на упавший detective
+    assert "Детектив" not in written["Telegram_Text"]
+
+
 def test_run_once_model_silent_skips_write(monkeypatch):
     monkeypatch.setattr(wa, "_fetch_all", lambda cur: {"recs": [], "targets": []})
     monkeypatch.setattr(wa, "build_context", lambda s: {"window": {"to": "2026-09-20"}})

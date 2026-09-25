@@ -55,6 +55,43 @@ def test_process_creates_new_episode():
         assert cur.fetchone() == ("headache", "open")
 
 
+def test_process_new_episode_auto_links_to_active_problem_by_symptom_key():
+    """«Детектив» (2026-09-26, часть 2.1) — НОВЫЙ эпизод с symptom_key, уже
+    закреплённым за ровно одной активной problem, привязывается автоматически."""
+    from app import problem as pm
+    with get_conn() as conn, conn.cursor() as cur:
+        created = pm.create_problem(cur, "Проблема для автопривязки write_path")
+        conn.commit()
+    # затравочный эпизод той же темы, уже привязанный к problem — тот факт, из
+    # которого правило и делает вывод "эта тема — про эту проблему".
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.episode (id, ts_event, provenance, symptom_key, onset_ts, status, problem_id) "
+            "VALUES ('ep_seed_wp_test', now(), '{}', 'wp-autolinkkey', now(), 'open', %s)",
+            (created["id"],),
+        )
+        conn.commit()
+
+    src_id = _ingest("снова та же боль")
+    with patch("app.write_path.extract", return_value=_mock_extract([Draft(symptom_key="wp-autolinkkey")])):
+        result = process(src_id)
+
+    ep_id = result["written"][0]["episode_id"]
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT problem_id FROM {schema()}.episode WHERE id = %s", (ep_id,))
+        assert cur.fetchone()[0] == created["id"]
+
+
+def test_process_new_episode_stays_unlinked_without_active_problem():
+    src_id = _ingest("новая тема без проблемы")
+    with patch("app.write_path.extract", return_value=_mock_extract([Draft(symptom_key="wp-orphankey")])):
+        result = process(src_id)
+    ep_id = result["written"][0]["episode_id"]
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT problem_id FROM {schema()}.episode WHERE id = %s", (ep_id,))
+        assert cur.fetchone()[0] is None
+
+
 def test_process_updates_existing_open_episode_within_48h():
     src1 = _ingest("болит голова с утра")
     with patch("app.write_path.extract", return_value=_mock_extract([Draft(symptom_key="headache")])):

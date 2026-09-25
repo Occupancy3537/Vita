@@ -30,8 +30,8 @@ from ulid import ULID
 from app import timeutil
 from app.db import get_conn, schema
 from app.doctor.contract import (
-    CloseInvestigationArgs, CloseRecommendationArgs, DisposeAnomalyArgs, OpenInvestigationArgs, PlanLabArgs,
-    RecordNoteArgs, RecordSymptomArgs, StagedWrite, UpdateInvestigationArgs,
+    CloseInvestigationArgs, CloseProblemArgs, CloseRecommendationArgs, CreateProblemArgs, DisposeAnomalyArgs,
+    OpenInvestigationArgs, PlanLabArgs, RecordNoteArgs, RecordSymptomArgs, StagedWrite, UpdateInvestigationArgs,
 )
 from app.extraction import Draft
 from app.journal import write_journal
@@ -196,6 +196,33 @@ def _dispose_anomaly(cur, args: DisposeAnomalyArgs) -> None:
         raise CommitError(f"Dispose_Anomaly({args.metric!r}): {result['error']}")
 
 
+def _create_problem(cur, args: CreateProblemArgs) -> None:
+    """«Детектив» (2026-09-26, часть 1.1) — единственное исключение из «не
+    трогать app/doctor/» в этом тикете (вместе с Close_Problem/Read_Problems).
+    Логика — app/problem.py, здесь только адаптация StagedWrite -> сигнатура."""
+    from app.problem import create_problem
+
+    create_problem(cur, args.title, symptom_keys=args.symptom_keys or None, icd_hint=args.icd_hint)
+
+
+def _close_problem(cur, args: CloseProblemArgs) -> None:
+    from app.problem import close_problem
+
+    q = sql.SQL("SELECT id, title FROM {t} WHERE status = 'active' AND title ILIKE %s") \
+        .format(t=sql.Identifier(schema(), "problem"))
+    cur.execute(q, (f"%{args.title}%",))
+    rows = cur.fetchall()
+    if not rows:
+        raise CommitError(f"Close_Problem({args.title!r}): активных проблем с такой темой не найдено")
+    if len(rows) > 1:
+        titles = ", ".join(r[1] for r in rows)
+        raise CommitError(f"Close_Problem({args.title!r}): совпадений несколько ({titles}) — уточни формулировку")
+    problem_id = rows[0][0]
+    result = close_problem(cur, problem_id, args.status, args.summary, args.what_helped)
+    if result is None:
+        raise CommitError(f"Close_Problem({args.title!r}): не удалось закрыть {problem_id}")
+
+
 _HANDLERS = {
     "symptom": (RecordSymptomArgs, _write_symptom),
     "note": (RecordNoteArgs, _write_note),
@@ -205,6 +232,8 @@ _HANDLERS = {
     "lab_plan": (PlanLabArgs, _plan_lab),
     "recommendation_close": (CloseRecommendationArgs, _close_recommendation),
     "anomaly_dispose": (DisposeAnomalyArgs, _dispose_anomaly),
+    "problem_create": (CreateProblemArgs, _create_problem),
+    "problem_close": (CloseProblemArgs, _close_problem),
 }
 
 

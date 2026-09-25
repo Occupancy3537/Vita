@@ -103,6 +103,9 @@
 # доктора — отдельный путь (app.consilium.submit_command, свой executor,
 # не через это расписание); новых секретов не требует (переиспользует
 # OPENROUTER_API_KEY, включая режим web-поиска плагином OpenRouter).
+# 2026-09-26: PROBLEM_MAINTENANCE_ENABLED — «детектив» (app/problem.py),
+# ежедневно 09:10 ВЛ: эпизоды без активности >30 дней -> presumed_resolved.
+# Create/Close_Problem — по команде доктора, не по расписанию; новых секретов не требует.
 # 2026-09-21 (#38/#46, аудит ZCode): set -e без -u пропускал незаданную
 # переменную молча — `-e CARD_PG_PASSWORD=""` собирает контейнер, /health
 # отдаёт 200, а сбой (пустой пароль БД, пустой токен бота и т.п.) всплывает
@@ -168,6 +171,7 @@ sudo docker run -d \
   -e HOST_METRICS_ENABLED=1 \
   -e RECOMMENDATIONS_EVAL_ENABLED=1 \
   -e CONSILIUM_SCHEDULER_ENABLED=1 \
+  -e PROBLEM_MAINTENANCE_ENABLED=1 \
   -e YANDEX_IOT_TOKEN="$YANDEX_IOT_TOKEN" \
   -e CARD_GOOGLE_CLIENT_ID="$CARD_GOOGLE_CLIENT_ID" \
   -e CARD_GOOGLE_CLIENT_SECRET="$CARD_GOOGLE_CLIENT_SECRET" \

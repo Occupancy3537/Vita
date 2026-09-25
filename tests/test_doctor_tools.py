@@ -291,8 +291,9 @@ def test_tool_registry_read_and_write_split():
     write_names = {t["name"] for t in tools.TOOL_REGISTRY if not t["read_only"]}
     assert write_names == {"Record_Symptom", "Record_Note", "Open_Investigation",
                             "Update_Investigation", "Close_Investigation", "Plan_Lab",
-                            "Close_Recommendation", "Dispose_Anomaly"}
-    assert len(read_names) == 11  # +Search_Publications (2026-09-25, «научный контур»)
+                            "Close_Recommendation", "Dispose_Anomaly",
+                            "Create_Problem", "Close_Problem"}
+    assert len(read_names) == 12  # +Search_Publications (научный контур) +Read_Problems (детектив)
 
 
 def test_write_tool_stages_valid_args_without_touching_db():
@@ -358,3 +359,45 @@ def test_openai_tool_schemas_shape():
 def test_analyze_symptom_food_requires_symptom_id_in_schema():
     entry = tools.TOOLS_BY_NAME["Analyze_Symptom_Food"]
     assert entry["parameters"]["required"] == ["symptom_id"]
+
+
+# ─────── Read_Problems/Create_Problem/Close_Problem («детектив», 2026-09-26) ───────
+
+def test_read_problems_maps_columns():
+    cur = FakeCursor([[
+        ("pb_1", "Боль в боку", None, "active", "2026-09-01", None, None, 3),
+    ]])
+    r = tools.read_problems(cur, {})
+    assert r["problems"][0]["title"] == "Боль в боку"
+    assert r["problems"][0]["status"] == "active"
+    assert r["problems"][0]["episodes"] == 3
+
+
+def test_create_problem_stages_valid_args():
+    r = tools.create_problem(None, {"title": "Новая проблема", "symptom_keys": ["headache"]})
+    assert r["staged"] is True
+    assert r["kind"] == "problem_create"
+    assert r["payload"]["title"] == "Новая проблема"
+    assert r["payload"]["symptom_keys"] == ["headache"]
+
+
+def test_create_problem_rejects_missing_title():
+    r = tools.create_problem(None, {})
+    assert r.get("error") == "invalid_arguments"
+
+
+def test_close_problem_stages_valid_args():
+    r = tools.close_problem(None, {"title": "боку", "status": "resolved", "summary": "прошло само"})
+    assert r["staged"] is True
+    assert r["kind"] == "problem_close"
+    assert r["payload"]["status"] == "resolved"
+
+
+def test_close_problem_rejects_invalid_status():
+    r = tools.close_problem(None, {"title": "боку", "status": "cured", "summary": "текст"})
+    assert r.get("error") == "invalid_arguments"
+
+
+def test_close_problem_rejects_missing_summary():
+    r = tools.close_problem(None, {"title": "боку", "status": "resolved"})
+    assert r.get("error") == "invalid_arguments"

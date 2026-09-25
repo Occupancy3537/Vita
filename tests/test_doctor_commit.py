@@ -377,3 +377,76 @@ def test_dispose_anomaly_unknown_metric_raises():
     sw = [StagedWrite(kind="anomaly_dispose", payload={"metric": "полностью выдуманная метрика xyz", "disposition": "acknowledge"})]
     with pytest.raises(CommitError):
         apply_staged_writes(sw, turn_id=_turn())
+
+
+# ─────── Create_Problem/Close_Problem/Read_Problems («детектив», 2026-09-26) ───────
+# Единственное исключение из «не трогать app/doctor/» в этом тикете. Логика —
+# app/problem.py, здесь только адаптация StagedWrite -> её сигнатура.
+
+def test_create_problem_via_staged_write():
+    sw = [StagedWrite(kind="problem_create", payload={"title": "Проблема через доктора"})]
+    r = apply_staged_writes(sw, turn_id=_turn())
+    assert r["committed"] is True
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT status FROM {schema()}.problem WHERE title = 'Проблема через доктора'")
+        assert cur.fetchone() == ("active",)
+
+
+def test_create_problem_via_staged_write_links_symptom_keys():
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.episode (id, ts_event, provenance, symptom_key, status) "
+            "VALUES ('ep_commit_link_test', now(), '{}', 'commit-test-linkkey', 'open')"
+        )
+        conn.commit()
+
+    sw = [StagedWrite(kind="problem_create",
+                      payload={"title": "Проблема со связкой через доктора", "symptom_keys": ["commit-test-linkkey"]})]
+    apply_staged_writes(sw, turn_id=_turn())
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT problem_id FROM {schema()}.episode WHERE id = 'ep_commit_link_test'")
+        problem_id = cur.fetchone()[0]
+        cur.execute(f"SELECT title FROM {schema()}.problem WHERE id = %s", (problem_id,))
+        assert cur.fetchone() == ("Проблема со связкой через доктора",)
+
+
+def test_close_problem_by_title_substring():
+    with get_conn() as conn, conn.cursor() as cur:
+        from app.problem import create_problem
+        created = create_problem(cur, "Записаться к неврологу и закрыть тему")
+        conn.commit()
+
+    sw = [StagedWrite(kind="problem_close", payload={
+        "title": "неврологу", "status": "resolved", "summary": "сходил, диагноз снят",
+    })]
+    r = apply_staged_writes(sw, turn_id=_turn())
+    assert r["committed"] is True
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT status, case_summary FROM {schema()}.problem WHERE id = %s", (created["id"],))
+        status, case_summary = cur.fetchone()
+    assert status == "resolved"
+    assert case_summary["summary"] == "сходил, диагноз снят"
+
+
+def test_close_problem_no_match_raises():
+    sw = [StagedWrite(kind="problem_close", payload={
+        "title": "не существует такой проблемы совсем", "status": "resolved", "summary": "текст",
+    })]
+    with pytest.raises(CommitError):
+        apply_staged_writes(sw, turn_id=_turn())
+
+
+def test_close_problem_ambiguous_match_raises():
+    with get_conn() as conn, conn.cursor() as cur:
+        from app.problem import create_problem
+        create_problem(cur, "Уникальная гамма тестовость режима")
+        create_problem(cur, "Особая дельта тестовость режима")
+        conn.commit()
+    sw = [StagedWrite(kind="problem_close", payload={
+        "title": "тестовость", "status": "resolved", "summary": "текст",
+    })]
+    with pytest.raises(CommitError):
+        apply_staged_writes(sw, turn_id=_turn())

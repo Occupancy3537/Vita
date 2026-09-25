@@ -151,6 +151,12 @@ def apply_draft(cur, draft: Draft, source_id: str) -> dict:
                         "triggers": draft.triggers, "context": draft.onset_expr},
                   reason=f"source={source_id}", link_back=True)
     index_entity(cur, "symptom", draft.symptom_key, ep_id, "episode")
+    # «Детектив» (2026-09-26, часть 2.1): НОВЫЙ эпизод — единственный момент,
+    # когда автопривязка к активной problem вообще применима (у уже открытого
+    # эпизода, обновляемого веткой выше, problem_id либо уже стоит, либо
+    # намеренно нет). Никогда не гадает — см. докстринг app/problem.py.
+    from app.problem import link_new_episode
+    link_new_episode(cur, draft.symptom_key, ep_id)
     fact_id = new_id("f")
     attrs = {"intensity": draft.intensity, "triggers": draft.triggers}
     cur.execute(

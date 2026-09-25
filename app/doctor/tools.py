@@ -34,8 +34,8 @@ from psycopg import sql
 from pydantic import ValidationError
 
 from app.doctor.contract import (
-    CloseInvestigationArgs, CloseRecommendationArgs, DisposeAnomalyArgs, OpenInvestigationArgs, PlanLabArgs,
-    RecordNoteArgs, RecordSymptomArgs, UpdateInvestigationArgs,
+    CloseInvestigationArgs, CloseProblemArgs, CloseRecommendationArgs, CreateProblemArgs, DisposeAnomalyArgs,
+    OpenInvestigationArgs, PlanLabArgs, RecordNoteArgs, RecordSymptomArgs, UpdateInvestigationArgs,
 )
 
 from app import timeutil
@@ -89,6 +89,21 @@ def read_investigations(cur, args: dict) -> dict:
     cols = ["inv_id", "trigger", "trigger_detail", "hypothesis", "status", "findings",
             "doctor_brief", "opened", "updated"]
     return {"investigations": [dict(zip(cols, row)) for row in cur.fetchall()]}
+
+
+def read_problems(cur, args: dict) -> dict:
+    """«Детектив» (2026-09-26) — единственный read-доступ доктора к card.problem
+    (раньше не было вообще). Вызывай ПЕРЕД Create_Problem/Close_Problem — не
+    заводи вторую проблему про то же самое, не путай названия при закрытии."""
+    cur.execute(
+        sql.SQL(
+            "SELECT id, title, icd_hint, status, opened_ts::date, closed_ts::date, case_summary, "
+            "(SELECT count(*) FROM {e} e WHERE e.problem_id = p.id) AS episodes "
+            "FROM {p} p ORDER BY (status = 'active') DESC, opened_ts DESC LIMIT 20"
+        ).format(e=sql.Identifier(schema(), "episode"), p=sql.Identifier(schema(), "problem")),
+    )
+    cols = ["id", "title", "icd_hint", "status", "opened", "closed", "case_summary", "episodes"]
+    return {"problems": [dict(zip(cols, row)) for row in cur.fetchall()]}
 
 
 def get_patient_medical_history(cur, args: dict) -> dict:
@@ -461,6 +476,14 @@ def close_recommendation(cur, args: dict) -> dict:
     return _stage("recommendation_close", CloseRecommendationArgs, args)
 
 
+def create_problem(cur, args: dict) -> dict:
+    return _stage("problem_create", CreateProblemArgs, args)
+
+
+def close_problem(cur, args: dict) -> dict:
+    return _stage("problem_close", CloseProblemArgs, args)
+
+
 # --- реестр ------------------------------------------------------------------
 
 TOOL_REGISTRY = [
@@ -477,6 +500,14 @@ TOOL_REGISTRY = [
                         "одновременно только одно открытое.",
         "parameters": {"type": "object", "properties": {}},
         "executor": read_investigations, "timeout": 4.0, "read_only": True,
+    },
+    {
+        "name": "Read_Problems",
+        "description": "Список проблем (тема разбора длиной в несколько эпизодов/визитов) — "
+                        "активных и закрытых, с их итогом (case_summary). Вызывай ПЕРЕД Create_Problem "
+                        "(не заводи вторую проблему про то же самое) и ПЕРЕД Close_Problem (точная формулировка темы).",
+        "parameters": {"type": "object", "properties": {}},
+        "executor": read_problems, "timeout": 4.0, "read_only": True,
     },
     {
         "name": "Get_Patient_Medical_History",
@@ -669,6 +700,36 @@ TOOL_REGISTRY = [
             },
         }, "required": ["metric", "disposition"]},
         "executor": dispose_anomaly, "timeout": 1.0, "read_only": False,
+    },
+    {
+        "name": "Create_Problem",
+        "description": "Заведи проблему — тему разбора на несколько эпизодов/визитов вперёд "
+                        "(повторяющийся или серьёзный симптом, который стоит вести отдельно от "
+                        "одиночных жалоб). Сначала Read_Problems — не заводи вторую про то же самое. "
+                        "Впиши symptom_keys уже записанных эпизодов, которые сюда относятся — "
+                        "иначе будущие эпизоды с тем же symptom_id не привяжутся автоматически.",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string", "description": "Короткая тема, например 'Боль в левом подреберье после еды'"},
+            "icd_hint": {"type": "string"},
+            "symptom_keys": {"type": "array", "items": {"type": "string"},
+                             "description": "symptom_id уже записанных эпизодов по этой теме"},
+        }, "required": ["title"]},
+        "executor": create_problem, "timeout": 1.0, "read_only": False,
+    },
+    {
+        "name": "Close_Problem",
+        "description": "Закрой проблему с итогом — что было, чем закончилось, что помогло (обязательно, "
+                        "иначе в карте останется дыра). status: resolved (симптомы прошли и понятна причина), "
+                        "chronic (состояние подтверждено и стабильно ведётся, эта ветка разбора закрыта), "
+                        "obsolete (тема больше не актуальна/оказалась ошибкой). Ищет по подстроке темы; "
+                        "если совпадений несколько или ни одного — вызов отклоняется, не гадает какую закрыть.",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string", "description": "Слово/фраза из темы проблемы"},
+            "status": {"type": "string", "enum": ["resolved", "chronic", "obsolete"]},
+            "summary": {"type": "string", "description": "Что было и чем закончилось"},
+            "what_helped": {"type": "string"},
+        }, "required": ["title", "status", "summary"]},
+        "executor": close_problem, "timeout": 1.0, "read_only": False,
     },
 ]
 

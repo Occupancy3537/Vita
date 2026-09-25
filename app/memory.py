@@ -398,6 +398,21 @@ def tier1_render(cur, object_type: str, object_id: str) -> dict:
         row = cur.fetchone()
         if row:
             return {"id": object_id, "kind": "memory_note", "tier": 1, "rendered": f"[{row[1]}] {row[0]}"}
+    elif object_type == "problem":
+        # «Детектив» (2026-09-26) — до этого тикета card.problem не имел ни
+        # одного пути create/close, get_object() уже поддерживал его вслепую
+        # (generic SELECT *), но retrieval-рендер падал в общий fallback
+        # ("problem pb_...", бесполезно в контексте). Теперь — заголовок,
+        # статус и хвост case_summary, если проблема уже закрыта.
+        cur.execute(
+            sql.SQL("SELECT title, status, case_summary FROM {t} WHERE id = %s")
+            .format(t=sql.Identifier(schema(), "problem")), (object_id,))
+        row = cur.fetchone()
+        if row:
+            title, status, case_summary = row
+            summary_tail = f" — {case_summary.get('summary')}" if (status != "active" and case_summary) else ""
+            return {"id": object_id, "kind": "problem", "tier": 1,
+                    "rendered": f"{title} [{status}]{summary_tail}"}
     return {"id": object_id, "kind": object_type, "tier": 1, "rendered": f"{object_type} {object_id}"}
 
 
@@ -519,6 +534,37 @@ def create_clinical_note(cur, rec_id: str, rec_title: str, verdict: str,
     )
     write_journal(cur, "memory_note", note_id, "create",
                   diff={"type": "clinical", "title": title, "rec_id": rec_id, "verdict": verdict},
+                  link_back=True)
+    return note_id
+
+
+def create_case_summary_note(cur, problem_id: str, problem_title: str, status: str,
+                              summary: str, what_helped: Optional[str] = None) -> str:
+    """«Детектив» (2026-09-26, часть 1.3) — «case_summary при закрытии проблемы»
+    (план §6.3, честно отмечен в докстринге модуля как несделанный до этого
+    тикета: "в системе физически нет пути ЗАКРЫТЬ проблему"). Тот же приём, что
+    create_clinical_note() — case_summary САМ по себе уже лежит в card.problem
+    (колонка jsonb), но retrieval (entity_index/get_context) видит только
+    memory_note — без этой записи закрытая проблема не всплывёт по симптомному
+    ключу в разговоре, только по прямому problem_id (rehydration)."""
+    from ulid import ULID
+    from app.journal import write_journal
+
+    note_id = f"mn_{ULID()}"
+    title = f"{problem_title} — закрыто ({status})"[:60]
+    content = {"problem_id": problem_id, "status": status, "summary": summary, "what_helped": what_helped}
+    subject = [{"entity_type": "problem", "entity_value": problem_id}]
+
+    cur.execute(
+        sql.SQL(
+            "INSERT INTO {t} (id, provenance, verification, type, title, content, subject, source_refs) "
+            "VALUES (%s, %s, 'auto', 'case_summary', %s, %s, %s, %s)"
+        ).format(t=sql.Identifier(schema(), "memory_note")),
+        (note_id, json.dumps({"origin": "problem_close"}), title, json.dumps(content),
+         json.dumps(subject), json.dumps([problem_id])),
+    )
+    write_journal(cur, "memory_note", note_id, "create",
+                  diff={"type": "case_summary", "title": title, "problem_id": problem_id, "status": status},
                   link_back=True)
     return note_id
 

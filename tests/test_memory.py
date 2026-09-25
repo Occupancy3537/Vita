@@ -2,6 +2,7 @@
 get_context(). Честно: golden-корпус здесь — стартовый (заземлён на реальных
 сущностях/словах из уже существующих тестов проекта), не 100+ пар из спеки —
 как и с красными флагами, полный корпус строится вместе с Владом, не в одиночку."""
+import json
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -249,6 +250,75 @@ def test_clinical_note_auto_created_on_no_effect_verdict():
         cur.execute(f"SELECT title FROM {schema()}.memory_note WHERE type='clinical' AND content->>'rec_id'=%s", (rc.id,))
         row = cur.fetchone()
     assert row is not None and "не помогает" in row[0]
+
+
+# ─────── «Детектив» (2026-09-26) — case_summary при закрытии problem (§6.3,
+# честно отмеченный в докстринге модуля как несделанный до этого тикета) ───────
+
+def test_create_case_summary_note_writes_memory_note():
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.problem (id, ts_event, provenance, title, status, opened_ts) "
+            "VALUES ('pb_mem_test', now(), '{}', 'Проблема для теста памяти', 'active', now())"
+        )
+        conn.commit()
+    with get_conn() as conn, conn.cursor() as cur:
+        note_id = memory.create_case_summary_note(
+            cur, "pb_mem_test", "Проблема для теста памяти", "resolved",
+            "симптомы прошли за неделю", what_helped="покой",
+        )
+        conn.commit()
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT type, title, content, subject FROM {schema()}.memory_note WHERE id = %s", (note_id,))
+        row = cur.fetchone()
+    assert row[0] == "case_summary"
+    assert "resolved" in row[1]
+    assert row[2]["summary"] == "симптомы прошли за неделю"
+    assert row[2]["what_helped"] == "покой"
+    assert row[3][0]["entity_type"] == "problem" and row[3][0]["entity_value"] == "pb_mem_test"
+
+
+def test_tier1_render_problem_shows_title_and_status():
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.problem (id, ts_event, provenance, title, status, opened_ts) "
+            "VALUES ('pb_render_active', now(), '{}', 'Активная проблема рендера', 'active', now())"
+        )
+        conn.commit()
+    with get_conn() as conn, conn.cursor() as cur:
+        rendered = memory.tier1_render(cur, "problem", "pb_render_active")
+    assert rendered["kind"] == "problem"
+    assert "Активная проблема рендера" in rendered["rendered"]
+    assert "[active]" in rendered["rendered"]
+
+
+def test_tier1_render_problem_shows_case_summary_when_closed():
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.problem (id, ts_event, provenance, title, status, opened_ts, case_summary) "
+            "VALUES ('pb_render_closed', now(), '{}', 'Закрытая проблема рендера', 'resolved', now(), %s)",
+            (json.dumps({"summary": "итог случая", "what_helped": None}),),
+        )
+        conn.commit()
+    with get_conn() as conn, conn.cursor() as cur:
+        rendered = memory.tier1_render(cur, "problem", "pb_render_closed")
+    assert "итог случая" in rendered["rendered"]
+
+
+def test_get_object_problem_rehydration_works_generically():
+    """get_object() уже поддерживал "problem" вслепую (generic SELECT *) до
+    этого тикета — просто ничего туда не писало. Подтверждаем, что теперь
+    реально созданная строка rehydrate-ится целиком."""
+    with get_conn() as conn, conn.cursor() as cur:
+        result = None
+        from app import problem as pm
+        result = pm.create_problem(cur, "Проблема для get_object")
+        conn.commit()
+    with get_conn() as conn, conn.cursor() as cur:
+        obj = memory.get_object(cur, "problem", result["id"])
+    assert obj is not None
+    assert obj["title"] == "Проблема для get_object"
+    assert obj["status"] == "active"
 
 
 def test_pre_archive_check_flags_critical_and_archives_quiet():

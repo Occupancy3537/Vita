@@ -35,7 +35,7 @@ from typing import Optional
 
 import httpx
 
-from app import llm_usage
+from app import detective, llm_usage
 from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _dkey, _num
 from app.db import get_conn
@@ -1135,6 +1135,20 @@ def run_once() -> None:
     fates_table = _format_anomaly_fates_table(ctx.get("anomaly_fates") or [])
     if fates_table:
         row["Telegram_Text"] = row["Telegram_Text"] + "\n\n" + fates_table
+
+    # «Детектив» (2026-09-26, часть 3.3) — тот же приём, что и fates_table:
+    # детерминированный блок, добавляется ПОСЛЕ того, как модель уже написала
+    # текст, не встраивается в сам prompt. Пусто -> "" -> блока в тексте нет.
+    # Сбой анализа не должен ронять весь недельный разбор (тот же принцип, что
+    # у action_loops в dashboard.py) — только сам блок молча отсутствует.
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            detective_block = detective.build_weekly_block(cur)
+    except Exception:
+        logger.exception("weekly_advisor: detective.build_weekly_block упал — блок пропущен")
+        detective_block = ""
+    if detective_block:
+        row["Telegram_Text"] = row["Telegram_Text"] + "\n\n" + detective_block
 
     with get_conn() as conn, conn.cursor() as cur:
         write_recommendations_log(cur, row)
