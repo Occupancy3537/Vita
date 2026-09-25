@@ -247,6 +247,17 @@ def _anomaly_dispositions(cur, limit: int = 10) -> list[dict]:
     return recent_dispositions(cur, limit=limit)
 
 
+def _recent_consilium_summaries(cur, limit: int = 3) -> list[dict]:
+    """Консилиум специалистов (2026-09-25, Часть 4.3) — "чтобы доктор знал,
+    что уже решено коллегами", не переспрашивал заново."""
+    cur.execute(
+        sql.SQL("SELECT topic, ts_recorded::date, actions, status FROM {t} "
+                "ORDER BY ts_recorded DESC LIMIT %s").format(t=sql.Identifier(schema(), "consilium_report")),
+        (limit,),
+    )
+    return [{"topic": t, "date": str(d), "actions": a, "status": s} for t, d, a, s in cur.fetchall()]
+
+
 def build_dossier(cur, text: str = "") -> dict:
     """Собирает всё досье одним проходом. Приёмка Phase 3: <300мс (план §4,
     шаг 3) — все запросы дешёвые (индексы/LIMIT), климат — единственный сетевой
@@ -265,4 +276,5 @@ def build_dossier(cur, text: str = "") -> dict:
         "room_climate": _room_climate(cur),
         "recent_publications": _recent_publications(cur),
         "anomaly_dispositions": _anomaly_dispositions(cur),
+        "recent_consilium_summaries": _recent_consilium_summaries(cur),
     }

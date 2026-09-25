@@ -134,6 +134,7 @@ def format_dossier(dossier: dict, today: str) -> str:
     climate = dossier.get("room_climate")
     publications = dossier.get("recent_publications") or []
     anomaly_dispositions = dossier.get("anomaly_dispositions") or []
+    consilium_summaries = dossier.get("recent_consilium_summaries") or []
 
     lines = [f"=СЕГОДНЯ: {today} (Владивосток). Все события в данных — прошлое. "
              "Никогда не указывай даты позже сегодняшней.", ""]
@@ -239,6 +240,16 @@ def format_dossier(dossier: dict, today: str) -> str:
         for d in anomaly_dispositions:
             lines.append(f"- {d['date']} {d['metric']} ({d['severity']}) → {d['disposition']}"
                          + (f": {d['reason']}" if d.get('reason') else ""))
+        lines.append("")
+
+    if consilium_summaries:
+        # Консилиум специалистов (2026-09-25, Часть 4.3) — доктор не должен
+        # переспрашивать то, что коллеги уже разобрали ранее.
+        lines.append("## 👥 ПОСЛЕДНИЕ ИТОГИ КОНСИЛИУМОВ (уже решено коллегами)")
+        for c in consilium_summaries:
+            imperatives = [a["imperative"] for a in (c.get("actions") or []) if a.get("imperative")]
+            actions_str = "; ".join(imperatives) if imperatives else "без новых действий"
+            lines.append(f"- {c['date']} «{c['topic']}» [{c['status']}]: {actions_str}")
         lines.append("")
 
     return "\n".join(lines)

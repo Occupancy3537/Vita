@@ -79,3 +79,25 @@ def test_format_dossier_includes_meals_and_meds():
     assert "Vitamin D reduces fall risk" in text
     assert "мета-анализ" in text
     assert "у тебя низкий D" in text
+
+
+def test_format_dossier_includes_consilium_summaries():
+    """Консилиум специалистов (2026-09-25, Часть 4.3) — доктор видит, что уже
+    решено коллегами, и не переспрашивает заново."""
+    dossier = {
+        "memory": {"bracelet": [], "hot": [], "cold": []},
+        "garmin_yesterday": None, "garmin_week_trend": {"days": 0},
+        "nutrition_today": None, "meals_today": [], "active_meds": [],
+        "open_investigations": [], "recent_doctor_notes": [], "labs_out_of_range": [],
+        "planned_labs": [], "room_climate": None, "recent_publications": [],
+        "recent_consilium_summaries": [
+            {"topic": "боль в боку 10 лет", "date": "2026-09-25", "status": "completed",
+             "actions": [{"imperative": "сделать МРТ пояснично-крестцового отдела", "accepted": True, "id": "r1"}]},
+            {"topic": "общий профиль долголетия", "date": "2026-08-01", "status": "empty", "actions": []},
+        ],
+    }
+    text = prompt.format_dossier(dossier, "2026-09-26")
+    assert "ПОСЛЕДНИЕ ИТОГИ КОНСИЛИУМОВ" in text
+    assert "боль в боку 10 лет" in text
+    assert "сделать МРТ пояснично-крестцового отдела" in text
+    assert "без новых действий" in text

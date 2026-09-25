@@ -166,13 +166,13 @@ def test_recent_publications_respects_limit():
 
 def test_build_dossier_has_all_expected_keys(monkeypatch):
     monkeypatch.setattr(context, "get_context", lambda cur, mode, payload: {"stub": True})
-    cur = FakeCursor([[] for _ in range(11)])  # 11 health/card.*-запросов внутри build_dossier
+    cur = FakeCursor([[] for _ in range(12)])  # 12 health/card.*-запросов внутри build_dossier
 
     d = context.build_dossier(cur, "тест")
     assert set(d.keys()) == {
         "memory", "garmin_yesterday", "garmin_week_trend", "nutrition_today",
         "meals_today", "active_meds", "open_investigations", "recent_doctor_notes",
         "labs_out_of_range", "planned_labs", "room_climate", "recent_publications",
-        "anomaly_dispositions",
+        "anomaly_dispositions", "recent_consilium_summaries",
     }
     assert d["memory"] == {"stub": True}
