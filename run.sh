@@ -10,16 +10,23 @@
 # остальные секреты в этом списке — задать в шелле ДО запуска этого скрипта).
 # + ERR_DEDUP_TOKEN — /err-dedup, значение то же, что уже читают три ночных
 # cron-скрипта из backups/infra/.google_oauth.env (google_oauth_creds.js)
-# 2026-09-21 (по прямому запросу Влада): + HERMES_BOT_TOKEN (@Hermes_AI_vvk_bot) —
-# системные алерты (backup_alert/system_check/err_dedup/anomaly_detector/
-# memory_archive_check/monthly_trend/weekly_advisor/gate_watch) шли через
-# TELEGRAM_BOT_TOKEN (бот доктора) — регрессия миграции с n8n, где эти же
-# воркфлоу слали через отдельный credential "Hermes Agent" (см. app/hermes_telegram.py).
-# + NUTRITION_BOT_TOKEN (@vvk_gemini_bot) — отчёты о питании (app/nutrition_reports.py,
-# дневной+недельный), в n8n шли через credential "Отчет по питанию" (см. app/nutrition_telegram.py)
-# ROADMAP 5.5 (2026-09-24): DIGEST_SCHEDULER_ENABLED — вечерний дайджест
-# (app/digest.py, 21:50 ВЛ) заменил отдельный анамнез-планировщик (Волна 2,
-# B1, был 11:00 ВЛ) — вопрос анамнеза теперь первым блоком того же сообщения.
+# 2026-09-21 (по прямому запросу Влада, ИСТОРИЯ): + HERMES_BOT_TOKEN
+# (@Hermes_AI_vvk_bot) — системные алерты шли через TELEGRAM_BOT_TOKEN (бот
+# доктора), регрессия миграции с n8n, где эти же воркфлоу слали через отдельный
+# credential "Hermes Agent". 2026-09-24 (тикет «раскладка ботов по тематическим
+# чатам»): УБРАН — Hermes-бот конфликтовал с личным ИИ-агентом Влада (NousPortal
+# перехватывал эти сообщения как команды себе), полностью исключён из проекта.
+# + NUTRITION_BOT_TOKEN (@vvk_gemini_bot) — раньше отчёты о питании (в n8n шли
+# через credential "Отчет по питанию"), с 2026-09-24 репурпose-нут в общий
+# сервисный бот app/notify.py (алерты + вечерний дайджест) — см.
+# app/service_telegram.py. Отчёты о питании переехали на FOOD_DIARY_BOT_TOKEN
+# (тот же бот, что дневник питания, см. app/food_diary_telegram.py).
+# ROADMAP 5.5 (2026-09-24) → правка тем же днём (тикет выше): DIGEST_SCHEDULER_ENABLED
+# — вечерний дайджест (app/digest.py, 21:50 ВЛ), теперь ТОЛЬКО «остальное»
+# (жёлтые аномалии, weekly/monthly-отчёты, critical сверх бюджета) через
+# сервисный бот. ANAMNESIS_SCHEDULER_ENABLED — анамнез вернулся на свой
+# отдельный планировщик (11:00 ВЛ, чат ДОКТОРА) — первые сутки общего дайджеста
+# показали, что анамнез внутри него неудобен.
 # Волна 3 (B2): REGISTRAR_MODEL / REGISTRAR_PDF_MODEL — vision-модели регистратора
 # лаб-документов (app/registrar.py; PDF идёт отдельной моделью — glm-5.3-flash не
 # принимает file-модальность на OpenRouter, дефолт = модель фото-пути Food diary).
@@ -109,8 +116,7 @@ cd "$(dirname "$0")"
 : "${DASHBOARD_TOKEN:?не задан — все /dashboard/* эндпоинты уйдут в fail-closed 403}"
 : "${WIDGET_TOKEN:?не задан — /widget/nutrition-diary уйдёт в fail-closed 403}"
 : "${ERR_DEDUP_TOKEN:?не задан — три ночных cron-скрипта не смогут слать алерты через /err-dedup}"
-: "${HERMES_BOT_TOKEN:?не задан — системные алерты не смогут уйти в @Hermes_AI_vvk_bot}"
-: "${NUTRITION_BOT_TOKEN:?не задан — отчёты о питании не смогут уйти в @vvk_gemini_bot}"
+: "${NUTRITION_BOT_TOKEN:?не задан — сервисный бот (алерты+дайджест, @vvk_gemini_bot) не сможет слать}"
 : "${ACTION_ACK_TOKEN:?не задан — кнопки 'сделал' на дашборде уйдут в fail-closed forbidden}"
 : "${BACKUP_STATUS_TOKEN:?не задан — пинг ночного бэкапа не сможет обновить состояние}"
 
@@ -131,6 +137,7 @@ sudo docker run -d \
   -e OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
   -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
   -e TELEGRAM_POLLING_ENABLED=1 \
+  -e ANAMNESIS_SCHEDULER_ENABLED=1 \
   -e DIGEST_SCHEDULER_ENABLED=1 \
   -e SYSTEM_CHECK_ENABLED=1 \
   -e GATE_WATCH_ENABLED=1 \
@@ -161,7 +168,6 @@ sudo docker run -d \
   -e DASHBOARD_TOKEN="$DASHBOARD_TOKEN" \
   -e WIDGET_TOKEN="$WIDGET_TOKEN" \
   -e ERR_DEDUP_TOKEN="$ERR_DEDUP_TOKEN" \
-  -e HERMES_BOT_TOKEN="$HERMES_BOT_TOKEN" \
   -e NUTRITION_BOT_TOKEN="$NUTRITION_BOT_TOKEN" \
   -e ACTION_ACK_TOKEN="$ACTION_ACK_TOKEN" \
   -e BACKUP_STATUS_TOKEN="$BACKUP_STATUS_TOKEN" \

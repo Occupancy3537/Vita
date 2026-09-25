@@ -79,9 +79,9 @@ def test_burst_nudge_fires_after_55_minutes_of_suppression(monkeypatch):
 
 
 def test_run_notify_sends_telegram_only_when_send_true(monkeypatch):
-    from app import hermes_telegram  # 2026-09-21: алерты -> Hermes, не бот доктора
+    from app import service_telegram  # 2026-09-21: алерты -> сервисный бот, не бот доктора
     sent = []
-    monkeypatch.setattr(hermes_telegram, "send_message", lambda chat_id, text, parse_mode=None: sent.append((chat_id, text)))
+    monkeypatch.setattr(service_telegram, "send_message", lambda chat_id, text, parse_mode=None: sent.append((chat_id, text)))
 
     with get_conn() as conn, conn.cursor() as cur:
         ed.run_notify(cur, TEST_WF, TEST_NODE, "первый сбой", False, ed.EXPECTED_TOKEN)

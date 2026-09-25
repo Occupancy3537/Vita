@@ -62,6 +62,7 @@ from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
 from app import digest
 from app.doctor import poller as doctor_poller
+from app.doctor import anamnesis as doctor_anamnesis
 from app import notify
 from app import timeutil
 from app.journal import write_journal
@@ -122,6 +123,9 @@ app = FastAPI(title="card-service", version="0.0.1")
 # сегодняшней конфигурации run.sh (все флаги=1) не меняется.
 _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     ("TELEGRAM_POLLING_ENABLED", lambda: doctor_poller.run_polling_loop(), "telegram-poller"),
+    # Возвращён 2026-09-24 (тикет «раскладка ботов по тематическим чатам») —
+    # см. app/doctor/anamnesis.py::run_scheduler для истории.
+    ("ANAMNESIS_SCHEDULER_ENABLED", lambda: doctor_anamnesis.run_scheduler(), "anamnesis-scheduler"),
     ("DIGEST_SCHEDULER_ENABLED", lambda: digest.run_scheduler(), "digest-scheduler"),
     ("SYSTEM_CHECK_ENABLED", lambda: system_check.run_scheduler(), "system-check-scheduler"),
     ("GATE_WATCH_ENABLED", lambda: gate_watch.run_scheduler(), "gate-watch-scheduler"),
@@ -149,7 +153,7 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # ежедневно и не на экране «Настройки» постоянно). См. app/issue_review.py.
     ("ISSUE_REVIEW_ENABLED", lambda: issue_review.run_scheduler(), "issue-review-scheduler"),
     # 2026-09-21: Food diary_v5 — свой бот (vlad_health), свой polling-цикл,
-    # независимый от доктора (Hermes Agent). Решение Влада: опрос, не вебхук.
+    # независимый от доктора (TELEGRAM_BOT_TOKEN). Решение Влада: опрос, не вебхук.
     ("FOOD_DIARY_BOT_ENABLED", lambda: food_diary_bot.run_polling_loop(), "food-diary-bot-poller"),
     # 2026-09-21: находка при проверке "можно ли убрать n8n" — card-service
     # собственную очередь /process крутил n8n (Card Processor, опрос раз в

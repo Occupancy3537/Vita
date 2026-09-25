@@ -201,7 +201,7 @@ def _deliver(msg, reply_text):
 
 
 def test_emergency_delivery_retries_then_succeeds(monkeypatch):
-    """Две попытки ботом доктора падают — третья доставляет; Hermes не нужен."""
+    """Две попытки ботом доктора падают — третья доставляет; сервисный бот не нужен."""
     attempts = {"n": 0}
     sent = []
 
@@ -212,31 +212,31 @@ def test_emergency_delivery_retries_then_succeeds(monkeypatch):
         sent.append((chat_id, text))
         return 42
 
-    hermes_calls = []
+    service_calls = []
     monkeypatch.setattr(telegram_module, "send_message", flaky)
     monkeypatch.setattr(intake_module, "EMERGENCY_RETRY_DELAY_SECONDS", 0)
-    monkeypatch.setattr(intake_module.hermes_telegram, "send_message",
-                        lambda *a, **k: hermes_calls.append(a))
+    monkeypatch.setattr(intake_module.service_telegram, "send_message",
+                        lambda *a, **k: service_calls.append(a))
 
     assert _deliver(_emergency_msg(), "🚨 ответ") is True
     assert attempts["n"] == 3
     assert sent == [("777", "🚨 ответ")]
-    assert hermes_calls == []  # успех ботом доктора — фолбэк не нужен
+    assert service_calls == []  # успех ботом доктора — фолбэк не нужен
 
 
-def test_emergency_delivery_falls_back_to_hermes(monkeypatch):
-    """Все попытки бота доктора падают — фолбэк Hermes-ботом в тот же чат."""
+def test_emergency_delivery_falls_back_to_service_bot(monkeypatch):
+    """Все попытки бота доктора падают — фолбэк сервисным ботом в тот же чат."""
     def doctor_boom(chat_id, text, reply_to_message_id=None, parse_mode=None):
         raise RuntimeError("bot blocked")
 
-    hermes_sent = []
+    service_sent = []
     monkeypatch.setattr(telegram_module, "send_message", doctor_boom)
     monkeypatch.setattr(intake_module, "EMERGENCY_RETRY_DELAY_SECONDS", 0)
-    monkeypatch.setattr(intake_module.hermes_telegram, "send_message",
-                        lambda chat_id, text, *a, **k: hermes_sent.append((chat_id, text)))
+    monkeypatch.setattr(intake_module.service_telegram, "send_message",
+                        lambda chat_id, text, *a, **k: service_sent.append((chat_id, text)))
 
     assert _deliver(_emergency_msg(update_id=501), "🚨 ответ") is True
-    assert hermes_sent == [("777", "🚨 ответ")]
+    assert service_sent == [("777", "🚨 ответ")]
 
 
 def test_emergency_delivery_total_failure_never_raises(monkeypatch):
@@ -245,7 +245,7 @@ def test_emergency_delivery_total_failure_never_raises(monkeypatch):
         raise RuntimeError("telegram down")
 
     monkeypatch.setattr(telegram_module, "send_message", boom)
-    monkeypatch.setattr(intake_module.hermes_telegram, "send_message", boom)
+    monkeypatch.setattr(intake_module.service_telegram, "send_message", boom)
     monkeypatch.setattr(intake_module, "EMERGENCY_RETRY_DELAY_SECONDS", 0)
 
     assert _deliver(_emergency_msg(update_id=502), "🚨 ответ") is False
@@ -260,7 +260,7 @@ def test_handle_update_l3_delivery_failure_still_runs_layer_b(monkeypatch):
 
     layer_b_calls = []
     monkeypatch.setattr(telegram_module, "send_message", boom)
-    monkeypatch.setattr(intake_module.hermes_telegram, "send_message", boom)
+    monkeypatch.setattr(intake_module.service_telegram, "send_message", boom)
     monkeypatch.setattr(intake_module, "EMERGENCY_RETRY_DELAY_SECONDS", 0)
     monkeypatch.setattr(gate, "slow_gate_followup",
                         lambda chat_id, text, source_id=None: layer_b_calls.append((chat_id, text)))
@@ -344,7 +344,7 @@ def test_finish_turn_model_emergency_reply_falls_back_when_edit_fails(monkeypatc
     """L2 (аудит логики, 2026-09-23, КРИТИЧНО): модель сама распознала неот-
     ложку (второй, семантический слой в промпте — regex её не ловит) — раньше
     сбой edit_message означал полную тихую потерю (один вызов без ретраев).
-    Теперь падает обратно на гарантированную доставку (ретраи + Hermes)."""
+    Теперь падает обратно на гарантированную доставку (ретраи + сервисный бот)."""
     sent = []
     monkeypatch.setattr(telegram_module, "send_chat_action", lambda *a, **k: None)
     monkeypatch.setattr(telegram_module, "send_message",

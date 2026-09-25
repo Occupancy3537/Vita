@@ -24,11 +24,13 @@ f'{schema()}.anamnesis' вместо литерального 'health.anamnesis'
 везде, из импортов убран schema() (был нужен только этим четырём строкам)."""
 import logging
 import re
+import time
 from datetime import datetime
 
 from app.db import get_conn
 from app.doctor import telegram
-from app import timeutil
+from app import notify, run_log, timeutil
+from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
@@ -128,13 +130,10 @@ def _fetch_rows(cur) -> list[dict]:
 
 def ask_daily() -> dict:
     """Один цикл опроса: выбрать, пометить (если пора). Возвращает результат
-    pick_next() — саму отправку с 2026-09-24 (ROADMAP 5.5) больше НЕ делает:
-    вопрос анамнеза переехал первым блоком в вечерний дайджест (app/digest.py,
-    вызывает эту функцию напрямую и сам решает, слать ли res["text"]).
-    Приём ответа (handle_reply) не изменился ни на йоту — тег #Q_ID в тексте
-    вопроса тот же, ищется тем же способом, реплай на дайджест целиком или
-    просто текст с тегом работают одинаково, независимо от того, была ли
-    команда вопроса единственным сообщением или частью сводки."""
+    pick_next() — саму отправку НЕ делает (чистая функция состояния, тестируется
+    без Telegram) — см. run_once()/run_scheduler() ниже, которые вызывают её и
+    решают, слать ли res["text"]. Приём ответа (handle_reply) не менялся ни на
+    йоту — тег #Q_ID в тексте вопроса тот же, ищется тем же способом."""
     with get_conn() as conn, conn.cursor() as cur:
         res = pick_next(_fetch_rows(cur), _vl_today())
         if res["action"] == "ask":
@@ -191,12 +190,38 @@ def handle_reply(update: dict) -> None:
         logger.info("anamnesis: ответ %s не записан (закрыт/неизвестен)", q_id)
 
 
-# 2026-09-24 (ROADMAP 5.5): раньше здесь был свой планировщик (спал до
-# ASK_HOUR_VL=11:00, звал ask_daily() и слал вопрос отдельным сообщением).
-# Удалён вместе с регистрацией в main.py — вопрос анамнеза теперь ПЕРВЫМ
-# блоком вечернего дайджеста (app/digest.py вызывает ask_daily() САМ, один
-# раз в сутки, в 21:45). Два независимых вызова ask_daily() в один день были
-# бы багом: первый молча помечает вопрос "asked" (это и раньше делал
-# ask_daily() безусловно), второй не нашёл бы что спрашивать — вопрос
-# считался бы заданным, хотя Влад его никогда не видел. run_log.mark_run
-# теперь тоже на стороне digest.py.
+# 2026-09-24 (ROADMAP 5.5 → правка тем же днём, тикет «раскладка ботов по
+# тематическим чатам»): планировщик здесь был, затем на один день (ROADMAP 5.5)
+# удалён в пользу вечернего дайджеста (вопрос — первым блоком общего сообщения
+# в 21:45/21:50). Первые живые сутки показали: анамнез внутри общего дайджеста
+# неудобен (Влад) — вопрос ВОЗВРАЩЁН на свой отдельный планировщик, время
+# ПРЕЖНЕЕ (11:00 ВЛ, до ROADMAP 5.5), но чат теперь ДОКТОРА (тот же #A0X-тег/
+# handle_reply — ничего в приёме ответа не поменялось), не Hermes и не общий
+# сервисный дайджест.
+ASK_HOUR_VL = 11
+
+
+def run_once() -> dict:
+    """Один вызов ask_daily() + (если есть что спрашивать) доставка ботом
+    доктора, force_reply — Telegram сам открывает поле ответа. Логируется в
+    card.notify_log через notify.log_external_send (priority="normal") —
+    журнал/аудит "было ли сегодня отправлено", доставку саму notify() не
+    трогает (та же схема, что doctor/intake.py::_deliver_emergency)."""
+    res = ask_daily()
+    if res.get("action") == "ask" and res.get("text"):
+        telegram.send_message(CHAT_ID, res["text"], force_reply=True)
+        notify.log_external_send("anamnesis", "normal")
+    return res
+
+
+def run_scheduler() -> None:
+    logger.info("anamnesis scheduler: старт (%02d:00 ВЛ)", ASK_HOUR_VL)
+    while True:
+        try:
+            timeutil.sleep_until_local(ASK_HOUR_VL, 0)
+            run_once()
+            run_log.mark_run("anamnesis")
+        except Exception as e:
+            logger.exception("anamnesis scheduler упал — повтор завтра")
+            alert_on_failure("anamnesis", e)
+            time.sleep(3600)

@@ -42,7 +42,7 @@ SECRET_NAMES = [
     "FOOD_DIARY_BOT_TOKEN", "YANDEX_IOT_TOKEN", "CARD_GOOGLE_CLIENT_ID",
     "CARD_GOOGLE_CLIENT_SECRET", "CARD_GOOGLE_SHEETS_REFRESH_TOKEN",
     "CARD_GOOGLE_CALENDAR_REFRESH_TOKEN", "RESCUETIME_API_KEY",
-    "DASHBOARD_TOKEN", "WIDGET_TOKEN", "ERR_DEDUP_TOKEN", "HERMES_BOT_TOKEN",
+    "DASHBOARD_TOKEN", "WIDGET_TOKEN", "ERR_DEDUP_TOKEN",
     "NUTRITION_BOT_TOKEN", "ACTION_ACK_TOKEN", "BACKUP_STATUS_TOKEN",
 ]
 
@@ -74,7 +74,9 @@ LOOPS: list[dict] = [
      "flag": "MEDS_FROM_CALENDAR_ENABLED"},
     {"key": "anomaly_detector_daily", "n": "Поиск аномалий (день)", "s": "ежедневно 09:15",
      "flag": "ANOMALY_DETECTOR_ENABLED"},
-    {"key": "digest", "n": "Вечерний дайджест (анамнез+сводки)", "s": "ежедневно 21:50",
+    {"key": "anamnesis", "n": "Анамнез — вопрос дня", "s": "ежедневно 11:00",
+     "flag": "ANAMNESIS_SCHEDULER_ENABLED"},
+    {"key": "digest", "n": "Вечерний дайджест (сервисный бот)", "s": "ежедневно 21:50",
      "flag": "DIGEST_SCHEDULER_ENABLED"},
     {"key": "nutrition_reports_daily", "n": "Отчёт о питании (день)", "s": "ежедневно 21:45",
      "flag": "NUTRITION_REPORTS_ENABLED"},

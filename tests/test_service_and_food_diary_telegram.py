@@ -1,12 +1,14 @@
-"""app/simple_telegram.py + app/hermes_telegram.py + app/nutrition_telegram.py
-(2026-09-21, по прямому запросу Влада): алерты и отчёты о питании ушли не в
-своих ботов, а в бота доктора — регрессия миграции с n8n (там алерты шли
-через credential "Hermes Agent", отчёты о питании — через "Отчет по
-питанию"). httpx мокается — тесты не бьют по Telegram API."""
+"""app/simple_telegram.py + app/service_telegram.py + app/food_diary_telegram.py
+(2026-09-24, тикет «раскладка ботов по тематическим чатам»): было
+test_hermes_and_nutrition_telegram.py — Hermes исключён из проекта, nutrition_telegram.py
+репурпose-нут в service_telegram.py (тот же токен NUTRITION_BOT_TOKEN, новая
+роль — сервисный бот app/notify.py). food_diary_telegram.py — новый минимальный
+отправитель для сводки питания (FOOD_DIARY_BOT_TOKEN, тот же бот, что дневник
+питания). httpx мокается — тесты не бьют по Telegram API."""
 import httpx
 import pytest
 
-from app import hermes_telegram, nutrition_telegram, simple_telegram
+from app import food_diary_telegram, service_telegram, simple_telegram
 
 
 def _resp(status_code=200, json_body=None):
@@ -42,31 +44,31 @@ def test_simple_telegram_raises_on_api_not_ok(monkeypatch):
         simple_telegram.send_message("TOK", "1", "текст")
 
 
-def test_hermes_telegram_raises_when_token_not_set(monkeypatch):
-    monkeypatch.delenv("HERMES_BOT_TOKEN", raising=False)
-    with pytest.raises(RuntimeError):
-        hermes_telegram.send_message("8956401", "тест")
-
-
-def test_hermes_telegram_uses_its_own_token(monkeypatch):
-    monkeypatch.setenv("HERMES_BOT_TOKEN", "hermes-tok")
-    captured = {}
-    monkeypatch.setattr(simple_telegram, "send_message",
-                         lambda token, chat_id, text, parse_mode=None: captured.update(token=token))
-    hermes_telegram.send_message("8956401", "тест")
-    assert captured["token"] == "hermes-tok"
-
-
-def test_nutrition_telegram_raises_when_token_not_set(monkeypatch):
+def test_service_telegram_raises_when_token_not_set(monkeypatch):
     monkeypatch.delenv("NUTRITION_BOT_TOKEN", raising=False)
     with pytest.raises(RuntimeError):
-        nutrition_telegram.send_message("8956401", "тест")
+        service_telegram.send_message("8956401", "тест")
 
 
-def test_nutrition_telegram_uses_its_own_token(monkeypatch):
-    monkeypatch.setenv("NUTRITION_BOT_TOKEN", "nutrition-tok")
+def test_service_telegram_uses_its_own_token(monkeypatch):
+    monkeypatch.setenv("NUTRITION_BOT_TOKEN", "service-tok")
     captured = {}
     monkeypatch.setattr(simple_telegram, "send_message",
                          lambda token, chat_id, text, parse_mode=None: captured.update(token=token))
-    nutrition_telegram.send_message("8956401", "тест")
-    assert captured["token"] == "nutrition-tok"
+    service_telegram.send_message("8956401", "тест")
+    assert captured["token"] == "service-tok"
+
+
+def test_food_diary_telegram_raises_when_token_not_set(monkeypatch):
+    monkeypatch.delenv("FOOD_DIARY_BOT_TOKEN", raising=False)
+    with pytest.raises(RuntimeError):
+        food_diary_telegram.send_message("8956401", "тест")
+
+
+def test_food_diary_telegram_uses_its_own_token(monkeypatch):
+    monkeypatch.setenv("FOOD_DIARY_BOT_TOKEN", "food-diary-tok")
+    captured = {}
+    monkeypatch.setattr(simple_telegram, "send_message",
+                         lambda token, chat_id, text, parse_mode=None: captured.update(token=token))
+    food_diary_telegram.send_message("8956401", "тест")
+    assert captured["token"] == "food-diary-tok"

@@ -1,7 +1,7 @@
 """Минимальная синхронная обёртка sendMessage для ботов, которым не нужен
 весь набор app/doctor/telegram.py (typing/edit/file-download — это про
-диалог с пациентом). Используется app/hermes_telegram.py и
-app/nutrition_telegram.py — каждый просто передаёт свой токен."""
+диалог с пациентом). Используется app/service_telegram.py и
+app/food_diary_telegram.py — каждый просто передаёт свой токен."""
 import httpx
 
 from app.telegram_safe import raise_for_status_safe

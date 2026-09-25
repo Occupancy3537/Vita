@@ -38,7 +38,7 @@ from app import llm_usage
 from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _num, _rows_as_dicts
 from app.db import get_conn
-from app import notify
+from app import food_diary_telegram, notify
 from app import run_log, timeutil
 from app.scheduler_alert import alert_on_failure
 
@@ -228,18 +228,25 @@ def _sync_nutrition_to_card(d: dict) -> None:
 
 
 def run_daily() -> None:
-    """2026-09-24 (ROADMAP 5.5): больше не шлёт сам — копит через notify()
-    (priority=normal), вечерний дайджест (app/digest.py) забирает как
-    вторую секцию (после вопроса анамнеза)."""
+    """2026-09-24 (тикет «раскладка ботов по тематическим чатам»): раньше
+    (ROADMAP 5.5, тем же днём) копило через notify() и уходило второй секцией
+    вечернего дайджеста — неудобно смешивать с остальным. Теперь шлёт САМ,
+    напрямую в чат дневника питания (тот же бот, что и живая запись блюд —
+    тематически логично), и только логирует факт в card.notify_log через
+    notify.log_external_send (priority="normal", тот же контракт, что у
+    doctor/intake.py::_deliver_emergency и app/doctor/anamnesis.py)."""
     with get_conn() as conn, conn.cursor() as cur:
         d = build_daily_report(cur)
     if d is None:
-        notify.notify("nutrition_reports", "normal", "⚠️ За сегодня не найдено записей о питании. Не забудь поесть и записать!")
+        food_diary_telegram.send_message(food_diary_telegram.CHAT_ID,
+                                         "⚠️ За сегодня не найдено записей о питании. Не забудь поесть и записать!")
+        notify.log_external_send("nutrition_reports", "normal")
         return
 
     text = call_model(build_daily_prompt(d), max_tokens=1800, reasoning_tokens=700, temperature=0.3)
     if text:
-        notify.notify("nutrition_reports", "normal", text)
+        food_diary_telegram.send_message(food_diary_telegram.CHAT_ID, text)
+        notify.log_external_send("nutrition_reports", "normal")
 
     with get_conn() as conn, conn.cursor() as cur:
         _write_day_sum(cur, d)

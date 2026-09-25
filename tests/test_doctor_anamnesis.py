@@ -6,6 +6,43 @@ import pytest
 from app.doctor import anamnesis
 
 
+# ─────── run_once/run_scheduler (2026-09-24, тикет «раскладка ботов по
+# тематическим чатам» — вопрос анамнеза вернулся на свой отдельный
+# планировщик, чат доктора, 11:00 ВЛ) ───────
+
+class TestRunOnce:
+    def test_action_ask_sends_via_doctor_bot_and_logs(self, monkeypatch):
+        sent = []
+        logged = []
+        monkeypatch.setattr(anamnesis, "ask_daily",
+                            lambda: {"action": "ask", "q_id": "A07", "text": "🧬 Вопрос?"})
+        monkeypatch.setattr(anamnesis.telegram, "send_message",
+                            lambda chat_id, text, **kw: sent.append((chat_id, text, kw)))
+        monkeypatch.setattr(anamnesis.notify, "log_external_send",
+                            lambda source, priority: logged.append((source, priority)))
+        res = anamnesis.run_once()
+        assert res["q_id"] == "A07"
+        assert sent == [(anamnesis.CHAT_ID, "🧬 Вопрос?", {"force_reply": True})]
+        assert logged == [("anamnesis", "normal")]
+
+    def test_action_wait_sends_nothing(self, monkeypatch):
+        sent = []
+        logged = []
+        monkeypatch.setattr(anamnesis, "ask_daily", lambda: {"action": "wait", "reason": "ждём ответа"})
+        monkeypatch.setattr(anamnesis.telegram, "send_message", lambda *a, **k: sent.append(a))
+        monkeypatch.setattr(anamnesis.notify, "log_external_send", lambda *a, **k: logged.append(a))
+        anamnesis.run_once()
+        assert sent == []
+        assert logged == []
+
+    def test_action_done_sends_nothing(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(anamnesis, "ask_daily", lambda: {"action": "done", "reason": "всё закрыто"})
+        monkeypatch.setattr(anamnesis.telegram, "send_message", lambda *a, **k: sent.append(a))
+        anamnesis.run_once()
+        assert sent == []
+
+
 def _row(q_id, cat, status="pending", asked=None, attempts=0, answer=None):
     return {"Q_ID": q_id, "Category": cat, "Question": f"Вопрос {q_id}?", "Status": status,
             "Asked_Date": asked, "Answer": answer, "Answered_Date": None, "Attempts": attempts}

@@ -1,24 +1,23 @@
-"""Вечерний дайджест (ROADMAP 5.5, 2026-09-24) — одно сообщение вместо
-потока: вопрос анамнеза первым блоком, сводка питания вторым, дальше —
-всё, что накопилось за день через app/notify.py (priority normal/digest,
-и critical сверх дневного бюджета — не теряется, просто не срочно).
-Пустой дайджест не отправляется вовсе.
+"""Вечерний дайджест (ROADMAP 5.5, 2026-09-24; сужен тем же днём тикетом
+«раскладка ботов по тематическим чатам») — одно сообщение сервисным ботом
+вместо потока: всё, что накопилось за день через app/notify.py (priority
+normal/digest, и critical сверх дневного бюджета — не теряется, просто не
+срочно). Пустой дайджест не отправляется вовсе.
 
-Порядок: анамнеза/питание — ФИКСИРОВАННЫЕ первые два блока (не по времени
-постановки в очередь — nutrition_reports ставится в очередь позже анамнеза,
-но должен идти вторым, не последним), всё остальное — в порядке накопления
-за день (ts).
-
-21:50, не 21:45: nutrition_reports.run_daily_scheduler() тоже стреляет в
-21:45 (не трогали её время специально — она и раньше была "вечерним
-отчётом", теперь просто копит вместо отправки) — 5 минут запаса гарантируют,
-что её пункт уже в card.notify_log к моменту сборки."""
+Раньше (ROADMAP 5.5, тем же днём) сюда ещё заходили анамнез первым блоком и
+сводка питания вторым — первые живые сутки показали, что это неудобно
+(анамнез внутри общего сообщения, конфликт бота с личным ИИ-агентом Влада).
+Оба переехали в свои тематические чаты со своим временем и больше НЕ идут
+через notify()/этот дайджест: анамнез — app/doctor/anamnesis.py::run_scheduler
+(11:00, чат доктора), сводка питания — app/nutrition_reports.py::run_daily
+(21:45, чат дневника питания). Здесь остаётся ровно то, что реально
+общее/сервисное: жёлтые аномалии, weekly/monthly-отчёты, critical сверх
+бюджета, находки issue_review и т.п."""
 import logging
 import time
 
 from app import notify, run_log, timeutil
 from app.db import get_conn, schema
-from app.doctor import anamnesis
 from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
@@ -27,29 +26,11 @@ DIGEST_HOUR_VL = 21
 DIGEST_MINUTE_VL = 50
 
 
-def _fixed_block(cur, day: str, source: str) -> str | None:
-    """Один источник -> одна секция (первая строка за сегодня, если их
-    почему-то несколько). Помечает delivered_in_digest, чтобы не попасть
-    ещё раз в "всё остальное" ниже."""
-    cur.execute(
-        f"SELECT id, text FROM {schema()}.notify_log "
-        "WHERE sent_date = %s AND source = %s AND immediate = false AND delivered_in_digest = false "
-        "ORDER BY ts LIMIT 1",
-        (day, source),
-    )
-    row = cur.fetchone()
-    if not row or not row[1]:
-        return None
-    cur.execute(f"UPDATE {schema()}.notify_log SET delivered_in_digest = true WHERE id = %s", (row[0],))
-    return row[1]
-
-
 def _rest_blocks(cur, day: str) -> list[str]:
-    """Всё остальное, накопленное за день (жёлтые аномалии, critical сверх
-    бюджета, недельные/месячные отчёты в свой день, находки issue_review
-    и т.п.) — в порядке накопления, кроме уже забранных фиксированных блоков
-    выше (nutrition_reports; anamnesis никогда сюда не попадает — не через
-    notify(), см. build_and_send)."""
+    """Всё, накопленное за день (жёлтые аномалии, critical сверх бюджета,
+    недельные/месячные отчёты в свой день, находки issue_review и т.п.) —
+    в порядке накопления (ts). anamnesis/nutrition_reports сюда больше не
+    попадают — у них свои каналы, см. докстринг модуля."""
     cur.execute(
         f"SELECT id, text FROM {schema()}.notify_log "
         "WHERE sent_date = %s AND immediate = false AND delivered_in_digest = false "
@@ -72,24 +53,8 @@ def build_and_send() -> dict:
     day = timeutil.today().isoformat()
     sections: list[str] = []
 
-    # 1. вопрос анамнеза — ПЕРВЫМ блоком, не через notify() (фиксированная
-    #    позиция, не порядок по времени постановки в очередь).
-    try:
-        anam_res = anamnesis.ask_daily()
-        if anam_res.get("action") == "ask" and anam_res.get("text"):
-            sections.append(anam_res["text"])
-    except Exception:
-        logger.exception("digest: anamnesis.ask_daily() упал — блок анамнеза пропущен")
-
-    # 2. сводка питания — ВТОРЫМ блоком (nutrition_reports сам кладёт текст
-    #    в notify_log на своём обычном 21:45-триггере, см. app/nutrition_reports.py).
-    with get_conn() as conn, conn.cursor() as cur:
-        nutrition_text = _fixed_block(cur, day, "nutrition_reports")
-        conn.commit()
-    if nutrition_text:
-        sections.append(nutrition_text)
-
-    # 3. всё остальное, что скопилось за день.
+    # всё, что скопилось за день (anamnesis/nutrition_reports больше не сюда —
+    # см. докстринг модуля).
     with get_conn() as conn, conn.cursor() as cur:
         rest = _rest_blocks(cur, day)
         conn.commit()

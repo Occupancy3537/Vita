@@ -13,13 +13,22 @@
 слоя красных флагов + гейт: они инициативны по смыслу (система САМА решает,
 что нужно вмешаться), поэтому подключены сюда с priority="red_flag".
 
+Также НЕ через notify()/приоритеты ниже — анамнез (app/doctor/anamnesis.py,
+ежедневно 11:00, чат ДОКТОРА) и дневная сводка питания (app/nutrition_reports.py
+::run_daily(), 21:45, чат ДНЕВНИКА ПИТАНИЯ): 2026-09-24 (тикет «раскладка
+ботов по тематическим чатам») оба переехали в СВОИ тематические чаты со
+своим временем — общий вечерний дайджест ниже остался только для сервисного
+бота. Обе отправки шлют сами (см. log_external_send ниже) и логируются сюда
+priority="normal" для журнала/аудита — тот же контракт, что уже был у
+doctor/intake.py::_deliver_emergency (priority="red_flag").
+
 Приоритеты:
   red_flag — ВСЕГДА немедленно, ВНЕ дневного бюджета (безопасность важнее
              тишины). Только для _deliver_emergency (doctor/intake.py — свои
-             3 попытки + фолбэк Hermes, эту логику НЕ трогаем и НЕ дублируем
-             здесь — она логируется через log_external_send(), не notify())
-             и write_path._alert_owner_redflag (обычный одиночный send —
-             мигрирован на notify() целиком).
+             3 попытки + фолбэк на сервисный бот, эту логику НЕ трогаем и НЕ
+             дублируем здесь — она логируется через log_external_send(), не
+             notify()) и write_path._alert_owner_redflag (обычный одиночный
+             send — мигрирован на notify() целиком).
   critical — немедленно, ПОКА дневной бюджет (CRITICAL_DAILY_BUDGET) не
              исчерпан; сверх бюджета — молча уходит в вечерний дайджест
              как обычный пункт (не теряется, просто не срочно).
@@ -28,12 +37,17 @@
              стороне вызывающего ("это фоновая сводка" vs "это и задумано
              как дайджест-материал, например недельный отчёт").
 
+Транспорт (_send) — @vvk_gemini_bot (app/service_telegram.py, был
+"Отчёт по питанию", репурпose-нут 2026-09-24 — см. его докстринг). Раньше
+был @Hermes_AI_vvk_bot — исключён из проекта полностью (личный агент Влада
+перехватывал эти сообщения как команды себе).
+
 Сутки — по timeutil.today() (человек, не UTC/сервер), как везде в проекте.
 Журнал — card.notify_log, читает и пишет и бюджет, и сборщик дайджеста
 (app/digest.py) — единственный источник правды, не два разных состояния."""
 import logging
 
-from app import hermes_telegram, timeutil
+from app import service_telegram, timeutil
 from app.db import get_conn, schema
 
 logger = logging.getLogger(__name__)
@@ -45,7 +59,7 @@ PRIORITIES = ("red_flag", "critical", "normal", "digest")
 
 def _send(text: str, parse_mode: str | None = None) -> bool:
     try:
-        hermes_telegram.send_message(hermes_telegram.CHAT_ID, text, parse_mode=parse_mode)
+        service_telegram.send_message(service_telegram.CHAT_ID, text, parse_mode=parse_mode)
         return True
     except Exception:
         logger.exception("notify: отправка не удалась")
@@ -109,10 +123,14 @@ def notify(source: str, priority: str, text: str, *, parse_mode: str | None = No
 
 def log_external_send(source: str, priority: str = "red_flag") -> None:
     """Для отправителей со своей логикой доставки, которую нельзя заменить
-    обычным notify() без потери надёжности — сейчас единственный случай:
-    doctor/intake.py::_deliver_emergency (3 попытки ботом доктора + фолбэк
-    через Hermes, F1-фикс 2026-09-22 — трогать нельзя ни на йоту). Они шлют
-    сами, но обязаны залогировать сюда для журнала/бюджета. Текст НЕ
+    обычным notify() без потери надёжности/маршрутизации:
+    - doctor/intake.py::_deliver_emergency (3 попытки ботом доктора + фолбэк
+      на сервисный бот, F1-фикс 2026-09-22 — трогать нельзя ни на йоту);
+    - app/doctor/anamnesis.py (вопрос дня — свой чат ДОКТОРА, своё время 11:00);
+    - app/nutrition_reports.py::run_daily() (сводка питания — свой чат
+      ДНЕВНИКА ПИТАНИЯ, своё время 21:45).
+    Оба последних — 2026-09-24, тикет «раскладка ботов по тематическим чатам».
+    Они шлют сами, но обязаны залогировать сюда для журнала/бюджета. Текст НЕ
     сохраняем (эмердженси-содержание уже есть в card.rf_event/journal —
     незачем дублировать клиническую переписку во второй таблице)."""
     day = timeutil.today()

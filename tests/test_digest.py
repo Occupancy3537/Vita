@@ -1,6 +1,7 @@
-"""app/digest.py — вечерний дайджест (ROADMAP 5.5). Юниты на порядок сборки
-(анамнез первым, питание вторым, остальное — в порядке накопления) и на
-"пустой дайджест не шлём вовсе"."""
+"""app/digest.py — вечерний дайджест (ROADMAP 5.5; сужен 2026-09-24 тикетом
+«раскладка ботов по тематическим чатам» — anamnesis/nutrition_reports больше
+не заходят сюда, см. докстринг модуля). Юниты на "всё накопленное — в порядке
+постановки в очередь" и на "пустой дайджест не шлём вовсе"."""
 import pytest
 
 from app import digest, notify, timeutil
@@ -10,7 +11,6 @@ pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
 
 
 def test_empty_digest_not_sent(monkeypatch):
-    monkeypatch.setattr(digest.anamnesis, "ask_daily", lambda: {"action": "done"})
     sent = []
     monkeypatch.setattr(digest.notify, "_send", lambda text, parse_mode=None: sent.append(text) or True)
     res = digest.build_and_send()
@@ -18,23 +18,19 @@ def test_empty_digest_not_sent(monkeypatch):
     assert sent == []
 
 
-def test_anamnesis_first_nutrition_second_rest_after(monkeypatch):
-    monkeypatch.setattr(digest.anamnesis, "ask_daily", lambda: {"action": "ask", "text": "БЛОК-АНАМНЕЗ"})
+def test_accumulated_items_sent_in_queue_order(monkeypatch):
     sent = []
     monkeypatch.setattr(digest.notify, "_send", lambda text, parse_mode=None: sent.append(text) or True)
 
-    # порядок постановки в очередь НАМЕРЕННО перепутан — "остальное" раньше
-    # nutrition_reports, дайджест обязан всё равно поставить nutrition вторым.
-    notify.notify("anomaly_detector", "normal", "БЛОК-ОСТАЛЬНОЕ")
-    notify.notify("nutrition_reports", "normal", "БЛОК-ПИТАНИЕ")
+    notify.notify("anomaly_detector", "normal", "БЛОК-ПЕРВЫЙ")
+    notify.notify("monthly_trend", "normal", "БЛОК-ВТОРОЙ")
 
     res = digest.build_and_send()
-    assert res["sections"] == 3
-    assert sent[0].split("\n\n———\n\n") == ["БЛОК-АНАМНЕЗ", "БЛОК-ПИТАНИЕ", "БЛОК-ОСТАЛЬНОЕ"]
+    assert res["sections"] == 2
+    assert sent[0].split("\n\n———\n\n") == ["БЛОК-ПЕРВЫЙ", "БЛОК-ВТОРОЙ"]
 
 
 def test_delivered_items_not_included_twice(monkeypatch):
-    monkeypatch.setattr(digest.anamnesis, "ask_daily", lambda: {"action": "done"})
     sent = []
     monkeypatch.setattr(digest.notify, "_send", lambda text, parse_mode=None: sent.append(text) or True)
 
@@ -47,7 +43,6 @@ def test_delivered_items_not_included_twice(monkeypatch):
 
 
 def test_critical_over_budget_lands_in_digest(monkeypatch):
-    monkeypatch.setattr(digest.anamnesis, "ask_daily", lambda: {"action": "done"})
     sent = []
     monkeypatch.setattr(notify, "_send", lambda text, parse_mode=None: sent.append(text) or True)
     for i in range(notify.CRITICAL_DAILY_BUDGET):
@@ -60,3 +55,16 @@ def test_critical_over_budget_lands_in_digest(monkeypatch):
     assert "СВЕРХ БЮДЖЕТА" in sent[0]
     for i in range(notify.CRITICAL_DAILY_BUDGET):
         assert f"в бюджете {i}" not in sent[0]  # немедленные не дублируются в дайджест
+
+
+def test_anamnesis_and_nutrition_reports_no_longer_flow_through_digest(monkeypatch):
+    """2026-09-24 (тикет «раскладка ботов по тематическим чатам»): оба источника
+    доставляют себя сами (log_external_send), не через notify() — значит и не
+    через _rest_blocks(). Явная регрессия на случай, если кто-то однажды снова
+    случайно позовёт notify.notify("anamnesis", ...) / ("nutrition_reports", ...)."""
+    sent = []
+    monkeypatch.setattr(digest.notify, "_send", lambda text, parse_mode=None: sent.append(text) or True)
+    notify.log_external_send("anamnesis", "normal")
+    notify.log_external_send("nutrition_reports", "normal")
+    res = digest.build_and_send()
+    assert res == {"sections": 0, "sent": False}  # log_external_send не пишет text -> нечего собирать

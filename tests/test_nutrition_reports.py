@@ -225,13 +225,37 @@ def test_write_day_sum_upserts_by_date():
 # --- run_daily / run_weekly (мокаем всё внешнее) ---------------------------
 
 def test_run_daily_no_meals_sends_reminder_only(monkeypatch):
+    """2026-09-24 (тикет «раскладка ботов по тематическим чатам»): run_daily()
+    больше не копит через notify() — шлёт сам, в чат дневника питания, и только
+    логирует факт через notify.log_external_send (тот же контракт, что у
+    doctor/intake.py::_deliver_emergency / app/doctor/anamnesis.py)."""
     monkeypatch.setattr(nr, "build_daily_report", lambda cur: None)
-    calls = []
-    monkeypatch.setattr(nr.notify, "notify", lambda *a, **kw: calls.append(a))
+    sent = []
+    logged = []
+    monkeypatch.setattr(nr.food_diary_telegram, "send_message",
+                        lambda chat_id, text, **kw: sent.append((chat_id, text)))
+    monkeypatch.setattr(nr.notify, "log_external_send", lambda source, priority: logged.append((source, priority)))
     nr.run_daily()
-    assert len(calls) == 1
-    assert calls[0][0] == "nutrition_reports" and calls[0][1] == "normal"
-    assert "не забудь" in calls[0][2].lower()
+    assert len(sent) == 1
+    assert sent[0][0] == nr.food_diary_telegram.CHAT_ID
+    assert "не забудь" in sent[0][1].lower()
+    assert logged == [("nutrition_reports", "normal")]
+
+
+def test_run_daily_with_meals_sends_model_text_via_food_diary_bot(monkeypatch):
+    monkeypatch.setattr(nr, "build_daily_report", lambda cur: {"Calories": 2000})
+    monkeypatch.setattr(nr, "build_daily_prompt", lambda d: "промпт")
+    monkeypatch.setattr(nr, "call_model", lambda *a, **kw: "Сводка дня: норм.")
+    monkeypatch.setattr(nr, "_write_day_sum", lambda cur, d: None)
+    monkeypatch.setattr(nr, "_sync_nutrition_to_card", lambda d: None)
+    sent = []
+    logged = []
+    monkeypatch.setattr(nr.food_diary_telegram, "send_message",
+                        lambda chat_id, text, **kw: sent.append((chat_id, text)))
+    monkeypatch.setattr(nr.notify, "log_external_send", lambda source, priority: logged.append((source, priority)))
+    nr.run_daily()
+    assert sent == [(nr.food_diary_telegram.CHAT_ID, "Сводка дня: норм.")]
+    assert logged == [("nutrition_reports", "normal")]
 
 
 def test_run_weekly_no_meals_sends_reminder_only(monkeypatch):

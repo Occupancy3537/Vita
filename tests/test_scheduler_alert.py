@@ -15,8 +15,8 @@ TEST_KEY = "test-scheduler-alert-source|scheduler"
 
 def test_alert_on_failure_sends_and_records(monkeypatch):
     sent = []
-    # 2026-09-21: алерты -> Hermes, не бот доктора (err_dedup.run_notify зовёт app.hermes_telegram)
-    monkeypatch.setattr("app.hermes_telegram.send_message", lambda chat_id, text, **kw: sent.append(text))
+    # 2026-09-21: алерты -> сервисный бот, не бот доктора (err_dedup.run_notify зовёт app.service_telegram)
+    monkeypatch.setattr("app.service_telegram.send_message", lambda chat_id, text, **kw: sent.append(text))
     sa.alert_on_failure("test-scheduler-alert-source", ValueError("boom"))
     assert len(sent) == 1
     assert "test-scheduler-alert-source" in sent[0]
@@ -29,7 +29,7 @@ def test_alert_on_failure_sends_and_records(monkeypatch):
 
 def test_alert_on_failure_deduped_within_window(monkeypatch):
     sent = []
-    monkeypatch.setattr("app.hermes_telegram.send_message", lambda chat_id, text, **kw: sent.append(text))
+    monkeypatch.setattr("app.service_telegram.send_message", lambda chat_id, text, **kw: sent.append(text))
     sa.alert_on_failure("test-scheduler-alert-source", ValueError("first"))
     sa.alert_on_failure("test-scheduler-alert-source", ValueError("second"))
     assert len(sent) == 1  # второй в пределах 60 мин подавлен

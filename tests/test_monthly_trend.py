@@ -209,8 +209,8 @@ def test_run_once_no_trends_sends_nothing(monkeypatch):
     monkeypatch.setattr(mt, "compute_trend", lambda rows: [])
 
     sent = []
-    from app import hermes_telegram  # 2026-09-21: алерты -> Hermes, не бот доктора
-    monkeypatch.setattr(hermes_telegram, "send_message", lambda chat_id, text: sent.append((chat_id, text)))
+    from app import service_telegram  # 2026-09-21: алерты -> сервисный бот, не бот доктора
+    monkeypatch.setattr(service_telegram, "send_message", lambda chat_id, text: sent.append((chat_id, text)))
 
     mt.run_once()
     assert sent == []

@@ -187,7 +187,7 @@ def test_process_survives_red_flag_alert_failure(monkeypatch):
     import app.write_path as wp
 
     def boom(*a, **k):
-        raise RuntimeError("hermes down")
+        raise RuntimeError("telegram down")
 
     monkeypatch.setattr(wp.notify, "notify", boom)
 

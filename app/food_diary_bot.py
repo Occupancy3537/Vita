@@ -1,7 +1,7 @@
 """Живой Telegram-бот Food diary_v5 (2026-09-21) — подключение к боту
 "vlad_health" (свой токен, FOOD_DIARY_BOT_TOKEN, credential 8CKBKo8CXTaLD3YI
 в n8n), СОБСТВЕННЫЙ long-polling цикл, независимый от app.doctor.poller
-(тот бот — Hermes Agent, другой токен, другая цель). Решение Влада
+(тот бот — доктор, TELEGRAM_BOT_TOKEN, другой токен, другая цель). Решение Влада
 2026-09-21: опрос (polling), как у доктора, не вебхук — не плодим новый
 публичный маршрут, card-service остаётся слушающим только 127.0.0.1.
 
