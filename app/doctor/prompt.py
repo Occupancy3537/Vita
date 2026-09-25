@@ -133,6 +133,7 @@ def format_dossier(dossier: dict, today: str) -> str:
     planned_labs = dossier.get("planned_labs") or []
     climate = dossier.get("room_climate")
     publications = dossier.get("recent_publications") or []
+    anomaly_dispositions = dossier.get("anomaly_dispositions") or []
 
     lines = [f"=СЕГОДНЯ: {today} (Владивосток). Все события в данных — прошлое. "
              "Никогда не указывай даты позже сегодняшней.", ""]
@@ -227,6 +228,17 @@ def format_dossier(dossier: dict, today: str) -> str:
             if p.get("phase"):
                 grade = f"{grade} ({p['phase']})"
             lines.append(f"- {p['title']} [{grade}]: {_fmt(p.get('why'), 'без обоснования')}")
+        lines.append("")
+
+    if anomaly_dispositions:
+        # «Мост аномалия -> действие» (2026-09-25, Часть 3.3 + 2.2): история —
+        # чтобы не спрашивать заново то, что Влад уже сказал, и чтобы было на
+        # чём строить гипотезы инструментом Dispose_Anomaly (контекст дня самой
+        # аномалии — в тексте алерта, который пациент цитирует в разговоре).
+        lines.append("## 🔍 ИСТОРИЯ РЕШЕНИЙ ПО АНОМАЛИЯМ (не спрашивай заново то, что уже решено)")
+        for d in anomaly_dispositions:
+            lines.append(f"- {d['date']} {d['metric']} ({d['severity']}) → {d['disposition']}"
+                         + (f": {d['reason']}" if d.get('reason') else ""))
         lines.append("")
 
     return "\n".join(lines)

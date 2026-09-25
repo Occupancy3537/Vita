@@ -30,7 +30,7 @@ from ulid import ULID
 from app import timeutil
 from app.db import get_conn, schema
 from app.doctor.contract import (
-    CloseInvestigationArgs, CloseRecommendationArgs, OpenInvestigationArgs, PlanLabArgs,
+    CloseInvestigationArgs, CloseRecommendationArgs, DisposeAnomalyArgs, OpenInvestigationArgs, PlanLabArgs,
     RecordNoteArgs, RecordSymptomArgs, StagedWrite, UpdateInvestigationArgs,
 )
 from app.extraction import Draft
@@ -182,6 +182,20 @@ def _close_recommendation(cur, args: CloseRecommendationArgs) -> None:
         raise CommitError(f"Close_Recommendation({args.title!r}): не удалось закрыть {rec_id}")
 
 
+def _dispose_anomaly(cur, args: DisposeAnomalyArgs) -> None:
+    """«Мост аномалия -> действие» (2026-09-25) — единственное исключение из
+    «не трогать app/doctor/» в этом тикете, вместе с досье-блоком истории
+    диспозиций (context.py). Логика самого моста — app/anomaly_disposition.py,
+    здесь только адаптация StagedWrite -> её сигнатура."""
+    from app.anomaly_disposition import dispose
+
+    hypotheses = [h.model_dump() for h in args.hypotheses] if args.hypotheses else None
+    result = dispose(cur, args.metric, args.disposition, reason=args.reason,
+                      window_days=args.window_days, hypotheses=hypotheses)
+    if not result["ok"]:
+        raise CommitError(f"Dispose_Anomaly({args.metric!r}): {result['error']}")
+
+
 _HANDLERS = {
     "symptom": (RecordSymptomArgs, _write_symptom),
     "note": (RecordNoteArgs, _write_note),
@@ -190,6 +204,7 @@ _HANDLERS = {
     "investigation_close": (CloseInvestigationArgs, _close_investigation),
     "lab_plan": (PlanLabArgs, _plan_lab),
     "recommendation_close": (CloseRecommendationArgs, _close_recommendation),
+    "anomaly_dispose": (DisposeAnomalyArgs, _dispose_anomaly),
 }
 
 

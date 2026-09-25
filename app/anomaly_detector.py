@@ -69,6 +69,7 @@ from typing import Optional
 
 import httpx
 
+from app import anomaly_disposition
 from app.db import get_conn
 from app import notify
 from app import run_log, timeutil
@@ -266,6 +267,17 @@ def _format_line(a: dict) -> str:
     return f"{sev} отклонение — {a['label']}: {a['value']} ({arrow} z={a['z']} за окно {a['window']}, baseline≈{a['baseline_mean']}) — {a['interpretation']}"
 
 
+def _format_series_line(a: dict) -> str:
+    """«Мост аномалия -> действие» (2026-09-25, Часть 1.2) — эскалированная
+    серия (3 moderate за 7 дней) визуально отличается от одиночного strong-
+    отклонения: честно об этом в тексте, не притворяется, что это тот же
+    сильный z-score за один день."""
+    arrow = "↑" if a["z"] > 0 else "↓"
+    return (f"🟠 серия умеренных ({anomaly_disposition.SERIES_MIN_COUNT}× за "
+            f"{anomaly_disposition.SERIES_WINDOW_DAYS}д) — {a['label']}: {a['value']} "
+            f"({arrow} z={a['z']} за окно {a['window']}, baseline≈{a['baseline_mean']}) — {a['interpretation']}")
+
+
 # =====================================================================
 # Извлечение последнего дня + алерт + запись (дневной/event путь)
 # =====================================================================
@@ -373,9 +385,40 @@ def run_daily_check() -> None:
     # состава — жёлтая находка была так же громкой, как сильная.
     strong = [a for a in unsent if a["severity"] == "strong"]
     moderate = [a for a in unsent if a["severity"] != "strong"]
-    if strong:
-        lines = [_format_line(a) for a in strong]
-        notify.notify("anomaly_detector", "critical", f"🚨 Обнаружены аномалии за {day}\n\n" + "\n".join(lines))
+
+    # «Мост аномалия -> действие» (2026-09-25, G5 VISION, Часть 1.2): серия
+    # 3 moderate по одной метрике за 7 дней эскалирует до strong-логики (сигнал,
+    # не шум) — читает то, что детектор уже записал в health.anomaly_log,
+    # z-score/baseline-математику детектора не трогает (граница тикета).
+    escalated, still_moderate = [], []
+    with get_conn() as conn, conn.cursor() as cur:
+        for a in moderate:
+            count = anomaly_disposition.check_series_escalation(cur, a["metric"], day)
+            (escalated if count >= anomaly_disposition.SERIES_MIN_COUNT else still_moderate).append(a)
+    moderate = still_moderate
+
+    # У каждой strong/эскалированной — судьба, не просто сообщение (Часть 1.1):
+    # активное suppress глушит critical для ЭТОЙ метрики (но пишет строку —
+    # "видимая тишина, не слепота", Часть 3.1), иначе — pending + алерт с
+    # подсказкой-ответом.
+    alertable = []
+    with get_conn() as conn, conn.cursor() as cur:
+        for a, sev in [(a, "strong") for a in strong] + [(a, "moderate_series") for a in escalated]:
+            suppressed = anomaly_disposition.active_suppression(cur, a["metric"], day)
+            if suppressed:
+                anomaly_disposition.create_disposition_row(
+                    cur, a["metric"], a["label"], day, sev,
+                    disposition="suppress", reason=suppressed["reason"], disposed_by="system",
+                )
+            else:
+                anomaly_disposition.create_disposition_row(cur, a["metric"], a["label"], day, sev)
+                alertable.append((a, sev))
+        conn.commit()
+
+    if alertable:
+        lines = [_format_series_line(a) if sev == "moderate_series" else _format_line(a) for a, sev in alertable]
+        notify.notify("anomaly_detector", "critical",
+                      f"🚨 Обнаружены аномалии за {day}\n\n" + "\n".join(lines) + f"\n\n{anomaly_disposition.REPLY_HINT}")
     if moderate:
         lines = [_format_line(a) for a in moderate]
         notify.notify("anomaly_detector", "normal", f"🟡 Умеренные отклонения за {day}\n\n" + "\n".join(lines))
@@ -471,12 +514,35 @@ def _sleep_until(hour: int, minute: int = 0, weekday: Optional[int] = None) -> N
     timeutil.sleep_until_local(hour, minute, weekday=weekday)
 
 
+def run_daily_maintenance() -> None:
+    """«Мост аномалия -> действие» (2026-09-25) — обслуживание диспозиций,
+    ТОЛЬКО из run_daily_scheduler() (не из run_daily_check(), которую зовут
+    ещё и после каждого ингеста/из недельного пути — иначе строка в дайджест
+    могла бы уйти чаще раза в день, Часть 1.4 явно это запрещает).
+
+    1. Часть 4.1: расследование, открытое из аномалии, закрылось где-то в
+       обычном разговоре с доктором — синхронизируем disposition='explained'.
+    2. Часть 1.4: pending старше суток — ОДНА строка в вечерний дайджест
+       (notify priority=normal — тот же общий дайджест, не отдельное
+       сообщение и не новый канал)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        explained = anomaly_disposition.sync_resolved_investigations(cur)
+        pending = anomaly_disposition.pending_older_than(cur, hours=24)
+        conn.commit()
+    if explained:
+        logger.info("anomaly_disposition: %d аномалий помечено explained (расследование закрыто)", explained)
+    line = anomaly_disposition.format_pending_digest_line(pending)
+    if line:
+        notify.notify("anomaly_pending_reminder", "normal", line)
+
+
 def run_daily_scheduler() -> None:
     logger.info("anomaly_detector daily scheduler: старт (%02d:%02d ВЛ)", DAILY_HOUR_VL, DAILY_MINUTE_VL)
     while True:
         try:
             _sleep_until(DAILY_HOUR_VL, DAILY_MINUTE_VL)
             run_daily_check()
+            run_daily_maintenance()
             run_log.mark_run("anomaly_detector_daily")
         except Exception as e:
             logger.exception("anomaly_detector: run_daily_check упал — повтор завтра")

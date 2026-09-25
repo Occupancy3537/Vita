@@ -173,5 +173,6 @@ def test_build_dossier_has_all_expected_keys(monkeypatch):
         "memory", "garmin_yesterday", "garmin_week_trend", "nutrition_today",
         "meals_today", "active_meds", "open_investigations", "recent_doctor_notes",
         "labs_out_of_range", "planned_labs", "room_climate", "recent_publications",
+        "anomaly_dispositions",
     }
     assert d["memory"] == {"stub": True}

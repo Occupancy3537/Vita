@@ -330,3 +330,50 @@ def test_close_recommendation_ambiguous_match_raises():
     sw = [StagedWrite(kind="recommendation_close", payload={"title": "тестовость"})]
     with pytest.raises(CommitError):
         apply_staged_writes(sw, turn_id=_turn())
+
+
+# ─────── Dispose_Anomaly (мост «аномалия → действие», 2026-09-25, часть 2) ───────
+# Единственное исключение из «не трогать app/doctor/» в этом тикете (вместе
+# с блоком истории в досье, не отдельная запись в commit.py).
+
+from app.anomaly_disposition import create_disposition_row
+
+
+def test_dispose_anomaly_acknowledge_via_staged_write():
+    with get_conn() as conn, conn.cursor() as cur:
+        create_disposition_row(cur, "hrv_commit_test", "ВСР (тест)", "2026-09-20", "strong")
+        conn.commit()
+
+    sw = [StagedWrite(kind="anomaly_dispose", payload={"metric": "ВСР (тест)", "disposition": "acknowledge",
+                                                        "reason": "знаю, был перелёт"})]
+    r = apply_staged_writes(sw, turn_id=_turn())
+    assert r["committed"] is True
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT disposition, reason FROM {schema()}.anomaly_disposition WHERE metric_key = 'hrv_commit_test'")
+        assert cur.fetchone() == ("acknowledge", "знаю, был перелёт")
+
+
+def test_dispose_anomaly_investigate_saves_hypotheses_via_staged_write():
+    with get_conn() as conn, conn.cursor() as cur:
+        create_disposition_row(cur, "stress_commit_test", "Стресс (тест)", "2026-09-20", "strong")
+        conn.commit()
+
+    sw = [StagedWrite(kind="anomaly_dispose", payload={
+        "metric": "Стресс (тест)", "disposition": "investigate",
+        "hypotheses": [{"hypothesis": "кофеин", "differentiator": "день без кофе — стресс ниже"}],
+    })]
+    r = apply_staged_writes(sw, turn_id=_turn())
+    assert r["committed"] is True
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT disposition, hypotheses FROM {schema()}.anomaly_disposition WHERE metric_key = 'stress_commit_test'")
+        disposition, hyps = cur.fetchone()
+    assert disposition == "investigate"
+    assert hyps[0]["hypothesis"] == "кофеин"
+
+
+def test_dispose_anomaly_unknown_metric_raises():
+    sw = [StagedWrite(kind="anomaly_dispose", payload={"metric": "полностью выдуманная метрика xyz", "disposition": "acknowledge"})]
+    with pytest.raises(CommitError):
+        apply_staged_writes(sw, turn_id=_turn())

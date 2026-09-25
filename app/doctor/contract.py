@@ -44,7 +44,7 @@ class StagedWrite(BaseModel):
     детерминированные инварианты, §3.6). commit.py решает, применять или нет."""
     kind: Literal[
         "symptom", "note", "investigation_open", "investigation_update",
-        "investigation_close", "lab_plan", "recommendation_close",
+        "investigation_close", "lab_plan", "recommendation_close", "anomaly_dispose",
     ]
     payload: dict
 
@@ -122,3 +122,27 @@ class CloseRecommendationArgs(BaseModel):
     совпадений вместо угадывания."""
     title: str = Field(description="Слово/фраза из названия рекомендации, например 'кардиолог'")
     reason: Optional[str] = None
+
+
+class HypothesisItem(BaseModel):
+    """Часть 2.2 тикета «мост аномалия -> действие»: у каждой гипотезы —
+    "чем закрывается" (какое наблюдение различит её от альтернатив), не просто
+    догадка без способа проверить."""
+    hypothesis: str
+    differentiator: str = Field(description="Какое наблюдение подтвердит/опровергнет именно эту гипотезу")
+
+
+class DisposeAnomalyArgs(BaseModel):
+    """«Мост аномалия -> действие» (2026-09-25, G5 VISION) — единственное
+    исключение из «не трогать app/doctor/» в этом тикете (вместе с блоком
+    истории диспозиций в context.py — контекст для генерации гипотез,
+    не отдельная интеграция). metric — подстрока (та же схема резолва, что
+    CloseRecommendationArgs.title), не внутренний id."""
+    metric: str = Field(description="Слово/фраза из названия метрики в алерте, например 'ВСР' или 'сон'")
+    disposition: Literal["investigate", "suppress", "acknowledge"]
+    reason: Optional[str] = None
+    window_days: Optional[int] = Field(None, description="Только для suppress — окно тишины в днях, по умолчанию 30")
+    hypotheses: list[HypothesisItem] = Field(
+        default_factory=list,
+        description="Только для investigate — 1-3 гипотезы по контексту дня аномалии, у каждой differentiator",
+    )

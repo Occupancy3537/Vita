@@ -291,7 +291,7 @@ def test_tool_registry_read_and_write_split():
     write_names = {t["name"] for t in tools.TOOL_REGISTRY if not t["read_only"]}
     assert write_names == {"Record_Symptom", "Record_Note", "Open_Investigation",
                             "Update_Investigation", "Close_Investigation", "Plan_Lab",
-                            "Close_Recommendation"}
+                            "Close_Recommendation", "Dispose_Anomaly"}
     assert len(read_names) == 11  # +Search_Publications (2026-09-25, «научный контур»)
 
 
@@ -305,6 +305,27 @@ def test_write_tool_stages_valid_args_without_touching_db():
 
 def test_write_tool_rejects_invalid_args():
     r = tools.record_symptom(None, {"symptom_id": "sid1"})  # symptom обязателен
+    assert r.get("error") == "invalid_arguments"
+
+
+def test_dispose_anomaly_stages_valid_args_with_hypotheses():
+    """«Мост аномалия -> действие» (2026-09-25)."""
+    r = tools.dispose_anomaly(None, {
+        "metric": "ВСР", "disposition": "investigate",
+        "hypotheses": [{"hypothesis": "поздний алкоголь", "differentiator": "если в трезвую ночь ВСР вернётся — подтверждено"}],
+    })
+    assert r["staged"] is True and r["kind"] == "anomaly_dispose"
+    assert r["payload"]["metric"] == "ВСР" and r["payload"]["disposition"] == "investigate"
+    assert r["payload"]["hypotheses"][0]["hypothesis"] == "поздний алкоголь"
+
+
+def test_dispose_anomaly_rejects_invalid_disposition():
+    r = tools.dispose_anomaly(None, {"metric": "ВСР", "disposition": "pending"})  # pending не назначается руками
+    assert r.get("error") == "invalid_arguments"
+
+
+def test_dispose_anomaly_rejects_missing_metric():
+    r = tools.dispose_anomaly(None, {"disposition": "acknowledge"})
     assert r.get("error") == "invalid_arguments"
 
 

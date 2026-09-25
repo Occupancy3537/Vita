@@ -238,6 +238,15 @@ def _recent_publications(cur, limit: int = 5) -> list[dict]:
     ][:limit]
 
 
+def _anomaly_dispositions(cur, limit: int = 10) -> list[dict]:
+    """«Мост аномалия -> действие» (2026-09-25, Часть 3.3: "история диспозиций
+    видна доктору — 'что я уже говорил про HRV'") — переиспользует
+    app/anomaly_disposition.py::recent_dispositions (не дублирует SQL); контекст
+    для генерации гипотез инструментом Dispose_Anomaly, не отдельная запись."""
+    from app.anomaly_disposition import recent_dispositions
+    return recent_dispositions(cur, limit=limit)
+
+
 def build_dossier(cur, text: str = "") -> dict:
     """Собирает всё досье одним проходом. Приёмка Phase 3: <300мс (план §4,
     шаг 3) — все запросы дешёвые (индексы/LIMIT), климат — единственный сетевой
@@ -255,4 +264,5 @@ def build_dossier(cur, text: str = "") -> dict:
         "planned_labs": _planned_labs(cur),
         "room_climate": _room_climate(cur),
         "recent_publications": _recent_publications(cur),
+        "anomaly_dispositions": _anomaly_dispositions(cur),
     }

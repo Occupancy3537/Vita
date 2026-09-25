@@ -159,6 +159,11 @@ def _fetch_all(cur) -> dict:
     cur.execute("SELECT date::text AS date, raw_anomalies FROM health.anomaly_log")
     anomaly_log = _rows(cur)
 
+    # «Мост аномалия -> действие» (2026-09-25, Часть 4.2): "аномалии недели
+    # с судьбами" — переиспользует app/anomaly_disposition.py, не дублирует SQL.
+    from app.anomaly_disposition import weekly_fates_summary
+    anomaly_fates = weekly_fates_summary(cur, (timeutil.now_local().date() - timedelta(days=7)).isoformat())
+
     # Премортем (2026-09-20, задача "1,3,4,5,7", проблема #5 "gate6_priority
     # никогда не получал реальные флаги") — нужен для _bioage_driver_patterns/
     # _overdue_lab_tests в sync_actions_to_card, тот же запрос, что и в
@@ -171,6 +176,7 @@ def _fetch_all(cur) -> dict:
         "profile": (profile_rows[0] if profile_rows else {}), "recs": recs, "pstate": pstate, "anam": anam,
         "sym": sym, "inv": inv, "meds": meds, "lab_res": lab_res, "lab_mark": lab_mark,
         "lab_visit": lab_visit, "pheno_log": pheno_log, "anomaly_log": anomaly_log, "lab_plan": lab_plan,
+        "anomaly_fates": anomaly_fates,
     }
 
 
@@ -184,6 +190,7 @@ def build_context(src: dict) -> dict:
     recs, pstate, anam = src["recs"], src["pstate"], src["anam"]
     sym, inv, meds = src["sym"], src["inv"], src["meds"]
     lab_res, lab_mark, lab_visit, pheno_log = src["lab_res"], src["lab_mark"], src["lab_visit"], src["pheno_log"]
+    anomaly_fates = src.get("anomaly_fates") or []
 
     daily_sorted = sorted((r for r in daily if r.get("Дата")), key=lambda r: _dkey(r["Дата"]))
     last_date = _dkey(daily_sorted[-1]["Дата"]) if daily_sorted else _dkey(timeutil.now_local())
@@ -573,6 +580,7 @@ def build_context(src: dict) -> dict:
         "past_recommendations": past_recs,
         "window": {"from": win7, "to": last_date, "days_with_wellness": len(week_daily), "days_with_nutrition": len(week_nut)},
         "anomalies_last_7d": anomalies_7d, "anomalies_last_30d": anomalies_30d,
+        "anomaly_fates": anomaly_fates,  # «мост аномалия -> действие» (2026-09-25, Часть 4.2)
         "correlations": correlations,
         "wellness": wellness,
         "nutrition": {"macros_avg_per_day": macro_avg, "deficits": deficits, "excesses": excesses, "recent_meals": recent_meals},
@@ -603,6 +611,7 @@ def build_prompt(ctx: dict) -> str:
 - medications — card_active (картотека Meds: препарат, класс, доза, зачем, кто назначил), card_stopped_recent (курсы, законченные за 90 дн), daily_log_current (фактический приём по дневнику Daily_Trends), changes_last_90d (старты/стопы по дневнику). ВСЕГДА проверяй: не совпадает ли сдвиг метрики (HRV, сон, стресс) со стартом или окончанием курса — особенно смотри card_stopped_recent (пример: курс кончился → метрика возвращается к исходной). Если card_active и daily_log_current расходятся — скажи об этом одной фразой, попроси Влада свериться.
 - past_recommendations — что ты советовал раньше. Если проблема та же и совет не выполнен — скажи об этом одной фразой, не переобъясняй. Фокус на новом.
 - anomalies_last_7d / 30d — метрики, отклонявшиеся от его индивидуальной нормы. worsening = в плохую сторону, strong = сильно, count = дней. Подсказки «посмотри сюда», не диагнозы.
+- anomaly_fates — судьба каждой сильной/эскалированной аномалии недели: pending (решение не принято), investigate (Влад разбирается), suppress (временно заглушено). Упомяни одной строкой в разборе, если там что-то есть — не пересказывай anomalies_last_7d ещё раз, это про статус решения, не про сами цифры.
 - correlations.disabled = true — движок корреляций отключён (слепой перебор пар на малых данных = шум). Не упоминай корреляции и «связи в данных». Гипотезы о причинах ищи через symptoms + nutrition + labs напрямую, вывод — «проверить элиминацией / у врача».
 - wellness — week vs prev_week vs last_30d vs last_90d. Смотри и неделя-к-неделе, и на месячный/квартальный тренд. acwr — острая/хроническая нагрузка. acwr_status (LOW / OPTIMAL / HIGH) — вердикт Garmin, он приоритетнее числа: HIGH = риск перегруза (критично при грыже L5/S1), LOW = недобор нагрузки.
 - nutrition.deficits / excesses — среднее за день против его целевых норм (в процентах).
@@ -1089,6 +1098,20 @@ def write_recommendations_log(cur, row: dict) -> None:
     )
 
 
+_FATE_LABEL = {"pending": "⏳ без решения", "investigate": "🔎 разбираемся", "suppress": "🔕 заглушено",
+               "acknowledge": "✅ известно", "explained": "✔️ объяснено"}
+
+
+def _format_anomaly_fates_table(fates: list[dict]) -> str:
+    """Часть 4.2 тикета «мост аномалия -> действие»: "одной компактной
+    таблицей" — детерминированно, не пересказ модели (та же логика, что и
+    у машинного ACTIONS-блока: факты решает код, не LLM)."""
+    if not fates:
+        return ""
+    lines = [f"{f['date']}  {f['metric']:<28} {_FATE_LABEL.get(f['disposition'], f['disposition'])}" for f in fates]
+    return "📋 Аномалии недели с судьбами:\n" + "\n".join(lines)
+
+
 def run_once() -> None:
     with get_conn() as conn, conn.cursor() as cur:
         src = _fetch_all(cur)
@@ -1108,6 +1131,10 @@ def run_once() -> None:
     summary = sync_actions_to_card(row["actions"], row["Date"], src["pheno_log"], src["lab_plan"])
     if summary:
         row["Telegram_Text"] = row["Telegram_Text"] + "\n\n🗂 card (тест, на текст выше не влияет):\n" + summary
+
+    fates_table = _format_anomaly_fates_table(ctx.get("anomaly_fates") or [])
+    if fates_table:
+        row["Telegram_Text"] = row["Telegram_Text"] + "\n\n" + fates_table
 
     with get_conn() as conn, conn.cursor() as cur:
         write_recommendations_log(cur, row)

@@ -17,7 +17,7 @@ from datetime import date, timedelta
 import pytest
 
 from app import anomaly_detector as ad
-from app.db import get_conn
+from app.db import get_conn, schema
 
 pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
 
@@ -359,3 +359,96 @@ def test_run_weekly_digest_sends_and_appends(monkeypatch):
     assert len(sent) == 1
     assert "Недельный дайджест" in sent[0][2]
     assert len(appended) == 1
+
+
+# ─────── «мост аномалия → действие» (2026-09-25, G5 VISION) ───────
+# Интеграция с app/anomaly_disposition.py: strong -> pending, серия эскалирует,
+# suppress глушит critical (но пишет строку). Даты — далеко от реального
+# "сегодня" (та же причина, что у test_run_weekly_digest_sends_and_appends:
+# эти сценарии не проверяют дедуп через _prune_alerted, реализм даты не нужен).
+
+def test_run_daily_check_strong_anomaly_creates_pending_disposition(monkeypatch):
+    base = date(2026, 7, 1)
+    rows = _rows(base, [9, 10, 11, 10, 9, 11, 10, 9, 10, 11, 30])
+    latest_date = rows[-1]["Дата"]
+    monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: (rows, METRICS))
+    sent = []
+    monkeypatch.setattr(ad.notify, "notify", lambda *a: sent.append(a))
+
+    ad.run_daily_check()
+
+    assert len(sent) == 1 and sent[0][1] == "critical"
+    assert ad.anomaly_disposition.REPLY_HINT in sent[0][2]
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT disposition, severity FROM {schema()}.anomaly_disposition WHERE metric_key = 'm' AND date = %s",
+                    (latest_date,))
+        disposition, severity = cur.fetchone()
+    assert disposition == "pending" and severity == "strong"
+
+
+def test_run_daily_check_escalates_moderate_series(monkeypatch):
+    base = date(2026, 7, 15)
+    # 7 базовых дней (лёгкий разброс) + сегодня со сдвигом в moderate-диапазон
+    # (z в [1.5, 2.0)): mean=10, std(sample)≈0.577, value=11 -> z≈1.73.
+    rows = _rows(base, [10, 10, 10, 10, 11, 9, 10, 11])
+    latest_date = rows[-1]["Дата"]
+    day6 = (base + timedelta(days=1)).isoformat()  # внутри 7-дневного окна до latest_date
+    day3 = (base + timedelta(days=4)).isoformat()
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO health.anomaly_log (date, anomaly_count, strong_count, raw_anomalies) VALUES (%s, 1, 0, %s::jsonb) "
+            "ON CONFLICT (date) DO UPDATE SET raw_anomalies = EXCLUDED.raw_anomalies",
+            (day6, json.dumps([{"metric": "m", "severity": "moderate"}])),
+        )
+        cur.execute(
+            "INSERT INTO health.anomaly_log (date, anomaly_count, strong_count, raw_anomalies) VALUES (%s, 1, 0, %s::jsonb) "
+            "ON CONFLICT (date) DO UPDATE SET raw_anomalies = EXCLUDED.raw_anomalies",
+            (day3, json.dumps([{"metric": "m", "severity": "moderate"}])),
+        )
+        conn.commit()
+
+    monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: (rows, METRICS))
+    sent = []
+    monkeypatch.setattr(ad.notify, "notify", lambda *a: sent.append(a))
+
+    ad.run_daily_check()
+
+    critical = [s for s in sent if s[1] == "critical"]
+    normal = [s for s in sent if s[1] == "normal"]
+    assert len(critical) == 1, "эскалированная серия должна уйти critical'ом, не потеряться"
+    assert "серия умеренных" in critical[0][2]
+    assert normal == [], "эскалированная запись не должна ОСТАТЬСЯ в обычном жёлтом потоке"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT disposition, severity FROM {schema()}.anomaly_disposition WHERE metric_key = 'm' AND date = %s",
+                    (latest_date,))
+        disposition, severity = cur.fetchone()
+    assert disposition == "pending" and severity == "moderate_series"
+
+
+def test_run_daily_check_suppressed_metric_stays_silent_but_logged(monkeypatch):
+    base = date(2026, 8, 1)
+    rows = _rows(base, [9, 10, 11, 10, 9, 11, 10, 9, 10, 11, 30])
+    latest_date = rows[-1]["Дата"]
+    with get_conn() as conn, conn.cursor() as cur:
+        ad.anomaly_disposition.create_disposition_row(
+            cur, "m", "Метрика", (base - timedelta(days=1)).isoformat(), "strong",
+            disposition="suppress", reason="известное — недосып из-за перелёта",
+        )
+        cur.execute(f"UPDATE {schema()}.anomaly_disposition SET suppress_until = %s WHERE metric_key = 'm'",
+                    ((date.fromisoformat(latest_date) + timedelta(days=10)).isoformat(),))
+        conn.commit()
+
+    monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: (rows, METRICS))
+    sent = []
+    monkeypatch.setattr(ad.notify, "notify", lambda *a: sent.append(a))
+
+    ad.run_daily_check()
+
+    critical = [s for s in sent if s[1] == "critical"]
+    assert critical == [], "suppress должен глушить critical — видимая тишина, не молчание системы"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT disposition, reason FROM {schema()}.anomaly_disposition WHERE metric_key = 'm' AND date = %s",
+                    (latest_date,))
+        disposition, reason = cur.fetchone()
+    assert disposition == "suppress"  # видимая строка в логе, не пустое место
+    assert "недосып" in reason

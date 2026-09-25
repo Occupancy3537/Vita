@@ -34,7 +34,7 @@ from psycopg import sql
 from pydantic import ValidationError
 
 from app.doctor.contract import (
-    CloseInvestigationArgs, CloseRecommendationArgs, OpenInvestigationArgs, PlanLabArgs,
+    CloseInvestigationArgs, CloseRecommendationArgs, DisposeAnomalyArgs, OpenInvestigationArgs, PlanLabArgs,
     RecordNoteArgs, RecordSymptomArgs, UpdateInvestigationArgs,
 )
 
@@ -453,6 +453,10 @@ def plan_lab(cur, args: dict) -> dict:
     return _stage("lab_plan", PlanLabArgs, args)
 
 
+def dispose_anomaly(cur, args: dict) -> dict:
+    return _stage("anomaly_dispose", DisposeAnomalyArgs, args)
+
+
 def close_recommendation(cur, args: dict) -> dict:
     return _stage("recommendation_close", CloseRecommendationArgs, args)
 
@@ -639,6 +643,32 @@ TOOL_REGISTRY = [
             "reason": {"type": "string", "description": "Почему закрываем — необязательно"},
         }, "required": ["title"]},
         "executor": close_recommendation, "timeout": 1.0, "read_only": False,
+    },
+    {
+        "name": "Dispose_Anomaly",
+        "description": "ВСЕГДА вызывай, когда пациент реагирует на алерт аномалии из истории решений в "
+                        "досье — даже одним словом ('известно', 'разбираемся', 'следи', 'забей', 'ладно') "
+                        "по КАЖДОЙ метрике, которую он упомянул. Не отвечай только текстом без вызова "
+                        "инструмента — иначе аномалия навсегда останется висеть pending. "
+                        "investigate/suppress/acknowledge. Для investigate — построй 1-3 гипотезы по "
+                        "контексту дня аномалии (сон, алкоголь, тренировки, питание, стресс, климат спальни, "
+                        "активные вмешательства), у КАЖДОЙ укажи differentiator — какое наблюдение подтвердит "
+                        "именно её, не общие слова. Для suppress — короткая причина, окно по умолчанию 30 дней.",
+        "parameters": {"type": "object", "properties": {
+            "metric": {"type": "string", "description": "Слово/фраза из названия метрики, например 'ВСР' или 'сон'"},
+            "disposition": {"type": "string", "enum": ["investigate", "suppress", "acknowledge"]},
+            "reason": {"type": "string"},
+            "window_days": {"type": "integer", "description": "Только для suppress, по умолчанию 30"},
+            "hypotheses": {
+                "type": "array",
+                "description": "Только для investigate, 1-3 штуки",
+                "items": {"type": "object", "properties": {
+                    "hypothesis": {"type": "string"},
+                    "differentiator": {"type": "string", "description": "Какое наблюдение различит эту гипотезу"},
+                }, "required": ["hypothesis", "differentiator"]},
+            },
+        }, "required": ["metric", "disposition"]},
+        "executor": dispose_anomaly, "timeout": 1.0, "read_only": False,
     },
 ]
 
