@@ -72,12 +72,14 @@ from app.redflag_union import evaluate_and_record, record_rf_event
 import app.recommendations as recommendations
 from app.recommendations import (
     ActionLoop,
+    ActiveRecommendationExpectation,
     EvaluateResponse,
     ProposeRequest,
     ProposeResponse,
     RecommendationSyncRequest,
     RecommendationSyncResponse,
     evaluate_recommendation,
+    get_active_recommendations,
     get_loops,
     propose_recommendation,
     sync_recommendation,
@@ -815,6 +817,14 @@ def recommendations_loops(limit: int = 3) -> list[ActionLoop]:
     """Замена прозе-парсеру в Build Health JSON — тот же shape, что дашборд ждал
     раньше, посчитан один раз при evaluate(), не при каждом открытии дашборда."""
     return get_loops(limit=limit)
+
+
+@app.get("/recommendations/active", response_model=list[ActiveRecommendationExpectation])
+def recommendations_active() -> list[ActiveRecommendationExpectation]:
+    """«Петля исходов» (2026-09-24, часть 6) — ВСЕ активные rc_ с их ожиданием
+    (измеримым или явно unmeasurable), не только те, у кого уже готов вердикт
+    (в отличие от /recommendations/loops)."""
+    return get_active_recommendations()
 
 
 class ContextRequest(BaseModel):

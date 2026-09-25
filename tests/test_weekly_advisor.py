@@ -66,6 +66,38 @@ def _raw(actions):
     return "Разбор недели.\n\n<<<ACTIONS\n" + _json.dumps({"actions": actions}) + "\nACTIONS>>>"
 
 
+# «Петля исходов» (2026-09-24, часть 1): expectation_type/unmeasurable_reason/
+# freq_min_ratio — новые поля машинного блока, обязательные для G7 downstream.
+
+def test_parse_action_with_metric_defaults_expectation_type_to_delta_abs():
+    """Обратная совместимость: старые прогоны без expectation_type -> delta_abs,
+    как и было единственное поведение до этого тикета."""
+    raw = _raw([{"title": "Отбой раньше", "why": "низкий HRV", "type": "sleep",
+                 "metric": "hrv", "direction": "up", "magnitude": 5}])
+    row = wa.parse_advisor_response(raw, BASE_CTX, [], None)
+    a = row["actions"][0]
+    assert a["expectation_type"] == "delta_abs"
+
+
+def test_parse_action_without_metric_becomes_unmeasurable_with_reason():
+    raw = _raw([{"title": "Записаться к врачу", "why": "онемение ноги", "type": "medical",
+                 "expectation_type": "unmeasurable", "unmeasurable_reason": "визит — разовое действие, не метрика"}])
+    row = wa.parse_advisor_response(raw, BASE_CTX, [], None)
+    a = row["actions"][0]
+    assert a["metric"] is None
+    assert a["expectation_type"] == "unmeasurable"
+    assert a["unmeasurable_reason"] == "визит — разовое действие, не метрика"
+
+
+def test_parse_frequency_action_carries_freq_min_ratio():
+    raw = _raw([{"title": "Плавать раз в неделю", "why": "мобильность", "type": "swim",
+                 "metric": "swam", "direction": "up", "magnitude": 1,
+                 "expectation_type": "frequency", "freq_min_ratio": 0.14}])
+    row = wa.parse_advisor_response(raw, BASE_CTX, [], None)
+    a = row["actions"][0]
+    assert a["expectation_type"] == "frequency" and a["freq_min_ratio"] == 0.14
+
+
 def test_parse_valid_action_kept():
     raw = _raw([{"title": "Больше сна", "why": "низкий HRV", "type": "sleep"}])
     row = wa.parse_advisor_response(raw, BASE_CTX, [], None)
@@ -184,6 +216,37 @@ def test_sync_actions_card_unavailable_reports_warning(monkeypatch):
 
 def test_sync_actions_empty_list_returns_empty_string():
     assert wa.sync_actions_to_card([], "2026-09-20") == ""
+
+
+def test_sync_actions_propagates_expectation_fields_to_propose_request(monkeypatch):
+    """«Петля исходов» часть 1: expectation_type/freq_min_ratio (measurable путь)
+    и unmeasurable_reason (неизмеримый путь) должны доехать до ProposeRequest —
+    иначе G7 в card-service отклонит то, что советник уже честно разметил."""
+    from app import recommendations as rc
+
+    captured = []
+
+    class FakeResp:
+        accepted = True
+        id = "rc_test_prop"
+        priority = "normal"
+        rejected_gate = None
+        rejected_reason = None
+
+    def fake_propose(req):
+        captured.append(req)
+        return FakeResp()
+
+    monkeypatch.setattr(rc, "propose_recommendation", fake_propose)
+    wa.sync_actions_to_card([
+        {"title": "Плавать раз в неделю", "type": "swim", "why": "тест", "metric": "swam",
+         "direction": "up", "magnitude": 1, "expectation_type": "frequency", "freq_min_ratio": 0.14},
+        {"title": "Визит к врачу", "type": "medical", "why": "тест",
+         "unmeasurable_reason": "разовое действие"},
+    ], "2026-09-20")
+
+    assert captured[0].expectation_type == "frequency" and captured[0].freq_min_ratio == 0.14
+    assert captured[1].unmeasurable_reason == "разовое действие"
 
 
 # --- премортем #5: is_bioage_driver/metric_overdue реально считаются -----------

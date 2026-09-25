@@ -45,6 +45,9 @@ def _seed_gate_problem(title: str, contra_load: str):
 
 
 BASE = {"title": "Т", "source_ref": "gate-test-1", "started_ts": "2026-09-01T00:00:00Z"}
+# G7 (2026-09-24) требует ЛИБО ожидание, ЛИБО unmeasurable_reason — тесты G3-G6
+# ниже проверяют ДРУГИЕ ворота, не G7, поэтому глушат его этим полем.
+_UNMEASURABLE = {"unmeasurable_reason": "тест: G7 не в фокусе этого сценария"}
 
 
 def test_g1_window_out_of_range_rejected():
@@ -91,7 +94,7 @@ def test_g3_bracelet_intersection_blocks_recommendation():
     может быть записана вовсе, до всякой прозы."""
     _seed_bracelet_fact("allergy:novocaine_anaphylaxis", "анафилаксия на новокаин")
     r = client.post("/recommendations/propose", json={
-        **BASE, "source_ref": "gate-test-g3", "title": "Обезболивание новокаином перед процедурой",
+        **BASE, **_UNMEASURABLE, "source_ref": "gate-test-g3", "title": "Обезболивание новокаином перед процедурой",
     })
     body = r.json()
     assert body["accepted"] is False and body["rejected_gate"] == "G3"
@@ -108,7 +111,7 @@ def test_g4_gate_contradiction_blocks_recommendation():
     "изометрия при гипертонии" из спеки, на реальных полях card.problem.gate."""
     _seed_gate_problem("Грыжа L5/S1", "статические удержания; осевая нагрузка")
     r = client.post("/recommendations/propose", json={
-        **BASE, "source_ref": "gate-test-g4", "action": "Делать изометрические планки 3 раза в неделю",
+        **BASE, **_UNMEASURABLE, "source_ref": "gate-test-g4", "action": "Делать изометрические планки 3 раза в неделю",
     })
     body = r.json()
     assert body["accepted"] is False and body["rejected_gate"] == "G4"
@@ -118,13 +121,13 @@ def test_g4_gate_contradiction_blocks_recommendation():
 def test_g4_unrelated_recommendation_not_blocked():
     _seed_gate_problem("Грыжа L5/S1", "статические удержания; осевая нагрузка")
     r = client.post("/recommendations/propose", json={
-        **BASE, "source_ref": "gate-test-g4-ok", "action": "Пить больше воды утром",
+        **BASE, **_UNMEASURABLE, "source_ref": "gate-test-g4-ok", "action": "Пить больше воды утром",
     })
     assert r.json()["accepted"] is True
 
 
 def test_g5_duplicate_kind_action_returns_reference_not_new_id():
-    payload = {**BASE, "source_ref": "gate-test-g5-first", "kind": "behavior", "action": "Ходьба 12000 шагов"}
+    payload = {**BASE, **_UNMEASURABLE, "source_ref": "gate-test-g5-first", "kind": "behavior", "action": "Ходьба 12000 шагов"}
     r1 = client.post("/recommendations/propose", json=payload)
     assert r1.json()["accepted"] is True
     first_id = r1.json()["id"]
@@ -154,14 +157,56 @@ def test_g5_conflicting_direction_same_metric_rejected():
 
 def test_g6_priority_high_for_bioage_driver():
     r = client.post("/recommendations/propose", json={
-        **BASE, "source_ref": "gate-test-g6-hi", "is_bioage_driver": True,
+        **BASE, **_UNMEASURABLE, "source_ref": "gate-test-g6-hi", "is_bioage_driver": True,
     })
     assert r.json()["accepted"] is True and r.json()["priority"] == "high"
 
 
 def test_g6_priority_normal_by_default():
-    r = client.post("/recommendations/propose", json={**BASE, "source_ref": "gate-test-g6-norm"})
+    r = client.post("/recommendations/propose", json={**BASE, **_UNMEASURABLE, "source_ref": "gate-test-g6-norm"})
     assert r.json()["accepted"] is True and r.json()["priority"] == "normal"
+
+
+def test_g7_neither_expectation_nor_reason_rejected():
+    """«Петля исходов» (2026-09-24): черновик без ожидания и без явной причины
+    неизмеримости отклоняется — не создаёт rc_ вовсе (акс. критерий тикета)."""
+    r = client.post("/recommendations/propose", json={**BASE, "source_ref": "gate-test-g7-reject"})
+    body = r.json()
+    assert body["accepted"] is False and body["rejected_gate"] == "G7"
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {schema()}.recommendation WHERE provenance->>'source_ref' = 'gate-test-g7-reject'")
+        assert cur.fetchone()[0] == 0
+
+
+def test_g7_unmeasurable_reason_creates_unmeasurable_expectation():
+    """Черновик с явной причиной проходит G7 и получает ex_ type='unmeasurable' —
+    видимый на витрине, не тишина (акс. критерий тикета)."""
+    r = client.post("/recommendations/propose", json={
+        **BASE, "source_ref": "gate-test-g7-ok", "title": "Функциональный покой руки",
+        "unmeasurable_reason": "нет метрики, отслеживающей покой конечности",
+    })
+    body = r.json()
+    assert body["accepted"] is True and body["measurable"] is False
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT type, reason FROM {schema()}.expectation WHERE rec_id = %s", (body["id"],))
+        ex_type, reason = cur.fetchone()
+        assert ex_type == "unmeasurable" and reason == "нет метрики, отслеживающей покой конечности"
+
+
+def test_g7_rejected_draft_logged_to_issue_log_not_silently_dropped():
+    """Отклонённый ворoтами черновик пишется в issue_log, не пропадает молча
+    (часть 1 тикета) — issue_log.record_issue импортируется локально внутри
+    _log_rejected_draft, патчим по месту реального использования: app.issue_log."""
+    from unittest.mock import patch
+    with patch("app.issue_log.record_issue") as mock_record:
+        r = client.post("/recommendations/propose", json={**BASE, "source_ref": "gate-test-g7-logged"})
+        assert r.json()["accepted"] is False
+        assert mock_record.called
+        args, kwargs = mock_record.call_args
+        assert "gate-test-g7-logged" in args[1]
+        assert kwargs["source"] == "propose_recommendation"
 
 
 def test_accepted_recommendation_creates_rc_and_ex_with_priority_and_journal():

@@ -10,10 +10,11 @@ health.* эти тесты больше не касаются вообще. (Р�
 (episode/fact/journal) — через conftest.py, автоматически truncate'ится."""
 import pytest
 
-from app.db import get_conn
+from app.db import get_conn, schema
 from app.doctor.commit import _HEALTH_SCHEMA, CommitError, already_committed, apply_staged_writes
 from app.doctor.contract import StagedWrite
 from app.doctor.dialog import write_turn
+from app.recommendations import RecommendationSyncRequest, sync_recommendation
 
 _next_update_id = iter(range(1, 100_000))
 
@@ -287,3 +288,45 @@ def test_investigation_and_lab_plan_dates_are_vladivostok():
         # Next_Due = VL-сегодня + 3 месяца; проверяем диапазон, чтобы тест не
         # зависел от календарной даты прогона
         assert next_due is not None and len(next_due) == 10
+
+
+# ─────── Close_Recommendation (петля исходов, 2026-09-24, часть 4) ───────
+# Единственное исключение из «не трогать app/doctor/» в этом тикете.
+
+from datetime import datetime, timezone
+
+
+def _seed_recommendation(title: str, source_ref: str) -> str:
+    r = sync_recommendation(RecommendationSyncRequest(
+        title=title, source_ref=source_ref, started_ts=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    ))
+    return r.id
+
+
+def test_close_recommendation_by_title_substring():
+    rec_id = _seed_recommendation("Записаться к кардиологу", "commit-test-rc-close-1")
+    sw = [StagedWrite(kind="recommendation_close", payload={"title": "кардиолог", "reason": "выполнено"})]
+    r = apply_staged_writes(sw, turn_id=_turn())
+    assert r["committed"] is True
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT status, stop_reason FROM {schema()}.recommendation WHERE id = %s", (rec_id,))
+        assert cur.fetchone() == ("closed", "выполнено")
+
+
+def test_close_recommendation_no_match_raises():
+    sw = [StagedWrite(kind="recommendation_close", payload={"title": "не существует такой рекомендации совсем"})]
+    with pytest.raises(CommitError):
+        apply_staged_writes(sw, turn_id=_turn())
+
+
+def test_close_recommendation_ambiguous_match_raises():
+    # Первые 3 слова ДОЛЖНЫ отличаться (recommendations.py::_derive_topic_key
+    # без совпадения по _TOPIC_PATTERNS строит ключ именно из них) — иначе вторая
+    # sync сама супersed-нула бы первую по topic_key, и совпадение перестало бы
+    # быть двусмысленным для Close_Recommendation.
+    _seed_recommendation("Уникальное альфа тестовость режима", "commit-test-rc-close-amb1")
+    _seed_recommendation("Особое бета тестовость режима", "commit-test-rc-close-amb2")
+    sw = [StagedWrite(kind="recommendation_close", payload={"title": "тестовость"})]
+    with pytest.raises(CommitError):
+        apply_staged_writes(sw, turn_id=_turn())

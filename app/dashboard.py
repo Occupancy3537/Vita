@@ -30,7 +30,7 @@ from datetime import date, datetime, timedelta, timezone
 from app import timeutil
 from app.biohacking_ingest import MOVEMENT_GAP_OK_THRESHOLD_MIN
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
-from app.recommendations import get_loops
+from app.recommendations import get_active_recommendations, get_loops
 
 # --- «Здоровье»-экран: порт n8n Code-ноды "Build Health JSON" (2026-09-16) ---
 #
@@ -349,6 +349,15 @@ def get_health_dashboard(cur) -> dict:
     except Exception as e:
         action_loops = [{"error": str(e)}]
 
+    # «Петля исходов» (2026-09-24, часть 6): в отличие от action_loops (только
+    # рекомендации с уже посчитанным вердиктом) — ВСЕ активные, с ожиданием или
+    # явным unmeasurable+причиной. Сбой не должен ронять весь дашборд (тот же
+    # принцип, что у action_loops/nutrition_loops выше).
+    try:
+        active_recommendations = [r.model_dump() for r in get_active_recommendations()]
+    except Exception as e:
+        active_recommendations = [{"error": str(e)}]
+
     result = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "window": {"from": days_14[0]["date"] if days_14 else None, "to": _dkey(last_date)},
@@ -360,6 +369,7 @@ def get_health_dashboard(cur) -> dict:
         "medical_notes_recent": medical_notes_recent,
         "anomalies": anomalies,
         "action_loops": action_loops,
+        "active_recommendations": active_recommendations,
         "correlations": _DISABLED_CORRELATIONS,
         "experiments": [],
         "experiments_note": _EXPERIMENTS_NOTE,

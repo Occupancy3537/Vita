@@ -265,7 +265,8 @@ def test_tool_registry_read_and_write_split():
     read_names = {t["name"] for t in tools.TOOL_REGISTRY if t["read_only"]}
     write_names = {t["name"] for t in tools.TOOL_REGISTRY if not t["read_only"]}
     assert write_names == {"Record_Symptom", "Record_Note", "Open_Investigation",
-                            "Update_Investigation", "Close_Investigation", "Plan_Lab"}
+                            "Update_Investigation", "Close_Investigation", "Plan_Lab",
+                            "Close_Recommendation"}
     assert len(read_names) == 10
 
 

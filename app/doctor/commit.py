@@ -30,7 +30,7 @@ from ulid import ULID
 from app import timeutil
 from app.db import get_conn, schema
 from app.doctor.contract import (
-    CloseInvestigationArgs, OpenInvestigationArgs, PlanLabArgs,
+    CloseInvestigationArgs, CloseRecommendationArgs, OpenInvestigationArgs, PlanLabArgs,
     RecordNoteArgs, RecordSymptomArgs, StagedWrite, UpdateInvestigationArgs,
 )
 from app.extraction import Draft
@@ -162,6 +162,26 @@ def _plan_lab(cur, args: PlanLabArgs) -> None:
     )
 
 
+def _close_recommendation(cur, args: CloseRecommendationArgs) -> None:
+    """«Петля исходов» (2026-09-24, часть 4) — единственное исключение из «не
+    трогать app/doctor/». card.recommendation, не health.* — schema(), не
+    _HEALTH_SCHEMA. Поиск по подстроке title, не по id (см. CloseRecommendationArgs)."""
+    from app.recommendations import close_recommendation
+
+    q = sql.SQL("SELECT id, title FROM {t} WHERE status = 'active' AND title ILIKE %s") \
+        .format(t=sql.Identifier(schema(), "recommendation"))
+    cur.execute(q, (f"%{args.title}%",))
+    rows = cur.fetchall()
+    if not rows:
+        raise CommitError(f"Close_Recommendation({args.title!r}): активных рекомендаций с таким названием не найдено")
+    if len(rows) > 1:
+        titles = ", ".join(r[1] for r in rows)
+        raise CommitError(f"Close_Recommendation({args.title!r}): совпадений несколько ({titles}) — уточни формулировку")
+    rec_id = rows[0][0]
+    if not close_recommendation(cur, rec_id, args.reason or "closed_by_doctor_chat"):
+        raise CommitError(f"Close_Recommendation({args.title!r}): не удалось закрыть {rec_id}")
+
+
 _HANDLERS = {
     "symptom": (RecordSymptomArgs, _write_symptom),
     "note": (RecordNoteArgs, _write_note),
@@ -169,6 +189,7 @@ _HANDLERS = {
     "investigation_update": (UpdateInvestigationArgs, _update_investigation),
     "investigation_close": (CloseInvestigationArgs, _close_investigation),
     "lab_plan": (PlanLabArgs, _plan_lab),
+    "recommendation_close": (CloseRecommendationArgs, _close_recommendation),
 }
 
 

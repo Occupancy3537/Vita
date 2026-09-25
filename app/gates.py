@@ -134,6 +134,26 @@ def gate5_dedup(cur, kind: Optional[str], action: Optional[str],
     return None
 
 
+def gate7_expectation_required(metric_key: Optional[str], direction: Optional[str],
+                                magnitude: Optional[float], unmeasurable_reason: Optional[str]) -> Optional[GateFailure]:
+    """G7 (петля исходов, 2026-09-24) — рекомендация рождается ЛИБО с проверяемым
+    ожиданием (metric_key+direction+magnitude — движок посчитает вердикт), ЛИБО с
+    явной причиной, почему это невозможно (unmeasurable_reason). Раньше "неизмеримо"
+    означало ноль строк expectation вообще — неотличимо от "советник забыл дать
+    ожидание". Теперь оба случая дают ex_-запись (см. sync_recommendation), но G7
+    гарантирует, что причина для отказа от метрики была НАЗВАНА, а не подразумевалась."""
+    has_expectation = metric_key is not None and direction is not None and magnitude is not None
+    has_reason = bool(unmeasurable_reason and unmeasurable_reason.strip())
+    if not has_expectation and not has_reason:
+        return GateFailure(
+            "G7",
+            "нет ни проверяемого ожидания (metric_key+direction+magnitude), ни explicit "
+            "unmeasurable_reason — совет должен либо порождать проверку, либо явно "
+            "признавать, что не измерим (и почему)",
+        )
+    return None
+
+
 def gate6_priority(is_bioage_driver: bool, metric_overdue: bool) -> str:
     """Метрика — тормоз-драйвер биовозраста ИЛИ просроченная лаба -> high.
 

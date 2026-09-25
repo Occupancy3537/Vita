@@ -44,7 +44,7 @@ class StagedWrite(BaseModel):
     детерминированные инварианты, §3.6). commit.py решает, применять или нет."""
     kind: Literal[
         "symptom", "note", "investigation_open", "investigation_update",
-        "investigation_close", "lab_plan",
+        "investigation_close", "lab_plan", "recommendation_close",
     ]
     payload: dict
 
@@ -111,4 +111,14 @@ class PlanLabArgs(BaseModel):
     test: str
     category: Optional[str] = None
     interval_months: Optional[int] = None
+    reason: Optional[str] = None
+
+
+class CloseRecommendationArgs(BaseModel):
+    """«Петля исходов» (2026-09-24, часть 4) — единственное исключение из «не
+    трогать app/doctor/» в этом тикете. title — подстрока названия, не id: у
+    доктора нет способа знать внутренние rc_-идентификаторы (дайджест/дашборд их
+    не показывают пациенту), поиск по названию в commit.py, отказ при 0 или >1
+    совпадений вместо угадывания."""
+    title: str = Field(description="Слово/фраза из названия рекомендации, например 'кардиолог'")
     reason: Optional[str] = None

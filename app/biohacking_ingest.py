@@ -747,7 +747,23 @@ METRIC_COLS = {
     "dew_point_avg_c": "Точка_росы_avg_C", "pressure_delta_12h": "Атм_давление_Дельта_12ч",
     "pressure_delta_24h": "Атм_давление_Дельта_24ч", "daylight_h": "Освещенность_ч_сутки",
     "cognitive_load_index": "Индекс_когнитивной_нагрузки", "acwr": "ACWR_Garmin",
+    # «Петля исходов» (2026-09-24): движок частотных ожиданий (verdict_engine.py
+    # ::_evaluate_frequency) нуждается в этих двух метриках как в примерах из
+    # самой спеки тикета («вставать каждые 40 минут», «плавание раз в неделю») —
+    # раньше в METRIC_COLS не было вовсе, данные лежали только в daily_trends,
+    # ни разу не попав в card.fact. Числовая колонка идёт через общий цикл ниже;
+    # "Плавание_было" (текст "Да"/"Нет") общий float()-парсинг не проходит —
+    # обрабатывается отдельно, см. _SWIM_COL ниже. Про backfill — см.
+    # [[no-backfill-new-metrics]]: только вперёд, старые дни не пересчитываем.
+    "movement_gap_min": "Провал_без_движения_мин",
 }
+
+# "Да"/"Нет" — единственное булево поле в этом справочнике, общий цикл
+# sync_device_facts() парсит float() и не подходит; конвертация здесь же, рядом
+# с METRIC_COLS, чтобы обе половины одной метрики не расходились по файлу.
+_SWIM_COL = "Плавание_было"
+_SWIM_METRIC_KEY = "swam"
+_SWIM_YES_VALUES = {"да", "yes", "true", "1"}
 
 
 def sync_device_facts(row: dict) -> None:
@@ -767,6 +783,12 @@ def sync_device_facts(row: dict) -> None:
         except ValueError:
             continue
         facts.append(StructuredFact(metric_key=key, value_num=num, ts_event=f"{day_iso}T00:00:00Z"))
+
+    swim_raw = row.get(_SWIM_COL)
+    if swim_raw not in (None, ""):
+        swam = 1.0 if str(swim_raw).strip().lower() in _SWIM_YES_VALUES else 0.0
+        facts.append(StructuredFact(metric_key=_SWIM_METRIC_KEY, value_num=swam, ts_event=f"{day_iso}T00:00:00Z"))
+
     if facts:
         try:
             _write_structured_facts(facts, origin="device")

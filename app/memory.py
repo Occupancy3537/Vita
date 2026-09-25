@@ -489,16 +489,20 @@ def get_context(cur, mode: str, payload: Optional[dict] = None, budget: int = TI
 
 def create_clinical_note(cur, rec_id: str, rec_title: str, verdict: str,
                           metric_key: Optional[str] = None) -> Optional[str]:
-    """clinical mn_ — "X не помогает"/"adverse: Y" — автоматически при no_effect/
-    adverse (единственный тип заметки, для которого триггер уже полностью
-    определён кодом, не ждёт П8/health-check)."""
-    if verdict not in ("no_effect", "adverse"):
+    """clinical mn_ — "X не помогает"/"adverse: Y"/"X не выполнялось" — автоматически
+    при no_effect/adverse/not_adhered (единственные типы, для которых триггер уже
+    полностью определён кодом, не ждёт П8/health-check). not_adhered добавлен
+    2026-09-24 («петля исходов» часть 3) — сознательно ОТДЕЛЬНАЯ формулировка от
+    no_effect: "не помогает" (эффекта нет, вмешательство было) — другой клинический
+    вывод, чем "не выполнялось" (неизвестно, было ли вмешательство вообще)."""
+    if verdict not in ("no_effect", "adverse", "not_adhered"):
         return None
     from ulid import ULID
     from app.journal import write_journal
 
     note_id = f"mn_{ULID()}"
-    verdict_word = "не помогает" if verdict == "no_effect" else "adverse-реакция"
+    verdict_word = {"no_effect": "не помогает", "adverse": "adverse-реакция",
+                     "not_adhered": "не выполнялось (низкая частота)"}[verdict]
     title = f"{rec_title} — {verdict_word}"[:60]
     content = {"rec_id": rec_id, "verdict": verdict, "metric_key": metric_key}
     subject = [{"entity_type": "recommendation", "entity_value": rec_id}]

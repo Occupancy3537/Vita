@@ -503,3 +503,40 @@ def test_reprocess_from_log_replays_without_duplicating_daily_trends_row(monkeyp
 def test_reprocess_from_log_raises_on_unknown_id():
     with pytest.raises(ValueError):
         bi.reprocess_from_log(999_999_999)
+
+
+# ─────── METRIC_COLS: movement_gap_min / swam (петля исходов, 2026-09-24) ───────
+# Нужны движку частотных ожиданий (verdict_engine.py) — примеры из самого тикета
+# («вставать каждые 40 минут», «плавание раз в неделю»). Раньше в METRIC_COLS не
+# было вовсе, [[no-backfill-new-metrics]] — только вперёд.
+
+def test_sync_device_facts_includes_movement_gap_and_swim(monkeypatch):
+    captured = []
+    monkeypatch.setattr("app.main._write_structured_facts", lambda facts, origin: captured.extend(facts))
+
+    bi.sync_device_facts({
+        "Дата": "2026-09-24", "Провал_без_движения_мин": "78", "Плавание_было": "Да",
+    })
+
+    by_key = {f.metric_key: f.value_num for f in captured}
+    assert by_key["movement_gap_min"] == 78.0
+    assert by_key["swam"] == 1.0
+
+
+def test_sync_device_facts_swim_no_maps_to_zero(monkeypatch):
+    captured = []
+    monkeypatch.setattr("app.main._write_structured_facts", lambda facts, origin: captured.extend(facts))
+
+    bi.sync_device_facts({"Дата": "2026-09-24", "Плавание_было": "Нет"})
+
+    by_key = {f.metric_key: f.value_num for f in captured}
+    assert by_key["swam"] == 0.0
+
+
+def test_sync_device_facts_swim_absent_when_column_empty(monkeypatch):
+    captured = []
+    monkeypatch.setattr("app.main._write_structured_facts", lambda facts, origin: captured.extend(facts))
+
+    bi.sync_device_facts({"Дата": "2026-09-24", "Плавание_было": ""})
+
+    assert "swam" not in {f.metric_key for f in captured}

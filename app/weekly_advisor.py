@@ -66,7 +66,8 @@ LOAD_RX = re.compile(
     r"тяж(?:есть|ести|[её]л)|спринт|силов|кроссфит|бадминтон|берпи|выпад|растяж|мобилити|йог|лфк|"
     r"упражнен|качат|тренаж|подтягив|скакалк|степ[- ]аэроб|ударн", re.I,
 )
-ALLOWED_METRICS = ["sleep_min", "sleep_score", "sleep_eff", "hrv", "rhr", "body_battery", "stress", "steps", "vo2max"]
+ALLOWED_METRICS = ["sleep_min", "sleep_score", "sleep_eff", "hrv", "rhr", "body_battery", "stress", "steps", "vo2max",
+                    "movement_gap_min", "swam"]  # 2026-09-24 («петля исходов»): для type:"walk"/"swim" frequency-действий
 ACTION_TYPES = ["load_high", "load_low", "walk", "swim", "diet", "supplement", "sleep", "stress", "medical", "other"]
 MACRO_COLS = {"Calories", "Proteins", "Carbs", "Fats"}
 
@@ -625,15 +626,21 @@ def build_prompt(ctx: dict) -> str:
 
 МАШИННЫЙ БЛОК (обязателен, в самом конце, СРАЗУ после текста разбора, в лимит 1200 не входит):
 <<<ACTIONS
-[{{"title":"...","why":"...","expect":"...","priority":"высокий","metric":"sleep_min","direction":"up","magnitude":20,"type":"sleep"}}]
+[{{"title":"...","why":"...","expect":"...","priority":"высокий","metric":"sleep_min","direction":"up","magnitude":20,"expectation_type":"delta_abs","type":"sleep"}}]
 ACTIONS>>>
 Правила блока:
 - 1–3 объекта, ВСЕГДА минимум один. РОВНО те действия, что ты дал выше. Только действия, не статусы.
-- Спокойная неделя без новых действий → один объект {{"title":"Держать текущий режим","why":"...","expect":"...","priority":"низкий","metric":null,"direction":null,"magnitude":null,"type":"other"}}.
+- Спокойная неделя без новых действий → один объект {{"title":"Держать текущий режим","why":"...","expect":"...","priority":"низкий","metric":null,"direction":null,"magnitude":null,"expectation_type":"unmeasurable","unmeasurable_reason":"нет нового действия — нечего проверять","type":"other"}}.
 - title — коротко, что делать. why — почему сейчас. expect — какой эффект ожидаешь.
 - priority: высокий | средний | низкий.
-- metric — ключ, по которому будет виден эффект, строго один из: sleep_min, sleep_score, sleep_eff, hrv, rhr, body_battery, stress, steps, vo2max. Если действие ими не измеряется — null.
-- direction/magnitude — заполняются, ТОЛЬКО если metric не null: direction — "up" или "down" (в какую сторону должна сдвинуться метрика), magnitude — на сколько (число, в единицах самой метрики: минуты для sleep_min, мс для hrv, уд/мин для rhr, баллы для sleep_score/body_battery/vo2max, шаги для steps). Реалистичная величина за 7 дней, не оптимистичный максимум. Если metric null — оба null.
+- metric — ключ, по которому будет виден эффект, строго один из: sleep_min, sleep_score, sleep_eff, hrv, rhr, body_battery, stress, steps, vo2max, movement_gap_min (минуты без движения подряд — для type:"walk"), swam (плавал ли в этот день: 1=да/0=нет — для type:"swim"). Если действие ими не измеряется — null.
+- direction/magnitude — заполняются, ТОЛЬКО если metric не null: direction — "up" или "down" (в какую сторону должна сдвинуться метрика), magnitude — на сколько (число, в единицах самой метрики: минуты для sleep_min/movement_gap_min, мс для hrv, уд/мин для rhr, баллы для sleep_score/body_battery/vo2max, шаги для steps, 0 или 1 для swam). Реалистичная величина за 7 дней, не оптимистичный максимум. Если metric null — оба null.
+- expectation_type — КАЖДОЕ действие должно иметь одно из четырёх, иначе card-service его отклонит (ворота G7):
+  "delta_abs" — эффект виден как сдвиг среднего до/после (сон, HRV, стресс и т.п. — большинство метрических действий);
+  "threshold" — эффект виден как держится ли агрегат метрики за неделю по нужную сторону границы, БЕЗ сравнения с "было" (например «шаги стабильно 12-13 тыс», «жиры не выше 28 г/день» — здесь magnitude это САМА граница, а не дельта);
+  "frequency" — эффект виден как доля дней недели, когда условие выполнено (например «плавать раз в неделю» — metric:"swam", direction:"up", magnitude:1; «вставать каждые 40 минут» — metric:"movement_gap_min", direction:"down", magnitude:40; добавь freq_min_ratio — долю дней из 7, которой достаточно, например 0.14 для «раз в неделю», 0.7 для «почти каждый день»);
+  "unmeasurable" — действие невозможно проверить числом (визит к врачу, режим покоя сустава, субъективное самочувствие) — metric ОБЯЗАН быть null, а unmeasurable_reason — короткая честная причина, почему число не подходит. НЕ выдумывай метрику ради галочки — лучше честный unmeasurable, чем метрика, которая на самом деле ничего не докажет.
+  Если metric не null — expectation_type обязан быть "delta_abs"/"threshold"/"frequency" (не "unmeasurable"). Если metric null — expectation_type обязан быть "unmeasurable" с заполненным unmeasurable_reason.
 - type — ЧТО это за действие, СТРОГО одно из закрытого списка (по нему код проверяет противопоказания, не по тексту):
   load_high — интенсив, интервалы/HIIT, силовая, бег, прыжки, спринт, кроссфит, подъём тяжестей, любые ударные;
   load_low — лёгкая аэробика, растяжка, мобилити, йога, ЛФК, любые упражнения с движением корпуса/осевой нагрузкой;
@@ -734,6 +741,35 @@ def parse_advisor_response(raw_text: str, ctx: dict, targets: list[dict], prev_w
         a_type = a.get("type") if a.get("type") in ACTION_TYPES else "unknown"
         if a.get("type") and a_type == "unknown" and a["type"] != "unknown":
             unknown_fields.append(f'type="{a["type"]}" в "{str(a.get("title"))[:40]}"')
+
+        # «Петля исходов» (2026-09-24, часть 1): G7 в card-service требует ЛИБО
+        # ожидание, ЛИБО unmeasurable_reason — если советник забыл прислать
+        # expectation_type (старые прогоны/модель не подхватила промпт), не роняем
+        # весь ответ: metric не null -> delta_abs (прежнее поведение по умолчанию,
+        # обратная совместимость); metric null -> unmeasurable с запасным reason
+        # из "why", чтобы G7 не отклонил черновик из-за формальности промпта.
+        exp_type_raw = a.get("expectation_type")
+        exp_type = exp_type_raw if exp_type_raw in ("delta_abs", "threshold", "frequency", "unmeasurable") else None
+        if exp_type_raw and exp_type is None:
+            unknown_fields.append(f'expectation_type="{exp_type_raw}" в "{str(a.get("title"))[:40]}"')
+        if metric is None:
+            exp_type = "unmeasurable"
+        elif exp_type is None or exp_type == "unmeasurable":
+            exp_type = "delta_abs"
+
+        unmeasurable_reason = None
+        if exp_type == "unmeasurable":
+            # Запасной reason из "why" — НЕ алерт: "why" почти всегда осмысленно
+            # объясняет действие, это разумный дефолт, а не признак сбоя советника
+            # (в отличие от action["metric"]/["type"] с нераспознанным значением ниже).
+            unmeasurable_reason = str(a["unmeasurable_reason"])[:300] if a.get("unmeasurable_reason") else (
+                str(a["why"])[:300] if a.get("why") else "советник не указал причину неизмеримости")
+
+        freq_min_ratio = None
+        if exp_type == "frequency" and metric:
+            raw_ratio = a.get("freq_min_ratio")
+            freq_min_ratio = raw_ratio if (isinstance(raw_ratio, (int, float)) and 0 < raw_ratio <= 1) else None
+
         entry = {
             "title": str(a["title"])[:120], "why": (str(a["why"])[:400] if a.get("why") else ""),
             "expect": (str(a["expect"])[:300] if a.get("expect") else ""),
@@ -741,6 +777,9 @@ def parse_advisor_response(raw_text: str, ctx: dict, targets: list[dict], prev_w
             "metric": metric,
             "direction": (a.get("direction") if (metric and a.get("direction") in ("up", "down")) else None),
             "magnitude": (a.get("magnitude") if (metric and isinstance(a.get("magnitude"), (int, float))) else None),
+            "expectation_type": exp_type,
+            "unmeasurable_reason": unmeasurable_reason,
+            "freq_min_ratio": freq_min_ratio,
             "type": a_type,
         }
         entry["check"] = _validate_check({**a, "type": a_type}, nutrient_to_col, unknown_fields)
@@ -1004,6 +1043,10 @@ def sync_actions_to_card(actions: list[dict], date: str, pheno_log: Optional[lis
             req.window_days = 7
             req.lag_days = 1
             req.baseline_days = 7
+            req.expectation_type = a.get("expectation_type") or "delta_abs"
+            req.freq_min_ratio = a.get("freq_min_ratio")
+        else:
+            req.unmeasurable_reason = a.get("unmeasurable_reason")
         try:
             resp = propose_recommendation(req)
             if resp.accepted:

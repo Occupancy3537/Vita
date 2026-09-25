@@ -34,7 +34,7 @@ from psycopg import sql
 from pydantic import ValidationError
 
 from app.doctor.contract import (
-    CloseInvestigationArgs, OpenInvestigationArgs, PlanLabArgs,
+    CloseInvestigationArgs, CloseRecommendationArgs, OpenInvestigationArgs, PlanLabArgs,
     RecordNoteArgs, RecordSymptomArgs, UpdateInvestigationArgs,
 )
 
@@ -433,6 +433,10 @@ def plan_lab(cur, args: dict) -> dict:
     return _stage("lab_plan", PlanLabArgs, args)
 
 
+def close_recommendation(cur, args: dict) -> dict:
+    return _stage("recommendation_close", CloseRecommendationArgs, args)
+
+
 # --- реестр ------------------------------------------------------------------
 
 TOOL_REGISTRY = [
@@ -591,6 +595,18 @@ TOOL_REGISTRY = [
             "interval_months": {"type": "integer"}, "reason": {"type": "string"},
         }, "required": ["test"]},
         "executor": plan_lab, "timeout": 1.0, "read_only": False,
+    },
+    {
+        "name": "Close_Recommendation",
+        "description": "Закрой активную рекомендацию — например, пациент подтвердил, что "
+                        "выполнил разовое действие (записался к врачу, сдал анализ). Ищет по "
+                        "подстроке в названии; если совпадений несколько или ни одного — "
+                        "вызов отклоняется, не гадает какую закрыть.",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string", "description": "Слово/фраза из названия рекомендации, например 'кардиолог'"},
+            "reason": {"type": "string", "description": "Почему закрываем — необязательно"},
+        }, "required": ["title"]},
+        "executor": close_recommendation, "timeout": 1.0, "read_only": False,
     },
 ]
 
