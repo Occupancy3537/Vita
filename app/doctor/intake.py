@@ -29,7 +29,7 @@ from typing import Optional
 from psycopg.errors import UniqueViolation
 from ulid import ULID
 
-from app import hermes_telegram, notify
+from app import notify, service_telegram
 from app.db import get_conn, schema
 from app.doctor import commit, gate, loop, render, telegram
 from app.doctor.commit import CommitError
@@ -39,6 +39,10 @@ from app.doctor.dialog import already_processed, write_turn
 logger = logging.getLogger(__name__)
 
 _SYM_TAG_RE = re.compile(r"#SYM:([A-Za-z0-9_-]+)")
+# «Консилиум специалистов» (2026-09-25) — детерминированный триггер, не
+# угадывание по смыслу свободного текста (CONSILIUM_PLAN_2026-09-23.md
+# настаивал на этом явно — "/консилиум <тема>", не эвристика).
+_CONSILIUM_RX = re.compile(r"^/консилиум\s*(.*)$", re.I | re.S)
 
 
 def _extract_sym_tag(text: Optional[str]) -> Optional[str]:
@@ -108,13 +112,13 @@ def parse_update(update: dict) -> Optional[IncomingMessage]:
 def _fallback_text(msg: IncomingMessage) -> str:
     return msg.text or f"[{msg.kind}]"
 
-
 # F1 (внешний аудит логики, 2026-09-22): эмердженси-ответ уходил одним вызовом
 # Telegram — сбой отправки (сеть/429/бот заблокирован) означал, что пациент
 # НИКОГДА не увидит «вызовите скорую», а слою B (slow_gate_followup) вообще не
 # давали шанса запуститься. Теперь: 3 попытки ботом доктора с паузой, затем
-# фолбэк через Hermes-бот — независимая доставка в тот же чат (chat_id личного
-# чата совпадает для всех ботов, оба принадлежат Владу).
+# фолбэк через сервисный бот (был Hermes до 2026-09-24, исключён из проекта) —
+# независимая доставка в тот же чат (chat_id личного чата совпадает для всех
+# ботов, все принадлежат Владу).
 EMERGENCY_SEND_ATTEMPTS = 3
 EMERGENCY_RETRY_DELAY_SECONDS = 1.5
 
@@ -132,7 +136,12 @@ def _deliver_emergency(chat_id: str, message_id: Optional[int], reply_text: str)
 
     2026-09-24 (ROADMAP 5.1): подключено к журналу notify.log_external_send()
     — ТОЛЬКО журнал (priority="red_flag", вне бюджета, как и положено),
-    саму доставку (ретраи + фолбэк выше) не трогаем ни на йоту."""
+    саму доставку (ретраи + фолбэк выше) не трогаем ни на йоту.
+
+    2026-09-24 (тикет «раскладка ботов по тематическим чатам»): фолбэк-бот
+    сменился с @Hermes_AI_vvk_bot на сервисный (app/service_telegram.py) —
+    Hermes исключён из проекта, независимость второго канала (другой бот,
+    другой токен) как принцип не изменилась."""
     for attempt in range(1, EMERGENCY_SEND_ATTEMPTS + 1):
         try:
             telegram.send_message(chat_id, reply_text, reply_to_message_id=message_id)
@@ -144,8 +153,8 @@ def _deliver_emergency(chat_id: str, message_id: Optional[int], reply_text: str)
             if attempt < EMERGENCY_SEND_ATTEMPTS:
                 time.sleep(EMERGENCY_RETRY_DELAY_SECONDS * attempt)
     try:
-        hermes_telegram.send_message(chat_id, reply_text)
-        logger.warning("intake: эмердженси доставлен фолбэком через Hermes-бот "
+        service_telegram.send_message(chat_id, reply_text)
+        logger.warning("intake: эмердженси доставлен фолбэком через сервисный бот "
                        "(бот доктора не смог; chat=%s)", chat_id)
         notify.log_external_send("doctor_emergency", "red_flag")
         return True
@@ -272,7 +281,7 @@ def _finish_turn(msg: IncomingMessage, text: str, user_turn_id: str, placeholder
         # увидит вообще ничего. Теперь: как и раньше, сперва пробуем аккуратно
         # заменить плейсхолдер (best effort, обычная UX-картинка "…" -> ответ);
         # если это эмердженси-текст модели И edit не удался — досылаем
-        # гарантированно той же логикой (ретраи + Hermes-фолбэк), что и
+        # гарантированно той же логикой (ретраи + фолбэк на сервисный бот), что и
         # детерминированный гейт (_deliver_emergency), не оставляя пациента
         # с голым "…" в кризисе.
         try:
@@ -347,9 +356,22 @@ def handle_update(update: dict) -> None:
         # Короткое замыкание: модель не вызывается вообще. Слой B всё равно
         # считается — ПОСЛЕ ответа, дописывает ту же сессию, если у него
         # найдётся что добавить (никогда не задерживает эмердженси, §3.7).
-        # F1: доставка — с ретраями и фолбэком через Hermes, см. _deliver_emergency.
+        # F1: доставка — с ретраями и фолбэком на сервисный бот, см. _deliver_emergency.
         _deliver_emergency(msg.chat_id, msg.message_id, emergency_reply)
         gate.slow_gate_followup(msg.chat_id, text)
+        return
+
+    consilium_match = _CONSILIUM_RX.match(text.strip())
+    if consilium_match:
+        # «Консилиум специалистов» (2026-09-25) — детерминированная команда,
+        # своя очередь (app.consilium.submit_command), не общий _turn_executor:
+        # многоминутный консилиум не должен держать в очереди обычную переписку.
+        from app import consilium
+        topic = consilium_match.group(1).strip() or "общий профиль долголетия"
+        telegram.send_message(msg.chat_id, f"Собираю консилиум по теме «{topic}» — вернусь с итогом через "
+                                            "несколько минут (несколько LLM-вызовов подряд).",
+                              reply_to_message_id=msg.message_id)
+        consilium.submit_command(msg.chat_id, topic)
         return
 
     telegram.send_chat_action(msg.chat_id, "typing")

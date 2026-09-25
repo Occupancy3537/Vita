@@ -94,6 +94,8 @@ LOOPS: list[dict] = [
      "flag": "ISSUE_REVIEW_ENABLED"},
     {"key": "research_scan", "n": "Научный контур — скан публикаций", "s": "по воскресеньям 21:50",
      "flag": "RESEARCH_SCAN_ENABLED"},
+    {"key": "consilium_monthly", "n": "Консилиум специалистов — месячный прогон", "s": "1-е число месяца ~09:30",
+     "flag": "CONSILIUM_SCHEDULER_ENABLED"},
 ]
 
 # «Свежесть данных»: источник → запрос последней метки времени. ok_h — порог

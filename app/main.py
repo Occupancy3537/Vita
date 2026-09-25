@@ -98,6 +98,7 @@ import app.meds_from_calendar as meds_from_calendar
 import app.monthly_trend as monthly_trend
 import app.issue_review as issue_review
 import app.research_scan as research_scan
+import app.consilium as consilium
 import app.food_diary_bot as food_diary_bot
 import app.card_processor as card_processor
 import app.phenoage_calc as phenoage_calc
@@ -177,6 +178,11 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # дёрнуть /recommendations/{id}/evaluate руками. Теперь сам находит
     # рекомендации с закрывшимся окном оценки и считает вердикт раз в сутки.
     ("RECOMMENDATIONS_EVAL_ENABLED", lambda: recommendations.run_scheduler(), "recommendations-evaluate-scheduler"),
+    # «Консилиум специалистов» (2026-09-25): полный ежемесячный прогон
+    # (1-е число, без конкретного вопроса) — команда "/консилиум ..." сама
+    # уходит через свой отдельный ThreadPoolExecutor (app.consilium.submit_command,
+    # вызывается из app/doctor/intake.py), сюда попадает только расписание.
+    ("CONSILIUM_SCHEDULER_ENABLED", lambda: consilium.run_scheduler(), "consilium-monthly-scheduler"),
 ]
 
 
@@ -322,6 +328,18 @@ def dashboard_medpassport(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return medpassport.build_medpassport(cur)
+
+
+@app.get("/dashboard/consilium")
+def dashboard_consilium(token: str = Query(default="")) -> dict:
+    """«Консилиум специалистов» (2026-09-25, Часть 4.1): ОТДЕЛЬНАЯ секция —
+    полные итоги + история, не пересекается с /dashboard/today (recommendations_log)
+    — та самая находка плана: последняя строка recommendations_log без фильтра
+    по типу молча вытеснила бы недельный план, если бы консилиум писал туда же."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return consilium.get_consilium_reports(cur)
 
 
 @app.get("/dashboard/system-status")
