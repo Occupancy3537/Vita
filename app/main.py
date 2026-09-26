@@ -41,11 +41,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+from pathlib import Path
 from typing import Callable, Literal, Optional
 
 import psycopg
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from psycopg import sql
 from pydantic import BaseModel
 from ulid import ULID
@@ -112,8 +114,18 @@ import app.system_status as system_status
 import app.err_dedup as err_dedup
 from app.biohacking_ingest import BiohackingPayload, process_ingest
 from app.write_path import process as process_source
+from app.vita import router as vita_router
 
 app = FastAPI(title="card-service", version="0.0.1")
+# Vita v1 (2026-09-26) — отдельный роутер (app/vita.py): страница + два
+# JSON-эндпоинта за httpOnly cookie-сессией, параллельно старому дашборду
+# (app/dashboard.py, не тронут). Собственная авторизация — см. app/vita_auth.py.
+app.include_router(vita_router)
+# Иконки/манифест PWA — единственные ПУБЛИЧНЫЕ файлы Vita (не секрет, не
+# персональные данные): без этого браузер не сможет установить приложение на
+# домашний экран ДО входа по паролю. Сама страница (vita.html) сюда не
+# попадает — она отдаётся только через гейтед /vita в app/vita.py.
+app.mount("/vita-assets", StaticFiles(directory=Path(__file__).parent / "static" / "vita_public"), name="vita-assets")
 
 
 # НАХОДКА премортема (2026-09-20, задача Влада "давай сделаем 1,3,4,5,7"):

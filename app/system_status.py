@@ -44,6 +44,7 @@ SECRET_NAMES = [
     "CARD_GOOGLE_CALENDAR_REFRESH_TOKEN", "RESCUETIME_API_KEY",
     "DASHBOARD_TOKEN", "WIDGET_TOKEN", "ERR_DEDUP_TOKEN",
     "NUTRITION_BOT_TOKEN", "ACTION_ACK_TOKEN", "BACKUP_STATUS_TOKEN",
+    "VITA_PASSWORD", "VITA_SESSION_SECRET",
 ]
 
 # Реестр фоновых циклов: ключ = имя в card.scheduler_run_log (совпадает с именем

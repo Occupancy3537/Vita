@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F5F4F1">
+<title>Vita — вход</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F5F4F1;--ink:#1E2126;--ink2:#4A4E57;--muted:#8A8D94;--sage:#9DB89A;--sage-d:#6F8F6C;--line:rgba(255,255,255,.5);--glass:rgba(255,255,255,.6);--shadow:0 20px 60px rgba(90,90,120,.10)}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);font-family:"Manrope","Inter",system-ui,sans-serif;color:var(--ink);display:grid;place-items:center;padding:24px;-webkit-font-smoothing:antialiased}
+.card{width:100%;max-width:360px;background:var(--glass);-webkit-backdrop-filter:blur(26px) saturate(150%);backdrop-filter:blur(26px) saturate(150%);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);padding:32px 28px}
+h1{font-size:30px;font-weight:300;letter-spacing:-.01em}
+p.sub{margin-top:6px;font-size:13.5px;color:var(--muted)}
+form{margin-top:26px;display:flex;flex-direction:column;gap:12px}
+input{height:48px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.7);padding:0 16px;font-size:16px;font-family:inherit;color:var(--ink);outline:none}
+input:focus{border-color:var(--sage)}
+button{height:48px;border-radius:16px;border:0;background:var(--sage);color:#fff;font-size:15px;font-weight:500;font-family:inherit;cursor:pointer;transition:opacity .3s ease}
+button:active{opacity:.85}
+.err{font-size:13px;color:#B67E58;min-height:16px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Vita</h1>
+  <p class="sub">Личный журнал здоровья</p>
+  <form id="f">
+    <input type="password" id="pw" placeholder="Пароль" autocomplete="current-password" autofocus>
+    <p class="err" id="err"></p>
+    <button type="submit">Войти</button>
+  </form>
+</div>
+<script>
+document.getElementById('f').addEventListener('submit', async function(e){
+  e.preventDefault();
+  var err = document.getElementById('err');
+  err.textContent = '';
+  try{
+    var r = await fetch('/vita/login', {
+      method: 'POST', headers: {'content-type': 'application/json'},
+      body: JSON.stringify({password: document.getElementById('pw').value}),
+    });
+    if(!r.ok){ err.textContent = 'Неверный пароль'; return; }
+    location.href = '/vita';
+  }catch(e){ err.textContent = 'Не получилось соединиться — попробуй ещё раз'; }
+});
+</script>
+</body>
+</html>

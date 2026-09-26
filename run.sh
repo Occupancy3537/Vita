@@ -132,6 +132,8 @@ cd "$(dirname "$0")"
 : "${NUTRITION_BOT_TOKEN:?не задан — сервисный бот (алерты+дайджест, @vvk_gemini_bot) не сможет слать}"
 : "${ACTION_ACK_TOKEN:?не задан — кнопки 'сделал' на дашборде уйдут в fail-closed forbidden}"
 : "${BACKUP_STATUS_TOKEN:?не задан — пинг ночного бэкапа не сможет обновить состояние}"
+: "${VITA_PASSWORD:?не задан — вход в Vita (/vita/login) уйдёт в fail-closed}"
+: "${VITA_SESSION_SECRET:?не задан — cookie-сессия Vita не сможет подписываться, /vita/* уйдёт в fail-closed 401}"
 
 sudo docker build -t card-service:latest .
 
@@ -187,6 +189,8 @@ sudo docker run -d \
   -e NUTRITION_BOT_TOKEN="$NUTRITION_BOT_TOKEN" \
   -e ACTION_ACK_TOKEN="$ACTION_ACK_TOKEN" \
   -e BACKUP_STATUS_TOKEN="$BACKUP_STATUS_TOKEN" \
+  -e VITA_PASSWORD="$VITA_PASSWORD" \
+  -e VITA_SESSION_SECRET="$VITA_SESSION_SECRET" \
   card-service:latest
 
 echo "card-service started. Проверка: curl http://127.0.0.1:8080/health"
