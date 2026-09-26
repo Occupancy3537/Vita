@@ -165,7 +165,7 @@ def test_dashboard_health_endpoint_shape():
     body = r.json()
     for key in ("updated_at", "today", "metrics", "days_14", "trends",
                 "investigations", "medical_notes_recent", "anomalies",
-                "action_loops"):
+                "action_loops", "pending_anomalies"):
         assert key in body
     # «Стоп-кровь каналов» (2026-09-26, часть 2.2): correlations/experiments —
     # заглушки отключённого движка, мёртвые поля без потребителя — убраны из
@@ -210,6 +210,22 @@ def test_dashboard_health_surfaces_action_loops():
 
     body = client.get("/dashboard/health", params={"token": "test-dashboard-token-not-prod"}).json()
     assert any(l.get("metric") == "test_dashboard_loop" for l in body["action_loops"])
+
+
+def test_dashboard_health_surfaces_pending_anomaly_dispositions():
+    """«Пересборка вычитанием» (2026-09-26, Часть 1.1): лента решений на
+    главном экране читает pending-диспозиции через /dashboard/health — тот
+    же читатель card.anomaly_disposition, что и досье доктора
+    (recent_dispositions), просто про pending, а не про уже решённое."""
+    from app import anomaly_disposition as ad
+
+    with get_conn() as conn, conn.cursor() as cur:
+        ad.create_disposition_row(cur, "test_dashboard_pending_metric", "Тестовая метрика",
+                                   "2026-09-20", "strong")
+        conn.commit()
+    body = client.get("/dashboard/health", params={"token": "test-dashboard-token-not-prod"}).json()
+    assert isinstance(body["pending_anomalies"], list)
+    assert any(p.get("metric_key") == "test_dashboard_pending_metric" for p in body["pending_anomalies"])
 
 
 def test_dashboard_health_wrong_token_forbidden():

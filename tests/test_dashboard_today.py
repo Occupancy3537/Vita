@@ -8,8 +8,10 @@ from fastapi.testclient import TestClient
 
 from app.dashboard import (
     _ALCOHOL_TRACE_THRESHOLD_G,
+    DAY_ISSUE_TOP_N,
     _action_id,
     _alcohol_effective_g,
+    _day_issue,
     _garmin_data_confirmed_stale,
     _hhmm,
     _load_gate,
@@ -195,6 +197,74 @@ def test_action_id_stable_for_same_issued_and_title():
     assert _action_id("2026-09-13", "Ходьба") == _action_id("2026-09-13", "Ходьба")
 
 
+# --- _day_issue: «выпуск дня» — только закрытые сутки, топ-N дельт --------
+# «Пересборка вычитанием» (2026-09-26, Часть 1.2): раньше вердикт дня судил
+# по "пока (сегодня)"-числам середины дня наравне с закрытыми (review §5.5).
+# _day_issue получает уже отфильтрованные past_rows (last "Дата" <= сегодня)
+# и никогда не видит незакрытый день — здесь проверяем саму логику отбора.
+
+def _row(date_str, **cols):
+    return {"Дата": date_str, **cols}
+
+
+def test_day_issue_prefers_yesterday_over_week_baseline():
+    rows = [_row("2026-09-24", ВСР_ночная=41), _row("2026-09-25", ВСР_ночная=41),
+            _row("2026-09-26", ВСР_ночная=47)]
+    out = _day_issue(rows, "2026-09-26")
+    assert out["lines"] == ["ВСР ночью 47 мс — выше, чем вчера"]
+
+
+def test_day_issue_falls_back_to_week_baseline_without_a_previous_day():
+    """Первая строка истории — сравнивать со вчера не с чем, но неделя тоже
+    пуста (нет строк до неё) — раз ничего не с чем сравнивать, строк нет."""
+    rows = [_row("2026-09-26", ВСР_ночная=47)]
+    assert _day_issue(rows, "2026-09-26") == {"lines": []}
+
+
+def test_day_issue_uses_week_baseline_when_yesterday_is_missing_data():
+    rows = [_row(f"2026-09-{d:02d}", ВСР_ночная=41) for d in range(19, 25)]  # 19..24, 6 точек по 41
+    rows.append(_row("2026-09-25", ВСР_ночная=None))  # вчера — пропуск
+    rows.append(_row("2026-09-26", ВСР_ночная=53))
+    out = _day_issue(rows, "2026-09-26")
+    assert out["lines"] == ["ВСР ночью 53 мс — выше, чем обычно за неделю"]
+
+
+def test_day_issue_below_threshold_is_not_reported():
+    """min_abs_delta ВСР = 6 (METRIC_CONFIG) — сдвиг в 2 мс не значим."""
+    rows = [_row("2026-09-25", ВСР_ночная=41), _row("2026-09-26", ВСР_ночная=43)]
+    assert _day_issue(rows, "2026-09-26") == {"lines": []}
+
+
+def test_day_issue_ignores_neutral_direction_metrics():
+    """Шаги/калории/белок — direction='neutral' в METRIC_CONFIG: рост/падение
+    само по себе не «хорошо» или «плохо», в выпуск дня не годится, что бы ни
+    случилось с числом (в отличие от строгого разрыва по HRV/сну/пульсу)."""
+    rows = [_row("2026-09-25", Шаги_за_вчера=3000, ВСР_ночная=41),
+            _row("2026-09-26", Шаги_за_вчера=15000, ВСР_ночная=47)]
+    out = _day_issue(rows, "2026-09-26")
+    assert len(out["lines"]) == 1
+    assert "Шаг" not in out["lines"][0]
+
+
+def test_day_issue_caps_at_top_n_by_magnitude():
+    rows = [
+        _row("2026-09-25", ВСР_ночная=41, Пульс_ночной_средний=60, Стресс_дневной_средний=30,
+             Восстановление_BodyBattery=50, Чистый_сон_мин=420),
+        _row("2026-09-26", ВСР_ночная=60, Пульс_ночной_средний=40, Стресс_дневной_средний=5,
+             Восстановление_BodyBattery=95, Чистый_сон_мин=520),
+    ]
+    out = _day_issue(rows, "2026-09-26")
+    assert len(out["lines"]) == DAY_ISSUE_TOP_N
+
+
+def test_day_issue_has_no_jargon():
+    """Часть 1.3 того же тикета — z=/baseline≈ запрещены везде в человеческом
+    тексте, не только в анемалиях."""
+    rows = [_row("2026-09-25", ВСР_ночная=41), _row("2026-09-26", ВСР_ночная=53)]
+    line = _day_issue(rows, "2026-09-26")["lines"][0]
+    assert "z=" not in line and "baseline" not in line.lower()
+
+
 # --- endpoint / real-data smoke ---------------------------------------------
 
 def test_dashboard_today_endpoint_shape():
@@ -203,13 +273,19 @@ def test_dashboard_today_endpoint_shape():
     body = r.json()
     for key in ("updated_at", "date", "now_local", "data_date", "decision",
                 "streaks", "budget", "kcal_today", "protein_today", "meals_today",
-                "plan", "longevity", "quiet"):
+                "plan", "longevity", "quiet", "day_issue"):
         assert key in body
     assert "gate" in body["decision"]
     assert isinstance(body["decision"]["gate"]["blocked"], bool)
     # «Стоп-кровь каналов» (2026-09-26, часть 2.1): windows (кофе/еда/отбой) —
     # считалось каждый запрос, фронт сознательно не рисовал — убрано совсем.
     assert "windows" not in body
+    # «Пересборка вычитанием» (2026-09-26, часть 1.2): ровно DAY_ISSUE_TOP_N
+    # строк максимум, ни одна не содержит жаргон.
+    assert isinstance(body["day_issue"]["lines"], list)
+    assert len(body["day_issue"]["lines"]) <= DAY_ISSUE_TOP_N
+    for line in body["day_issue"]["lines"]:
+        assert "z=" not in line and "baseline" not in line.lower()
 
 
 def test_dashboard_today_wrong_token_forbidden():

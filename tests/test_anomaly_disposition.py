@@ -292,3 +292,69 @@ def test_weekly_fates_summary_includes_recent_dispositions():
         conn.commit()
         summary = ad.weekly_fates_summary(cur, (TODAY - timedelta(days=7)).isoformat())
     assert any(f["metric"] == "Метрика1" and f["disposition"] == "acknowledge" for f in summary)
+
+
+# ─────── pending() (Часть 1.1 «Пересборка вычитанием», 2026-09-26) — лента решений ───────
+
+def test_pending_lists_only_pending_rows():
+    with get_conn() as conn, conn.cursor() as cur:
+        ad.create_disposition_row(cur, "feed_pending", "В ленте", TODAY.isoformat(), "strong")
+        ad.create_disposition_row(cur, "feed_acked", "Не в ленте", TODAY.isoformat(), "strong")
+        ad.dispose(cur, "feed_acked", "acknowledge")
+        conn.commit()
+        rows = ad.pending(cur)
+    keys = {r["metric_key"] for r in rows}
+    assert "feed_pending" in keys
+    assert "feed_acked" not in keys
+
+
+def test_pending_empty_when_nothing_pending():
+    with get_conn() as conn, conn.cursor() as cur:
+        assert ad.pending(cur) == []
+
+
+# ─────── POST /dashboard/dispose («Пересборка вычитанием», Часть 1.1) —────────
+# кнопка на карточке решения дёргает ТУ ЖЕ dispose(), что и Dispose_Anomaly.
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+client = TestClient(app)
+_TOKEN = "test-dashboard-token-not-prod"
+
+
+def test_dashboard_dispose_endpoint_updates_disposition():
+    with get_conn() as conn, conn.cursor() as cur:
+        ad.create_disposition_row(cur, "dash_dispose_ok", "Кнопка ленты", TODAY.isoformat(), "strong")
+        conn.commit()
+    r = client.post("/dashboard/dispose", json={
+        "token": _TOKEN, "metric": "dash_dispose_ok", "disposition": "acknowledge", "reason": "известно",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and body["disposition"] == "acknowledge"
+    with get_conn() as conn, conn.cursor() as cur:
+        rows = ad.pending(cur)
+    assert "dash_dispose_ok" not in {r["metric_key"] for r in rows}
+
+
+def test_dashboard_dispose_unknown_metric_is_404():
+    r = client.post("/dashboard/dispose", json={
+        "token": _TOKEN, "metric": "no_such_metric_at_all", "disposition": "acknowledge",
+    })
+    assert r.status_code == 404
+
+
+def test_dashboard_dispose_invalid_disposition_is_422():
+    r = client.post("/dashboard/dispose", json={
+        "token": _TOKEN, "metric": "whatever", "disposition": "pending",
+    })
+    assert r.status_code == 422
+
+
+def test_dashboard_dispose_wrong_token_forbidden():
+    r = client.post("/dashboard/dispose", json={
+        "token": "wrong", "metric": "whatever", "disposition": "acknowledge",
+    })
+    assert r.status_code == 403

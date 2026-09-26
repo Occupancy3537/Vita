@@ -50,7 +50,7 @@ def _active_conditions(cur) -> list[dict]:
     ]
 
 
-def _recent_labs(cur, limit: int = 15) -> list[dict]:
+def _recent_labs(cur, limit: int = 100) -> list[dict]:
     """Последняя запись по каждому маркеру (card.lab_result — канон,
     см. registrar.py) + предыдущая, для стрелки динамики. Полная свежая
     картина, не только вне референса — врачу на приёме нужнее весь срез."""
@@ -88,7 +88,12 @@ def build_medpassport(cur) -> dict:
         "profile": _profile(cur),
         "active_conditions": _active_conditions(cur),
         "active_meds": _active_meds(cur),
+        # «Пересборка вычитанием» (2026-09-26, Часть 2.1): Медпаспорт становится
+        # единственным домом лабораторий и записей врача — лимиты подняты с
+        # 15/5 до полного среза (card.lab_result — 77 маркеров на 2026-09-26,
+        # тот же источник данных, что раньше отдельно показывала «Возраст»
+        # 52-строчным списком, см. app/dashboard.py::get_bioage_dashboard).
         "recent_labs": _recent_labs(cur),
         "labs_out_of_range": _labs_out_of_range(cur, limit=20),
-        "recent_doctor_notes": _recent_doctor_notes(cur, limit=5),
+        "recent_doctor_notes": _recent_doctor_notes(cur, limit=15),
     }

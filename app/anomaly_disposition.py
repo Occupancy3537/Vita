@@ -283,6 +283,18 @@ def sync_resolved_investigations(cur) -> int:
 # Часть 3.3 / досье доктора — история диспозиций ("что я уже говорил про HRV")
 # =====================================================================
 
+def pending(cur) -> list[dict]:
+    """«Пересборка вычитанием» (2026-09-26, Часть 1.1) — лента решений на
+    главном экране читает то же состояние, что dispose() пишет. В отличие
+    от pending_older_than() (для дайджеста, только «висит больше суток») —
+    здесь ВСЁ текущее pending, на экране решение видно сразу, не через сутки."""
+    cur.execute(
+        sql.SQL("SELECT metric_key, metric_label, date, severity FROM {t} "
+                "WHERE disposition = 'pending' ORDER BY date DESC").format(t=_t()),
+    )
+    return [{"metric_key": k, "metric_label": l or k, "date": str(d), "severity": s} for k, l, d, s in cur.fetchall()]
+
+
 def recent_dispositions(cur, limit: int = 10) -> list[dict]:
     cur.execute(
         sql.SQL("SELECT metric_label, metric_key, date, severity, disposition, reason FROM {t} "

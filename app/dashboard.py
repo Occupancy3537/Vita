@@ -28,6 +28,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from app import timeutil
+from app.anomaly_disposition import pending as pending_dispositions
 from app.biohacking_ingest import MOVEMENT_GAP_OK_THRESHOLD_MIN
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
 from app.recommendations import get_active_recommendations, get_loops
@@ -353,6 +354,17 @@ def get_health_dashboard(cur) -> dict:
     except Exception as e:
         active_recommendations = [{"error": str(e)}]
 
+    # «Пересборка вычитанием» (2026-09-26, Часть 1.1): лента решений на главном
+    # экране показывает pending-аномалии с кнопками — это то же состояние,
+    # что уже читает досье доктора (recent_dispositions) и пишет dispose()
+    # (Dispose_Anomaly), просто ещё один читатель одной и той же таблицы, не
+    # новая аналитика. Сбой не должен ронять весь дашборд (тот же принцип,
+    # что у action_loops/active_recommendations выше).
+    try:
+        pending_anomalies = pending_dispositions(cur)
+    except Exception as e:
+        pending_anomalies = [{"error": str(e)}]
+
     result = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "window": {"from": days_14[0]["date"] if days_14 else None, "to": _dkey(last_date)},
@@ -365,6 +377,7 @@ def get_health_dashboard(cur) -> dict:
         "anomalies": anomalies,
         "action_loops": action_loops,
         "active_recommendations": active_recommendations,
+        "pending_anomalies": pending_anomalies,
     }
     return result
 
@@ -818,6 +831,75 @@ def _load_mean(rows: list[dict], last_date: str, days: int):
     return sum(vals) / len(vals) if vals else None
 
 
+DAY_ISSUE_TOP_N = 3  # «Пересборка вычитанием» (2026-09-26, Часть 5) — бюджет
+# «выпуска дня» в коде, не в договорённости: новая строка попадает сюда,
+# только вытеснив другую, слайсом [:DAY_ISSUE_TOP_N], а не по доброй воле.
+
+
+def _day_issue(past_rows: list[dict], last_date: str) -> dict:
+    """«Пересборка вычитанием» (2026-09-26, Часть 1.2) — «выпуск дня»: ровно
+    DAY_ISSUE_TOP_N строк о том, что ИЗМЕНИЛОСЬ за последние ЗАКРЫТЫЕ сутки.
+    past_rows уже отфильтрован в get_today_dashboard на "Дата" <= today_iso —
+    здесь никогда нет чисел незакрытого дня, в отличие от decision.reasons
+    (которые до этого тикета сознательно мешали закрытое с "пока (сегодня)" —
+    ровно то, что review §5.5 назвал "4 из 11 критериев судят по незакрытому
+    дню", а сам блок reasons ниже по этой функции больше не собирает live-
+    метрики, см. правку "1. РЕШЕНИЕ ДНЯ"). Без LLM: сравнение со вчера, при
+    отсутствии вчерашней точки — с 7-дневной базой ДО последнего дня;
+    значимость — |дельта| относительно min_abs_delta той же метрики (тот
+    самый порог, которым уже устроен judgment в get_health_dashboard —
+    вторая аналитика здесь не изобретается, П5)."""
+    if len(past_rows) < 2:
+        return {"lines": []}
+    idx = len(past_rows) - 1
+    for i, r in enumerate(past_rows):
+        if r.get("Дата") == last_date:
+            idx = i
+            break
+    last_row = past_rows[idx]
+    prev_row = past_rows[idx - 1] if idx > 0 else None
+    week_rows = past_rows[max(0, idx - 7):idx]
+
+    candidates = []
+    for m in METRICS:
+        if m["direction"] == "neutral" or not m.get("min_abs_delta"):
+            continue
+        value = _num(last_row.get(m["col"]))
+        if value is None:
+            continue
+        prev_value = _num(prev_row.get(m["col"])) if prev_row else None
+        week_vals = [v for v in (_num(r.get(m["col"])) for r in week_rows) if v is not None]
+        base_value = sum(week_vals) / len(week_vals) if week_vals else None
+        if prev_value is not None:
+            delta, compared_to = value - prev_value, "вчера"
+        elif base_value is not None:
+            delta, compared_to = value - base_value, "обычно за неделю"
+        else:
+            continue
+        magnitude = abs(delta) / m["min_abs_delta"]
+        if magnitude < 1:
+            continue
+        better = delta > 0 if m["direction"] == "higher_better" else delta < 0
+        candidates.append({
+            "label": m["label"], "unit": m["unit"], "value": _r_smart(value),
+            "delta": _r_smart(delta), "magnitude": magnitude, "compared_to": compared_to, "good": better,
+        })
+
+    candidates.sort(key=lambda c: c["magnitude"], reverse=True)
+    lines = []
+    for c in candidates[:DAY_ISSUE_TOP_N]:
+        arrow = "выше" if c["delta"] > 0 else "ниже"
+        unit = f" {c['unit']}" if c["unit"] else ""
+        lines.append(f"{c['label']} {_fmt_human(c['value'])}{unit} — {arrow}, чем {c['compared_to']}")
+    return {"lines": lines}
+
+
+def _fmt_human(v) -> str:
+    """47.0 -> "47", 46.5 -> "46.5" — _r_smart() всегда возвращает float,
+    человеческому тексту не нужен фальшивый ".0" на круглых числах."""
+    return str(int(v)) if float(v).is_integer() else str(v)
+
+
 def get_today_dashboard(cur) -> dict:
     cur.execute('SELECT d.*, to_char(d."Дата", \'YYYY-MM-DD\') AS "Дата" FROM health.daily_trends d ORDER BY d."Дата"')
     daily = _rows_as_dicts(cur)
@@ -1264,6 +1346,7 @@ def get_today_dashboard(cur) -> dict:
         "decision": decision, "streaks": streaks,
         "budget": budget, "kcal_today": kcal_today, "protein_today": protein_today, "meals_today": len(today_meals),
         "plan": plan, "longevity": longevity, "quiet": quiet,
+        "day_issue": _day_issue(past_rows, last_date),
     }
 
 

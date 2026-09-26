@@ -58,6 +58,7 @@ from app.dashboard import (
     get_today_nutrition,
     get_weekly_nutrition,
 )
+from app import anomaly_disposition
 from app.db import get_conn, schema
 from app.doctor import gate as doctor_gate
 from app import digest
@@ -361,6 +362,35 @@ def dashboard_system_status(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return system_status.build(cur)
+
+
+class DashboardDisposeRequest(BaseModel):
+    token: str = ""
+    metric: str = ""
+    disposition: str = ""
+    reason: Optional[str] = None
+
+
+@app.post("/dashboard/dispose")
+def dashboard_dispose(req: DashboardDisposeRequest) -> dict:
+    """Кнопка на карточке решения (лента решений, «Пересборка вычитанием»,
+    2026-09-26, Часть 1.1): та же dispose(), что вызывает инструмент доктора
+    Dispose_Anomaly (app/doctor/commit.py::_dispose_anomaly) — здесь просто
+    второй вызывающий, без app/doctor/ посередине. Кнопка на дашборде отвечает
+    за себя сама, доктору для этого писать не нужно."""
+    _check_dashboard_token(req.token)
+    if req.disposition not in anomaly_disposition.SETTABLE_DISPOSITIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"disposition должен быть один из {anomaly_disposition.SETTABLE_DISPOSITIONS}",
+        )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            result = anomaly_disposition.dispose(cur, req.metric, req.disposition, reason=req.reason)
+        conn.commit()
+    if not result["ok"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 class SetTimezoneRequest(BaseModel):

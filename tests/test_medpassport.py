@@ -41,6 +41,24 @@ def test_profile_reads_real_user_profile():
     assert profile.get("allergies")  # известно, что поле реально заполнено
 
 
+def test_recent_labs_is_the_single_home_not_capped_at_the_old_fifteen():
+    """«Пересборка вычитанием» (2026-09-26, Часть 2.1): Медпаспорт становится
+    единственным домом лабораторий — раньше «Возраст» отдельно показывал 52
+    строки биомаркеров, здесь лимит был 15. card_test изолирован от прода
+    (см. докстринг файла) — сеем 20 синтетических маркеров и проверяем, что
+    старый лимит-15 реально снят по умолчанию (build_medpassport вызывает
+    _recent_labs(cur) без явного limit), а не просто переставлен."""
+    keys = [f"test_mp_home_{i}" for i in range(20)]
+    for k in keys:
+        _seed_lab_result(k, 1.0, days_ago=1)
+    try:
+        body = client.get("/dashboard/medpassport", params={"token": "test-dashboard-token-not-prod"}).json()
+        markers = {l["marker"] for l in body["recent_labs"]}
+        assert set(keys) <= markers
+    finally:
+        _cleanup_lab_results(keys)
+
+
 def test_active_conditions_reads_real_patient_state():
     """Известный живой инвариант проекта: активная грыжа L5/S1 в
     health.patient_state (тот же источник, что и гейт нагрузки на дашборде —
