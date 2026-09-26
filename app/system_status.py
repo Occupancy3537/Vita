@@ -82,8 +82,6 @@ LOOPS: list[dict] = [
      "flag": "NUTRITION_REPORTS_ENABLED"},
     {"key": "phenoage_calc", "n": "Расчёт биовозраста", "s": "по воскресеньям 09:00",
      "flag": "PHENOAGE_CALC_ENABLED"},
-    {"key": "anomaly_detector_weekly", "n": "Поиск аномалий (неделя)", "s": "по воскресеньям 11:00",
-     "flag": "ANOMALY_DETECTOR_ENABLED"},
     {"key": "nutrition_reports_weekly", "n": "Отчёт о питании (неделя)", "s": "по воскресеньям 12:00",
      "flag": "NUTRITION_REPORTS_ENABLED"},
     {"key": "weekly_advisor", "n": "Недельный советник", "s": "по воскресеньям 20:00",

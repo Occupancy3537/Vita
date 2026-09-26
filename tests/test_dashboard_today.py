@@ -201,13 +201,15 @@ def test_dashboard_today_endpoint_shape():
     r = client.get("/dashboard/today", params={"token": "test-dashboard-token-not-prod"})
     assert r.status_code == 200
     body = r.json()
-    for key in ("updated_at", "date", "now_local", "data_date", "decision", "windows",
+    for key in ("updated_at", "date", "now_local", "data_date", "decision",
                 "streaks", "budget", "kcal_today", "protein_today", "meals_today",
                 "plan", "longevity", "quiet"):
         assert key in body
     assert "gate" in body["decision"]
     assert isinstance(body["decision"]["gate"]["blocked"], bool)
-    assert isinstance(body["windows"], list) and len(body["windows"]) == 3
+    # «Стоп-кровь каналов» (2026-09-26, часть 2.1): windows (кофе/еда/отбой) —
+    # считалось каждый запрос, фронт сознательно не рисовал — убрано совсем.
+    assert "windows" not in body
 
 
 def test_dashboard_today_wrong_token_forbidden():

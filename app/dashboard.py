@@ -91,18 +91,13 @@ TARGET_ZONES = {
 # детекция осталась в n8n (не рерайт математики, только новый сток данных),
 # но ЧТЕНИЕ для дашборда — целиком отсюда, без единого обращения к n8n.
 #
-# correlations/experiments — не забытые поля: в исходном n8n-коде они были
-# буквально захардкожены отключёнными («движок корреляций отключён — слепой
-# перебор пар на малых данных = шум», коллективное ревью, решение уже принято
-# раньше), реального источника данных для них никогда не было. `recommendation`
-# (совет от Weekly AI Advisor, Google Sheets) в JSON был, но фронтенд его нигде
-# не рендерит — проверено (`grep` по v4.html/index.html), поэтому не переносил.
-_DISABLED_CORRELATIONS = {"computed": None, "disabled": True, "priority": [], "discovery": []}
-_EXPERIMENTS_NOTE = (
-    "Движок корреляций отключён (слепой перебор пар на малых данных = шум). "
-    "Гипотезы о причинах теперь ведёт доктор-бот: связь симптомов с едой + "
-    "элиминационные тесты."
-)
+# correlations/experiments — были в ответе до 2026-09-26 («стоп-кровь каналов»,
+# часть 2.2): заглушки отключённого движка корреляций («слепой перебор пар на
+# малых данных = шум», решение принято раньше), реального источника данных для
+# них никогда не было, фронтенд их не рендерил (проверено grep по v4.html/
+# index.html) — мёртвые поля, возились по сети без потребителя. Сам факт
+# "движок отключён" не пропал — он записан здесь, в CLAUDE.md и в решениях
+# проекта, просто больше не отправляется клиенту как пустая структура.
 
 
 def _r1(x):
@@ -370,9 +365,6 @@ def get_health_dashboard(cur) -> dict:
         "anomalies": anomalies,
         "action_loops": action_loops,
         "active_recommendations": active_recommendations,
-        "correlations": _DISABLED_CORRELATIONS,
-        "experiments": [],
-        "experiments_note": _EXPERIMENTS_NOTE,
     }
     return result
 
@@ -977,26 +969,6 @@ def get_today_dashboard(cur) -> dict:
     latest_parsed = _parse_actions(latest_rec["Recommendation_Text"]) if latest_rec else None
     latest_actions = latest_parsed["actions"] if latest_parsed else []
 
-    bed_min = 23 * 60 + 30
-    for a in latest_actions:
-        m = re.search(r"(\d{1,2})[:.](\d{2})", str(a.get("title") or ""))
-        if m and re.search(r"отбо|спат|лож|сон", str(a.get("title") or ""), re.I):
-            bed_min = int(m.group(1)) * 60 + int(m.group(2))
-            break
-    coffee_min = bed_min - 8 * 60
-    meal_min = bed_min - 3 * 60
-
-    def _window(key, label, target_min, hint):
-        return {"key": key, "label": label, "until": _hhmm(target_min), "target_min": target_min, "hint": hint}
-
-    windows = [
-        _window("coffee", "Последний кофе", coffee_min, "за 8 ч до отбоя"),
-        _window("meal", "Последняя еда", meal_min, "за 3 ч до отбоя"),
-        _window("bed", "Отбой", bed_min,
-                "из плана советника" if any(re.search(r"отбо|спат", str(a.get("title") or ""), re.I) for a in latest_actions)
-                else "цель по умолчанию"),
-    ]
-
     sleep_streak = 0
     for r in reversed(rows):
         v = _num(r.get("Чистый_сон_мин"))
@@ -1289,7 +1261,7 @@ def get_today_dashboard(cur) -> dict:
     return {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "date": today_iso, "now_local": _hhmm(now_min), "data_date": last_date,
-        "decision": decision, "windows": windows, "streaks": streaks,
+        "decision": decision, "streaks": streaks,
         "budget": budget, "kcal_today": kcal_today, "protein_today": protein_today, "meals_today": len(today_meals),
         "plan": plan, "longevity": longevity, "quiet": quiet,
     }

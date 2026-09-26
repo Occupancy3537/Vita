@@ -1128,9 +1128,15 @@ def run_once() -> None:
 
     row = parse_advisor_response(raw, ctx, src["targets"], prev_weekly)
 
+    # «Стоп-кровь каналов» (2026-09-26, часть 2.3): summary раньше уходил в
+    # Telegram_Text как блок "🗂 card (тест, на текст выше не влияет)" —
+    # внутренние rc_-id и названия ворот (G3: …) в медицинском разборе для
+    # человека, который не читает код. sync_actions_to_card() (запись в
+    # card.recommendation через G7) не трогаем — трогаем только то, что из
+    # неё уходит пациенту; след остаётся в логах, не в чате.
     summary = sync_actions_to_card(row["actions"], row["Date"], src["pheno_log"], src["lab_plan"])
     if summary:
-        row["Telegram_Text"] = row["Telegram_Text"] + "\n\n🗂 card (тест, на текст выше не влияет):\n" + summary
+        logger.info("weekly_advisor: card-синхронизация действий недели:\n%s", summary)
 
     fates_table = _format_anomaly_fates_table(ctx.get("anomaly_fates") or [])
     if fates_table:

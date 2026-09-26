@@ -18,6 +18,7 @@ import pytest
 
 from app import anomaly_detector as ad
 from app.db import get_conn, schema
+from app.doctor import telegram as doctor_telegram_module
 
 pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
 
@@ -166,6 +167,32 @@ def test_write_anomaly_log_upserts():
         assert rows[0] == (0,)
 
 
+# --- _format_line / _format_series_line («стоп-кровь каналов», 2026-09-26,
+# часть 1.3) — z=/baseline≈ убраны из человеческого текста, числа остаются
+# в самом словаре и в БД, просто не в Telegram-строке. ------------------------
+
+_ANOMALY = {"label": "ВСР ночная", "value": 32, "z": -2.4, "window": "7д",
+            "severity": "strong", "baseline_mean": 49, "interpretation": "ухудшение"}
+
+
+def test_format_line_has_no_jargon():
+    line = ad._format_line(_ANOMALY)
+    assert "z=" not in line and "baseline" not in line and "окно" not in line
+    assert "ВСР ночная" in line and "49" in line and "ухудшение" in line
+
+
+def test_format_line_keeps_the_numbers_just_in_human_words():
+    line = ad._format_line(_ANOMALY)
+    assert "обычно ~49" in line
+    assert "за 7д" in line
+
+
+def test_format_series_line_has_no_jargon():
+    line = ad._format_series_line(_ANOMALY)
+    assert "z=" not in line and "baseline" not in line
+    assert "серия умеренных" in line and "49" in line
+
+
 # --- build_weekly_digest ---------------------------------------------------
 
 def test_build_weekly_digest_groups_by_metric():
@@ -261,8 +288,12 @@ def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch):
     rows = _rows(base, [9, 10, 11, 10, 9, 11, 10, 9, 10, 11, 30])
     latest_date = rows[-1]["Дата"]
     monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: (rows, METRICS))
+    # «Стоп-кровь каналов» (2026-09-26, часть 1.4): strong-алерт (просит
+    # ответить) теперь уходит ботом доктора напрямую, не через notify().
     sent = []
-    monkeypatch.setattr(ad.notify, "notify", lambda *a: sent.append(a))
+    monkeypatch.setattr(doctor_telegram_module, "send_message", lambda chat_id, text: sent.append((chat_id, text)))
+    logged = []
+    monkeypatch.setattr(ad.notify, "log_external_send", lambda source, priority: logged.append((source, priority)))
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -276,9 +307,11 @@ def test_run_daily_check_sends_once_then_dedups_rerun(monkeypatch):
     try:
         ad.run_daily_check()
         assert len(sent) == 1
-        assert "Метрика" in sent[0][2]
+        assert "Метрика" in sent[0][1]
+        assert logged == [("anomaly_detector", "critical")]
 
         sent.clear()
+        logged.clear()
         ad.run_daily_check()  # тот же день, та же аномалия — уже отмечена, повтор не шлём
         assert sent == [], "повторный прогон на тот же день не должен дублировать Telegram-алерт"
     finally:
@@ -373,12 +406,14 @@ def test_run_daily_check_strong_anomaly_creates_pending_disposition(monkeypatch)
     latest_date = rows[-1]["Дата"]
     monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: (rows, METRICS))
     sent = []
-    monkeypatch.setattr(ad.notify, "notify", lambda *a: sent.append(a))
+    monkeypatch.setattr(doctor_telegram_module, "send_message", lambda chat_id, text: sent.append((chat_id, text)))
+    logged = []
+    monkeypatch.setattr(ad.notify, "log_external_send", lambda source, priority: logged.append((source, priority)))
 
     ad.run_daily_check()
 
-    assert len(sent) == 1 and sent[0][1] == "critical"
-    assert ad.anomaly_disposition.REPLY_HINT in sent[0][2]
+    assert len(sent) == 1 and logged == [("anomaly_detector", "critical")]
+    assert ad.anomaly_disposition.REPLY_HINT in sent[0][1]
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(f"SELECT disposition, severity FROM {schema()}.anomaly_disposition WHERE metric_key = 'm' AND date = %s",
                     (latest_date,))
@@ -408,15 +443,18 @@ def test_run_daily_check_escalates_moderate_series(monkeypatch):
         conn.commit()
 
     monkeypatch.setattr(ad, "_fetch_daily_and_metrics", lambda cur: (rows, METRICS))
-    sent = []
-    monkeypatch.setattr(ad.notify, "notify", lambda *a: sent.append(a))
+    # эскалированная серия — тоже alertable/reply-needed, идёт ботом доктора
+    # (см. test_run_daily_check_strong_anomaly_creates_pending_disposition).
+    critical = []
+    monkeypatch.setattr(doctor_telegram_module, "send_message", lambda chat_id, text: critical.append((chat_id, text)))
+    monkeypatch.setattr(ad.notify, "log_external_send", lambda source, priority: None)
+    normal = []
+    monkeypatch.setattr(ad.notify, "notify", lambda *a: normal.append(a))
 
     ad.run_daily_check()
 
-    critical = [s for s in sent if s[1] == "critical"]
-    normal = [s for s in sent if s[1] == "normal"]
     assert len(critical) == 1, "эскалированная серия должна уйти critical'ом, не потеряться"
-    assert "серия умеренных" in critical[0][2]
+    assert "серия умеренных" in critical[0][1]
     assert normal == [], "эскалированная запись не должна ОСТАТЬСЯ в обычном жёлтом потоке"
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(f"SELECT disposition, severity FROM {schema()}.anomaly_disposition WHERE metric_key = 'm' AND date = %s",

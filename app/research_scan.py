@@ -550,8 +550,25 @@ def build_digest_text(items: list[dict]) -> Optional[str]:
 def _pick_discuss_with_doctor(items: list[dict], limit: int = 3) -> list[str]:
     """0-3 императивных строки — только для validated-грейда (мета-анализ/РКИ/
     когорта), не для препринтов/испытаний ранней фазы (Часть 4: "не внедрено" —
-    рано что-то менять по одному препринту)."""
-    return [f"спроси про «{r['title'][:70]}»" for r in items if r.get("design_type") in _VALIDATED_TYPES][:limit]
+    рано что-то менять по одному препринту).
+
+    «Стоп-кровь каналов» (2026-09-26, часть 2.4): раньше строка была шаблоном
+    "спроси про «X»" без единого слова причины — не вопрос и не совет, просто
+    имя статьи. Теперь строка ЛИБО несёт причину (используем уже посчитанный
+    why_for_you — не выдумываем новую), ЛИБО публикация честно не попадает в
+    этот блок вовсе (сам текст статьи уже виден в "Проверено" выше — тут
+    только повод завести разговор, без повода заводить нечего)."""
+    out = []
+    for r in items:
+        if r.get("design_type") not in _VALIDATED_TYPES:
+            continue
+        why = r.get("why_for_you")
+        if not why:
+            continue
+        out.append(f"спроси доктора про «{r['title'][:70]}» — {why}")
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _send_digest(items: list[dict]) -> bool:

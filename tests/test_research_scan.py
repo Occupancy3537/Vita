@@ -309,6 +309,20 @@ def test_pick_discuss_with_doctor_caps_at_limit():
     assert len(rs._pick_discuss_with_doctor(items)) == 3
 
 
+def test_pick_discuss_with_doctor_carries_the_reason():
+    """«Стоп-кровь каналов» (2026-09-26, часть 2.4) — строка обязана нести
+    причину (why_for_you), не просто имя статьи."""
+    items = [_item("rct", title="Vitamin D trial", why="у тебя низкий D")]
+    lines = rs._pick_discuss_with_doctor(items)
+    assert lines == ["спроси доктора про «Vitamin D trial» — у тебя низкий D"]
+
+
+def test_pick_discuss_with_doctor_skips_items_without_a_reason():
+    """Без причины — честно не включаем в блок вовсе (не пустой шаблон)."""
+    items = [_item("rct", title="No reason study", why=None)]
+    assert rs._pick_discuss_with_doctor(items) == []
+
+
 # ─────── _send_digest — сервисный бот напрямую, log_external_send (НЕ notify()) ───────
 
 def test_send_digest_uses_service_bot_and_logs_external(monkeypatch):

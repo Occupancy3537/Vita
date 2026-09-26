@@ -145,7 +145,11 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # не через этот список — прямой вызов run_daily_check() из
     # app/biohacking_ingest.py::process_ingest().
     ("ANOMALY_DETECTOR_ENABLED", lambda: anomaly_detector.run_daily_scheduler(), "anomaly-daily-scheduler"),
-    ("ANOMALY_DETECTOR_ENABLED", lambda: anomaly_detector.run_weekly_scheduler(), "anomaly-weekly-scheduler"),
+    # «Стоп-кровь каналов» (2026-09-26, часть 2.5): недельный дайджест аномалий
+    # (вс 11:00) убран — третье упоминание одних и тех же аномалий (уже были
+    # алертами и попадают в «судьбы» недельного разбора). run_weekly_digest()/
+    # build_weekly_digest() остаются в anomaly_detector.py (backend-логика
+    # агрегации, не трогаем), просто больше не вызываются по расписанию.
     # 2026-09-21 (группа 1, последний пункт): Card: Meds from Calendar.
     ("MEDS_FROM_CALENDAR_ENABLED", lambda: meds_from_calendar.run_scheduler(), "meds-from-calendar-scheduler"),
     # 2026-09-21 (группа 1, закрывает её целиком): Monthly_Trend_Wellness.

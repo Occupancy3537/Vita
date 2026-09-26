@@ -375,6 +375,26 @@ def test_run_once_sends_telegram_and_writes_log(monkeypatch):
     assert "2026-09-20" in sent[0][2]
 
 
+def test_run_once_does_not_leak_card_sync_debug_block_into_telegram_text(monkeypatch):
+    """«Стоп-кровь каналов» (2026-09-26, часть 2.3) — раньше summary от
+    sync_actions_to_card() уходил в Telegram_Text как блок "🗂 card (тест, на
+    текст выше не влияет)" с внутренними rc_-id. Теперь — только в логи."""
+    monkeypatch.setattr(wa, "_fetch_all", lambda cur: {"recs": [], "targets": [], "pheno_log": [], "lab_plan": []})
+    monkeypatch.setattr(wa, "build_context", lambda s: {"window": {"to": "2026-09-20"}})
+    monkeypatch.setattr(wa, "build_prompt", lambda ctx: "промпт")
+    monkeypatch.setattr(wa, "call_model", lambda prompt: "текст\n\n<<<ACTIONS\n{\"actions\": []}\nACTIONS>>>")
+    monkeypatch.setattr(wa, "sync_actions_to_card",
+                        lambda actions, date, pheno_log=None, lab_plan=None: "✅ Тест (rc_deadbeef123)")
+
+    written = {}
+    monkeypatch.setattr(wa, "write_recommendations_log", lambda cur, row: written.update(row))
+    monkeypatch.setattr(wa.notify, "notify", lambda source, priority, text: None)
+
+    wa.run_once()
+    assert "🗂" not in written["Telegram_Text"]
+    assert "rc_deadbeef123" not in written["Telegram_Text"]
+
+
 def test_run_once_appends_detective_block_when_present(monkeypatch):
     """«Детектив» (2026-09-26, часть 3.3) — тот же приём, что и fates_table:
     добавляется ПОСЛЕ текста модели, не встраивается в prompt."""

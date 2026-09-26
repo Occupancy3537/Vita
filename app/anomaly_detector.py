@@ -9,9 +9,11 @@ app/biohacking_ingest.py, потому что они реально связан
    данные" из Collect_Biohacking_Data) → здесь прямой вызов
    `run_daily_check()` из biohacking_ingest.py, тот же процесс.
 2. Ежедневно 09:15 ВЛ (было Daily Schedule Trigger) → `run_scheduler()`.
-3. Еженедельно по воскресеньям 11:00 ВЛ (было Weekly Schedule Trigger,
-   подтверждено по execution_entity: оба недавних прогона — 13 и 20
-   сентября — воскресенье) → `run_weekly_scheduler()`.
+3. Еженедельно по воскресеньям 11:00 ВЛ (было Weekly Schedule Trigger) —
+   `run_weekly_scheduler()`/канал этого дайджеста убран 2026-09-26 («стоп-
+   кровь каналов», часть 2.5: третье упоминание одних и тех же аномалий).
+   `run_weekly_digest()`/`build_weekly_digest()` остаются в коде, просто
+   ничто их больше не вызывает по расписанию.
 
 Z-score движок (детект отклонений по 7/30/90-дневным окнам с гейтом
 минимальной абсолютной дельты) перенесён 1:1, включая гейт на шум
@@ -80,7 +82,6 @@ logger = logging.getLogger(__name__)
 CHAT_ID = "8956401"
 DAILY_HOUR_VL = 9
 DAILY_MINUTE_VL = 15
-WEEKLY_HOUR_VL = 11
 
 HEALTH_DB_SHEET_ID = "1M8focgZBHCbhLEQb4GoyxTYxedA-FcdjQ_XakX5SG2w"
 ANOMALY_ALERT_KEEP_DAYS = 3
@@ -262,20 +263,27 @@ def detect_anomalies(daily_rows: list[dict], metrics: list[dict]) -> list[dict]:
 
 
 def _format_line(a: dict) -> str:
+    """«Стоп-кровь каналов» (2026-09-26, часть 1.3): z=/baseline≈ убраны из
+    текста — тот самый жаргон, который проект уже запретил для недельного
+    советника ("Запрещены слова: z-score, baseline, медиана. По-человечески"),
+    здесь жил нетронутым. Числа никуда не делись (z и baseline_mean остаются
+    в самом словаре `a`, попадают в БД как раньше) — из ЧЕЛОВЕЧЕСКОГО текста
+    уходит только язык, не данные."""
     arrow = "↑" if a["z"] > 0 else "↓"
     sev = "🔴 сильное" if a["severity"] == "strong" else "🟡 умеренное"
-    return f"{sev} отклонение — {a['label']}: {a['value']} ({arrow} z={a['z']} за окно {a['window']}, baseline≈{a['baseline_mean']}) — {a['interpretation']}"
+    return f"{sev} отклонение — {a['label']}: {a['value']} ({arrow} обычно ~{a['baseline_mean']}, за {a['window']}) — {a['interpretation']}"
 
 
 def _format_series_line(a: dict) -> str:
     """«Мост аномалия -> действие» (2026-09-25, Часть 1.2) — эскалированная
     серия (3 moderate за 7 дней) визуально отличается от одиночного strong-
     отклонения: честно об этом в тексте, не притворяется, что это тот же
-    сильный z-score за один день."""
+    сильный z-score за один день. z=/baseline≈ убраны тем же приёмом, что и
+    _format_line() (см. её докстринг, «стоп-кровь каналов» 2026-09-26)."""
     arrow = "↑" if a["z"] > 0 else "↓"
     return (f"🟠 серия умеренных ({anomaly_disposition.SERIES_MIN_COUNT}× за "
             f"{anomaly_disposition.SERIES_WINDOW_DAYS}д) — {a['label']}: {a['value']} "
-            f"({arrow} z={a['z']} за окно {a['window']}, baseline≈{a['baseline_mean']}) — {a['interpretation']}")
+            f"({arrow} обычно ~{a['baseline_mean']}, за {a['window']}) — {a['interpretation']}")
 
 
 # =====================================================================
@@ -416,9 +424,27 @@ def run_daily_check() -> None:
         conn.commit()
 
     if alertable:
+        # «Стоп-кровь каналов» (2026-09-26, часть 1.4): раньше уходило через
+        # notify.notify(..., "critical", ...) — сервисный бот, который не
+        # читает входящие. Текст явно просит ответить (REPLY_HINT), но
+        # ответить в этот чат физически нельзя — отвечать умеет только бот
+        # доктора. Правило тикета буквально: "канал, который спрашивает,
+        # обязан слышать" — поэтому шлём напрямую ботом доктора, минуя
+        # notify() (и его CRITICAL_DAILY_BUDGET=2/день: та же логика, что уже
+        # применена к red_flag в notify.py — "ВСЕГДА немедленно, ВНЕ
+        # дневного бюджета", это safety-релевантные, редкие по построению
+        # (strong z-score) отклонения, не источник шума). Журнал/бюджет всё
+        # равно ведётся — log_external_send(), тот же контракт, что у
+        # _deliver_emergency/anamnesis/nutrition_reports.
+        from app.doctor import telegram as doctor_telegram
+
         lines = [_format_series_line(a) if sev == "moderate_series" else _format_line(a) for a, sev in alertable]
-        notify.notify("anomaly_detector", "critical",
-                      f"🚨 Обнаружены аномалии за {day}\n\n" + "\n".join(lines) + f"\n\n{anomaly_disposition.REPLY_HINT}")
+        text = f"🚨 Обнаружены аномалии за {day}\n\n" + "\n".join(lines) + f"\n\n{anomaly_disposition.REPLY_HINT}"
+        try:
+            doctor_telegram.send_message(CHAT_ID, text)
+            notify.log_external_send("anomaly_detector", "critical")
+        except Exception:
+            logger.exception("anomaly_detector: не удалось отправить алерт ботом доктора")
     if moderate:
         lines = [_format_line(a) for a in moderate]
         notify.notify("anomaly_detector", "normal", f"🟡 Умеренные отклонения за {day}\n\n" + "\n".join(lines))
@@ -550,14 +576,9 @@ def run_daily_scheduler() -> None:
             time.sleep(3600)
 
 
-def run_weekly_scheduler() -> None:
-    logger.info("anomaly_detector weekly scheduler: старт (вс %02d:00 ВЛ)", WEEKLY_HOUR_VL)
-    while True:
-        try:
-            _sleep_until(WEEKLY_HOUR_VL, 0, weekday=6)  # 6 = воскресенье (Python Monday=0)
-            run_weekly_digest()
-            run_log.mark_run("anomaly_detector_weekly")
-        except Exception as e:
-            logger.exception("anomaly_detector: run_weekly_digest упал — повтор через неделю")
-            alert_on_failure("anomaly_detector_weekly", e)
-            time.sleep(3600)
+    # «Стоп-кровь каналов» (2026-09-26, часть 2.5): run_weekly_scheduler()
+    # (воскресенье 11:00) убран — канал был третьим упоминанием одних и тех
+    # же аномалий (уже были алертами и попадают в «судьбы» недельного
+    # разбора советника). run_weekly_digest()/build_weekly_digest() выше
+    # остаются нетронутыми (backend-агрегация), просто ничто их больше не
+    # вызывает по расписанию.

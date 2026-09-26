@@ -57,6 +57,60 @@ def test_critical_over_budget_lands_in_digest(monkeypatch):
         assert f"в бюджете {i}" not in sent[0]  # немедленные не дублируются в дайджест
 
 
+# ─────── «Стоп-кровь каналов» (2026-09-26, часть 1.1) — retry, не тихая потеря ───────
+
+def test_failed_send_leaves_items_pending_for_next_run(monkeypatch):
+    """Раньше _rest_blocks() помечал delivered_in_digest=true ДО отправки —
+    неудачный send терял пункты навсегда. Теперь помечаем ТОЛЬКО при успехе."""
+    monkeypatch.setattr(digest.notify, "_send", lambda text, parse_mode=None: False)
+    notify.notify("gate_watch", "normal", "пункт, который не должен потеряться")
+
+    res = digest.build_and_send()
+    assert res == {"sections": 1, "sent": False}
+
+    # тот же день, второй прогон — теперь отправка удаётся, пункт доезжает
+    monkeypatch.setattr(digest.notify, "_send", lambda text, parse_mode=None: True)
+    res2 = digest.build_and_send()
+    assert res2 == {"sections": 1, "sent": True}
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT count(*) FROM {schema()}.notify_log WHERE source = 'gate_watch' AND delivered_in_digest = true"
+        )
+        assert cur.fetchone()[0] == 1
+
+
+def test_failed_send_does_not_write_digest_sent_log_row(monkeypatch):
+    monkeypatch.setattr(digest.notify, "_send", lambda text, parse_mode=None: False)
+    notify.notify("gate_watch", "normal", "пункт")
+    digest.build_and_send()
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {schema()}.notify_log WHERE source = 'digest_sent'")
+        assert cur.fetchone()[0] == 0
+
+
+def test_repeated_failures_escalate_via_alert_on_failure(monkeypatch):
+    digest._consecutive_failures = 0
+    monkeypatch.setattr(digest.notify, "_send", lambda text, parse_mode=None: False)
+    escalations = []
+    monkeypatch.setattr(digest, "alert_on_failure", lambda source, exc: escalations.append((source, str(exc))))
+
+    for i in range(digest.FAILURE_ALERT_THRESHOLD):
+        notify.notify("gate_watch", "normal", f"пункт {i}")
+        digest.build_and_send()
+
+    assert escalations and escalations[-1][0] == "digest_delivery"
+    digest._consecutive_failures = 0  # не протекает в другие тесты этого файла
+
+
+def test_success_resets_failure_streak(monkeypatch):
+    digest._consecutive_failures = digest.FAILURE_ALERT_THRESHOLD - 1
+    monkeypatch.setattr(digest.notify, "_send", lambda text, parse_mode=None: True)
+    notify.notify("gate_watch", "normal", "пункт")
+    digest.build_and_send()
+    assert digest._consecutive_failures == 0
+
+
 def test_anamnesis_and_nutrition_reports_no_longer_flow_through_digest(monkeypatch):
     """2026-09-24 (тикет «раскладка ботов по тематическим чатам»): оба источника
     доставляют себя сами (log_external_send), не через notify() — значит и не

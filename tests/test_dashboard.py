@@ -165,8 +165,14 @@ def test_dashboard_health_endpoint_shape():
     body = r.json()
     for key in ("updated_at", "today", "metrics", "days_14", "trends",
                 "investigations", "medical_notes_recent", "anomalies",
-                "action_loops", "correlations", "experiments", "experiments_note"):
+                "action_loops"):
         assert key in body
+    # «Стоп-кровь каналов» (2026-09-26, часть 2.2): correlations/experiments —
+    # заглушки отключённого движка, мёртвые поля без потребителя — убраны из
+    # ответа совсем, не проверяем их отсутствием ключа И значением сразу.
+    assert "correlations" not in body
+    assert "experiments" not in body
+    assert "experiments_note" not in body
     assert isinstance(body["metrics"], list) and len(body["metrics"]) > 0
     assert isinstance(body["days_14"], list)
     # D9 (аудит логики, 2026-09-23): action_loops был мёртвым полем — фронт его
@@ -175,8 +181,6 @@ def test_dashboard_health_endpoint_shape():
     keys = {m["key"] for m in body["metrics"]}
     assert "hrv" in keys and "steps_today_live" in keys
     assert body["anomalies"]["status"] in ("flagged", "clean", "not_run")
-    assert body["correlations"] == {"computed": None, "disabled": True, "priority": [], "discovery": []}
-    assert body["experiments"] == []
 
 
 def test_dashboard_health_surfaces_action_loops():

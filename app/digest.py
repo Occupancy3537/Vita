@@ -25,58 +25,89 @@ logger = logging.getLogger(__name__)
 DIGEST_HOUR_VL = 21
 DIGEST_MINUTE_VL = 50
 
+# «Стоп-кровь каналов» (2026-09-26, часть 1.1): раньше _rest_blocks() помечал
+# delivered_in_digest=true СРАЗУ при чтении, до всякой попытки отправки —
+# неудачный send() терял пункты навсегда и молча (классическая "тихая потеря
+# данных", риск №1 проекта). Теперь: читаем БЕЗ пометки -> пытаемся отправить
+# -> помечаем доставленными ТОЛЬКО при успехе. Неудача оставляет пункты
+# pending — следующий прогон (завтра) заберёт их снова, ничего не потеряно.
+# Счётчик подряд идущих неудач — в памяти процесса (как _last_write в
+# run_log.py: сбрасывается при рестарте, это не риск потери данных, только
+# риск чуть более поздней эскалации) — после FAILURE_ALERT_THRESHOLD подряд
+# неудачных попыток шлём critical через alert_on_failure — ДРУГОЙ путь
+# (err_dedup -> issue_log -> notify(critical), не голый notify._send() —
+# если сам send() методично не работает несколько дней подряд, дайджест-канал
+# явно ненадёжен, и рабочий путь эскалации не должен зависеть только от него).
+FAILURE_ALERT_THRESHOLD = 3
+_consecutive_failures = 0
 
-def _rest_blocks(cur, day: str) -> list[str]:
-    """Всё, накопленное за день (жёлтые аномалии, critical сверх бюджета,
-    недельные/месячные отчёты в свой день, находки issue_review и т.п.) —
-    в порядке накопления (ts). anamnesis/nutrition_reports сюда больше не
-    попадают — у них свои каналы, см. докстринг модуля."""
+
+def _pending_blocks(cur, day: str) -> list[tuple[int, str]]:
+    """Всё, накопленное за день и ЕЩЁ НЕ доставленное (жёлтые аномалии, critical
+    сверх бюджета, недельные/месячные отчёты в свой день, находки issue_review
+    и т.п.) — в порядке накопления (ts). anamnesis/nutrition_reports сюда
+    больше не попадают — у них свои каналы, см. докстринг модуля. Читает, но
+    НЕ помечает доставленным — это делает _mark_delivered() после успешной
+    отправки."""
     cur.execute(
         f"SELECT id, text FROM {schema()}.notify_log "
         "WHERE sent_date = %s AND immediate = false AND delivered_in_digest = false "
         "ORDER BY ts",
         (day,),
     )
-    rows = cur.fetchall()
-    if rows:
+    return [(r[0], r[1]) for r in cur.fetchall() if r[1]]
+
+
+def _mark_delivered(ids: list[int]) -> None:
+    if not ids:
+        return
+    with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            f"UPDATE {schema()}.notify_log SET delivered_in_digest = true "
-            "WHERE id = ANY(%s)",
-            ([r[0] for r in rows],),
+            f"UPDATE {schema()}.notify_log SET delivered_in_digest = true WHERE id = ANY(%s)",
+            (ids,),
         )
-    return [r[1] for r in rows if r[1]]
+        conn.commit()
 
 
 def build_and_send() -> dict:
     """Собирает и шлёт (если есть что). Возвращает {"sections": int, "sent": bool}
     — удобно для тестов, ничего не бросает наружу (обёрнуто в run_scheduler)."""
+    global _consecutive_failures
     day = timeutil.today().isoformat()
-    sections: list[str] = []
 
-    # всё, что скопилось за день (anamnesis/nutrition_reports больше не сюда —
-    # см. докстринг модуля).
     with get_conn() as conn, conn.cursor() as cur:
-        rest = _rest_blocks(cur, day)
-        conn.commit()
-    sections.extend(rest)
+        pending = _pending_blocks(cur, day)
 
-    if not sections:
+    if not pending:
         logger.info("digest: за %s копить нечего — не шлём", day)
         return {"sections": 0, "sent": False}
 
-    combined = "\n\n———\n\n".join(sections)
+    ids = [row[0] for row in pending]
+    combined = "\n\n———\n\n".join(row[1] for row in pending)
     ok = notify._send(combined)  # прямая единичная отправка — сам дайджест не через notify()
     # (иначе стал бы ещё одной "digest"-строкой в своём же журнале рекурсивно)
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            f"INSERT INTO {schema()}.notify_log (sent_date, source, priority, immediate, text) "
-            "VALUES (%s, 'digest_sent', 'digest', true, %s)",
-            (day, f"{len(sections)} секций"),
-        )
-        conn.commit()
-    if not ok:
-        logger.error("digest: отправка дайджеста за %s не удалась", day)
-    return {"sections": len(sections), "sent": ok}
+
+    if ok:
+        _mark_delivered(ids)
+        _consecutive_failures = 0
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO {schema()}.notify_log (sent_date, source, priority, immediate, text) "
+                "VALUES (%s, 'digest_sent', 'digest', true, %s)",
+                (day, f"{len(pending)} секций"),
+            )
+            conn.commit()
+    else:
+        _consecutive_failures += 1
+        logger.error("digest: отправка дайджеста за %s не удалась (%d подряд) — %d пунктов остаются pending",
+                     day, _consecutive_failures, len(pending))
+        if _consecutive_failures >= FAILURE_ALERT_THRESHOLD:
+            alert_on_failure(
+                "digest_delivery",
+                RuntimeError(f"дайджест не отправляется {_consecutive_failures} раз(а) подряд, "
+                            f"{len(pending)} пунктов копится в pending"),
+            )
+    return {"sections": len(pending), "sent": ok}
 
 
 def run_scheduler() -> None:
