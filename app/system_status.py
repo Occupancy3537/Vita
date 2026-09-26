@@ -91,6 +91,8 @@ LOOPS: list[dict] = [
      "flag": "MONTHLY_TREND_ENABLED"},
     {"key": "outcomes_report", "n": "Мета-отчёт вердиктов", "s": "1-го числа 09:00",
      "flag": "OUTCOMES_REPORT_ENABLED"},
+    {"key": "lab_reminder", "n": "Напоминание о панели анализов", "s": "ежедневно 08:30",
+     "flag": "LAB_REMINDER_ENABLED"},
     {"key": "issue_review", "n": "Разбор бэклога находок", "s": "по воскресеньям 19:00",
      "flag": "ISSUE_REVIEW_ENABLED"},
     {"key": "research_scan", "n": "Научный контур — скан публикаций", "s": "по воскресеньям 21:50",

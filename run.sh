@@ -112,6 +112,12 @@
 # строка в дайджест (пусто -> строки нет). Данные + API (/outcomes/detail,
 # /outcomes/quarterly, DASHBOARD_TOKEN) — витрина в Vita v2, не здесь; новых
 # секретов не требует.
+# 2026-09-26 (тикет «оптимизатор сдачи анализов»): LAB_REMINDER_ENABLED —
+# ежедневная проверка (08:30 ВЛ) плана панелей (app/lab_optimizer.py) —
+# «панель созревает через 3 дня» одной строкой в дайджест, молчит, если
+# ничего не подходит под окно. Данные + API (/labs/plan, /labs/request,
+# DASHBOARD_TOKEN) — витрина «План» в Vita v2, не здесь; новых секретов
+# не требует.
 # 2026-09-21 (#38/#46, аудит ZCode): set -e без -u пропускал незаданную
 # переменную молча — `-e CARD_PG_PASSWORD=""` собирает контейнер, /health
 # отдаёт 200, а сбой (пустой пароль БД, пустой токен бота и т.п.) всплывает
@@ -181,6 +187,7 @@ sudo docker run -d \
   -e CONSILIUM_SCHEDULER_ENABLED=1 \
   -e PROBLEM_MAINTENANCE_ENABLED=1 \
   -e OUTCOMES_REPORT_ENABLED=1 \
+  -e LAB_REMINDER_ENABLED=1 \
   -e YANDEX_IOT_TOKEN="$YANDEX_IOT_TOKEN" \
   -e CARD_GOOGLE_CLIENT_ID="$CARD_GOOGLE_CLIENT_ID" \
   -e CARD_GOOGLE_CLIENT_SECRET="$CARD_GOOGLE_CLIENT_SECRET" \

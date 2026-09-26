@@ -26,7 +26,7 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 # Без этого logger.info() из app.doctor.poller/dispatch нигде не виден (Python
 # по умолчанию показывает только WARNING+) — а это единственный канал видеть,
@@ -113,6 +113,8 @@ import app.people as people
 import app.system_status as system_status
 import app.outcomes_report as outcomes_report
 import app.err_dedup as err_dedup
+import app.lab_optimizer as lab_optimizer
+import app.lab_reminder as lab_reminder
 from app.biohacking_ingest import BiohackingPayload, process_ingest
 from app.write_path import process as process_source
 from app.vita import router as vita_router
@@ -176,6 +178,10 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # Тикет «хвост» (2026-09-26, Часть 3) — мета-отчёт «что на мне работает»,
     # пересчёт 1-го числа + одна строка в дайджест (пусто -> строки нет).
     ("OUTCOMES_REPORT_ENABLED", lambda: outcomes_report.run_scheduler(), "outcomes-report-scheduler"),
+    # Тикет «оптимизатор сдачи анализов» (2026-09-26, Часть 3.3) — ежедневная
+    # проверка «панель созревает через 3 дня», одна строка в дайджест на
+    # панель (не на каждый маркер), молчит, если ничего не подходит под окно.
+    ("LAB_REMINDER_ENABLED", lambda: lab_reminder.run_scheduler(), "lab-reminder-scheduler"),
     # «Научный контур» (2026-09-25): единственная цель VISION со статусом «ноль».
     ("RESEARCH_SCAN_ENABLED", lambda: research_scan.run_scheduler(), "research-scan-scheduler"),
     # 2026-09-21: Food diary_v5 — свой бот (vlad_health), свой polling-цикл,
@@ -389,6 +395,66 @@ def outcomes_quarterly(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return outcomes_report.quarterly_summary(cur)
+
+
+@app.get("/labs/plan")
+def labs_plan(token: str = Query(default=""), horizon_days: int = Query(default=180),
+              max_per_draw: int = Query(default=12)) -> dict:
+    """Тикет «оптимизатор сдачи анализов» (2026-09-26, Часть 3.4) — план панелей
+    на N дней вперёд (данные + API; витрина «План» — Vita v2, экран не здесь).
+    Тот же DASHBOARD_TOKEN, что остальные /dashboard/* и /outcomes/* — НЕ в
+    nginx-вайтлисте (K1, см. AGENT_SYNC #92), доступен только с 127.0.0.1
+    до появления экрана Vita, сознательно."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return lab_optimizer.generate_plan(cur, horizon_days=horizon_days, max_per_draw=max_per_draw)
+
+
+class LabRequestSyncRequest(BaseModel):
+    marker_code: str
+    source_type: str  # visit | consilium | recommendation | intervention_monitor | phenoage_panel | standing
+    source_id: Optional[str] = None
+    source_ref: Optional[str] = None
+    reason: Optional[str] = None
+    due_date: Optional[date] = None
+    urgent: bool = False
+
+
+class LabRequestSyncResponse(BaseModel):
+    id: str
+    created: bool
+
+
+@app.post("/labs/request", response_model=LabRequestSyncResponse)
+def labs_request_sync(req: LabRequestSyncRequest) -> LabRequestSyncResponse:
+    """Часть 3.2 — точка входа для одноразовых запросов, которые движок не
+    может вывести живым запросом сам (доктор/визит/консилиум сказали
+    «пересдай X через N дней» без структурированного expectation.metric_key —
+    см. докстринг app/lab_optimizer.py). Идемпотентно по source_ref, как
+    остальные /*/sync в этом файле: повторная отправка не плодит дубли."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if req.source_ref:
+                cur.execute(
+                    sql.SQL("SELECT id FROM {t} WHERE source_ref = %s AND status = 'open'")
+                    .format(t=sql.Identifier(schema(), "lab_request")),
+                    (req.source_ref,),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    return LabRequestSyncResponse(id=existing[0], created=False)
+            new_id = f"lr_{ULID()}"
+            cur.execute(
+                sql.SQL(
+                    "INSERT INTO {t} (id, marker_code, source_type, source_id, source_ref, reason, due_date, urgent) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+                ).format(t=sql.Identifier(schema(), "lab_request")),
+                (new_id, req.marker_code, req.source_type, req.source_id, req.source_ref,
+                 req.reason, req.due_date, req.urgent),
+            )
+        conn.commit()
+    return LabRequestSyncResponse(id=new_id, created=True)
 
 
 @app.get("/dashboard/system-status")

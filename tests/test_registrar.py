@@ -397,6 +397,27 @@ _ROWS_2 = [
 ]
 
 
+def test_persist_document_marks_open_manual_lab_request_fulfilled(lab_doc):
+    """Тикет «оптимизатор сдачи анализов» (2026-09-26, Часть 3.1) — живой тест:
+    новый лабораторный документ автоматически сдвигает план (открытый ручной
+    запрос на этот же код закрывается), без отдельного шага руками."""
+    from ulid import ULID
+    req_id = f"lr_test_{ULID()}"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.lab_request (id, marker_code, source_type, reason, status) "
+            "VALUES (%s, 'M041', 'visit', 'тест', 'open')",
+            (req_id,),
+        )
+        conn.commit()
+
+    registrar.persist_document({"lab_name": "Инвитро", "notes": ""}, {"rows": _ROWS_2}, "2026-09-15")
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT status FROM {schema()}.lab_request WHERE id = %s", (req_id,))
+        assert cur.fetchone()[0] == "fulfilled"
+
+
 def test_partial_persist_retries_once_and_succeeds(lab_doc, monkeypatch):
     """Один маркер падает на первой попытке — повтор дозальёт его (идемпотентно)."""
     import app.main as main_mod

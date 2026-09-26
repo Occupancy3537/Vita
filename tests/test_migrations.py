@@ -203,7 +203,11 @@ def test_migrations_reproduce_the_live_schema():
     assert r.returncode == 0, r.stderr
     try:
         newly = migrate.up(scratch_dsn)
-        assert newly == [1]
+        # Не хардкодим число миграций — растёт с каждым новым тикетом, трогающим
+        # схему (0002_lab_request — тикет «оптимизатор сдачи анализов», 2026-09-26).
+        # Важно, что применились ВСЕ по порядку без пропуска, не конкретное число.
+        expected = [v for v, _, _ in migrate.list_migrations()]
+        assert newly == expected
 
         pgdump_cmd = os.environ.get("MIGRATE_PGDUMP_CMD", "pg_dump").split()
 
