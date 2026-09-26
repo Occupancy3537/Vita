@@ -13,9 +13,11 @@ $getWorkflowStaticData (переживает рестарт n8n, хранитс�
 Интервал 15 минут — тот же, что был у исходного Schedule Trigger."""
 import logging
 import time
+from datetime import datetime, timezone
 
 from app.dashboard import get_today_dashboard
 from app.db import get_conn
+from app import issue_log
 from app import notify
 from app import run_log
 from app.scheduler_alert import alert_on_failure
@@ -47,9 +49,32 @@ def check_once() -> None:
         now_blocked = bool(gate.get("blocked"))
         prev_blocked = _last_known_blocked(cur)
 
-        # prev_blocked is None только на самом первом тике после создания
-        # таблицы — не алертим на переход, которого не видели (нет базы для
-        # сравнения), просто запоминаем текущее состояние.
+        # prev_blocked is None — либо самый первый тик после создания таблицы,
+        # либо строка ПОТЕРЯЛАСЬ (тихая потеря — премортем test_gate_watch,
+        # тикет «хвост» 2026-09-26): раньше оба случая обрабатывались
+        # одинаково — молча запоминали текущее состояние, переход мог
+        # потеряться незамеченным. Признак «не первый запуск» — прошлые
+        # успешные прогоны в scheduler_run_log (last_ok_at ещё не переписан
+        # ЭТИМ тиком — run_scheduler() вызывает run_log.mark_run() ПОСЛЕ
+        # check_once(), так что здесь это честно "прошлый" успешный прогон).
+        if prev_blocked is None:
+            last_ok = run_log.last_ok_at("gate_watch")
+            if last_ok is not None:
+                window_start = last_ok.astimezone(timezone.utc).isoformat(timespec="minutes")
+                window_end = datetime.now(timezone.utc).isoformat(timespec="minutes")
+                summary = (
+                    f"health.gate_state пуста, хотя цикл раньше успешно работал "
+                    f"(последний прогон — {window_start}). Состояние гейта могло "
+                    f"потеряться в окне {window_start}–{window_end} — возможен "
+                    f"пропущенный переход, который никто не увидел."
+                )
+                issue_log.record_issue(cur, "gate_watch_state_lost", "gate_watch", summary, severity="critical")
+                notify.notify("gate_watch", "critical", f"🔴 <b>Состояние гейта нагрузки потеряно</b>\n\n{summary}",
+                              parse_mode="HTML")
+            _store_blocked(cur, now_blocked)
+            conn.commit()
+            return
+
         if prev_blocked is True and now_blocked is False:
             notify.notify(
                 "gate_watch", "critical",

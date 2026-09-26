@@ -111,6 +111,7 @@ import app.host_metrics as host_metrics
 import app.medpassport as medpassport
 import app.people as people
 import app.system_status as system_status
+import app.outcomes_report as outcomes_report
 import app.err_dedup as err_dedup
 from app.biohacking_ingest import BiohackingPayload, process_ingest
 from app.write_path import process as process_source
@@ -172,6 +173,9 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # предупреждениями: не критичные, нерешённые находки — раз в неделю, не
     # ежедневно и не на экране «Настройки» постоянно). См. app/issue_review.py.
     ("ISSUE_REVIEW_ENABLED", lambda: issue_review.run_scheduler(), "issue-review-scheduler"),
+    # Тикет «хвост» (2026-09-26, Часть 3) — мета-отчёт «что на мне работает»,
+    # пересчёт 1-го числа + одна строка в дайджест (пусто -> строки нет).
+    ("OUTCOMES_REPORT_ENABLED", lambda: outcomes_report.run_scheduler(), "outcomes-report-scheduler"),
     # «Научный контур» (2026-09-25): единственная цель VISION со статусом «ноль».
     ("RESEARCH_SCAN_ENABLED", lambda: research_scan.run_scheduler(), "research-scan-scheduler"),
     # 2026-09-21: Food diary_v5 — свой бот (vlad_health), свой polling-цикл,
@@ -362,6 +366,29 @@ def dashboard_consilium(token: str = Query(default="")) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return consilium.get_consilium_reports(cur)
+
+
+@app.get("/outcomes/detail")
+def outcomes_detail(token: str = Query(default="")) -> dict:
+    """Мета-отчёт «что на мне работает» (тикет «хвост», 2026-09-26, Часть 3) —
+    все вердикты по рекомендациям, по одной строке, с метрикой/окном/
+    конфаундерами/трассировкой до рекомендации и публикации. Данные + API —
+    здесь; полная витрина — секция «Программа» в Vita v2, не отдельная страница."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return {"items": outcomes_report.get_outcomes_detail(cur)}
+
+
+@app.get("/outcomes/quarterly")
+def outcomes_quarterly(token: str = Query(default="")) -> dict:
+    """Квартальная агрегация того же мета-отчёта — счётчики по исходам, тренд
+    доли «работает» (effective+partial) против прошлого квартала, список
+    закрытых рекомендаций с исходом."""
+    _check_dashboard_token(token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return outcomes_report.quarterly_summary(cur)
 
 
 @app.get("/dashboard/system-status")
