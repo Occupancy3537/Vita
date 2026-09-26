@@ -81,6 +81,43 @@ def test_format_dossier_includes_meals_and_meds():
     assert "у тебя низкий D" in text
 
 
+def test_format_dossier_includes_gate_and_active_problems():
+    """«Досье — тонкое ядро» (2026-09-26, Часть 1.1) — gate_status/active_problems:
+    новые блоки ЯДРА, рендерятся так же, как остальные."""
+    dossier = {
+        "memory": {"bracelet": [], "hot": [], "cold": []},
+        "gate_status": {"blocked": True, "condition": "Грыжа L5/S1", "contra": "бег, прыжки",
+                        "allowed": "ходьба, плавание"},
+        "active_problems": [{"id": "p1", "title": "Боль в боку 10 лет", "icd_hint": "R10.9", "opened": "2026-09-01"}],
+    }
+    text = prompt.format_dossier(dossier, "2026-09-26")
+    assert "МЕДИЦИНСКОЕ ОГРАНИЧЕНИЕ" in text
+    assert "Грыжа L5/S1" in text and "бег, прыжки" in text
+    assert "АКТИВНЫЕ ПРОБЛЕМЫ" in text
+    assert "Боль в боку 10 лет" in text
+
+
+def test_format_dossier_gate_not_blocked_has_no_restriction_section():
+    dossier = {"memory": {"bracelet": [], "hot": [], "cold": []}, "gate_status": {"blocked": False}}
+    text = prompt.format_dossier(dossier, "2026-09-26")
+    assert "МЕДИЦИНСКОЕ ОГРАНИЧЕНИЕ" not in text
+
+
+def test_format_dossier_thin_core_omits_routed_sections():
+    """Досье без маршрутизированных блоков (тема не распознана) — секции
+    питания/лаб/публикаций/консилиумов просто отсутствуют, не падает."""
+    dossier = {
+        "memory": {"bracelet": [], "hot": [], "cold": []},
+        "gate_status": {"blocked": False}, "active_problems": [], "active_meds": [],
+        "garmin_yesterday": None, "open_investigations": [],
+    }
+    text = prompt.format_dossier(dossier, "2026-09-26")
+    for absent in ("ПИТАНИЕ СЕГОДНЯ", "ЛАБЫ ВНЕ РЕФЕРЕНСА", "СВЕЖИЕ ПУБЛИКАЦИИ",
+                   "ПОСЛЕДНИЕ ИТОГИ КОНСИЛИУМОВ", "УЖЕ ЗАПЛАНИРОВАННЫЕ АНАЛИЗЫ",
+                   "ИСТОРИЯ РЕШЕНИЙ ПО АНОМАЛИЯМ", "КЛИМАТ В КОМНАТЕ"):
+        assert absent not in text
+
+
 def test_format_dossier_includes_consilium_summaries():
     """Консилиум специалистов (2026-09-25, Часть 4.3) — доктор видит, что уже
     решено коллегами, и не переспрашивает заново."""

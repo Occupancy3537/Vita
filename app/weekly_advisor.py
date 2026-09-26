@@ -35,10 +35,12 @@ from typing import Optional
 
 import httpx
 
+from psycopg import sql
+
 from app import detective, llm_usage
 from app.ai_models import DEFAULT_MODEL
 from app.dashboard import _dkey, _num
-from app.db import get_conn
+from app.db import get_conn, schema
 from app import notify
 from app.patient_gate import profile_hernia_active, profile_swim_allowed, load_gate
 from app import run_log, timeutil
@@ -611,7 +613,7 @@ def build_prompt(ctx: dict) -> str:
 - medications — card_active (картотека Meds: препарат, класс, доза, зачем, кто назначил), card_stopped_recent (курсы, законченные за 90 дн), daily_log_current (фактический приём по дневнику Daily_Trends), changes_last_90d (старты/стопы по дневнику). ВСЕГДА проверяй: не совпадает ли сдвиг метрики (HRV, сон, стресс) со стартом или окончанием курса — особенно смотри card_stopped_recent (пример: курс кончился → метрика возвращается к исходной). Если card_active и daily_log_current расходятся — скажи об этом одной фразой, попроси Влада свериться.
 - past_recommendations — что ты советовал раньше. Если проблема та же и совет не выполнен — скажи об этом одной фразой, не переобъясняй. Фокус на новом.
 - anomalies_last_7d / 30d — метрики, отклонявшиеся от его индивидуальной нормы. worsening = в плохую сторону, strong = сильно, count = дней. Подсказки «посмотри сюда», не диагнозы.
-- anomaly_fates — судьба каждой сильной/эскалированной аномалии недели: pending (решение не принято), investigate (Влад разбирается), suppress (временно заглушено). Упомяни одной строкой в разборе, если там что-то есть — не пересказывай anomalies_last_7d ещё раз, это про статус решения, не про сами цифры.
+- anomaly_fates — судьба каждой сильной/эскалированной аномалии недели: pending (решение не принято), investigate (Влад разбирается), suppress (временно заглушено). Используй как контекст при выборе действий (не предлагай то, что уже разбирается) — в текст разбора отдельно не выноси, новые/изменившиеся судьбы код печатает отдельной строкой сам («досье — тонкое ядро», 2026-09-26, Часть 2).
 - correlations.disabled = true — движок корреляций отключён (слепой перебор пар на малых данных = шум). Не упоминай корреляции и «связи в данных». Гипотезы о причинах ищи через symptoms + nutrition + labs напрямую, вывод — «проверить элиминацией / у врача».
 - wellness — week vs prev_week vs last_30d vs last_90d. Смотри и неделя-к-неделе, и на месячный/квартальный тренд. acwr — острая/хроническая нагрузка. acwr_status (LOW / OPTIMAL / HIGH) — вердикт Garmin, он приоритетнее числа: HIGH = риск перегруза (критично при грыже L5/S1), LOW = недобор нагрузки.
 - nutrition.deficits / excesses — среднее за день против его целевых норм (в процентах).
@@ -627,10 +629,11 @@ def build_prompt(ctx: dict) -> str:
 4. Лаборатория — одной-двумя фразами: текущий PhenoAge и Δ к паспорту; есть ли СЕЙЧАС что-то НОВОЕ вне нормы (стабильные многолетние особенности не пересказывай). Если phenoage пустой — назови, каких маркеров не хватает и что добавить в следующую сдачу.
 5. Спокойная неделя или мало данных — скажи прямо одной фразой, не выдумывай проблемы.
 
-ФОРМАТ ОТВЕТА:
-- Сначала — текст разбора. Максимум 1200 символов. Не влезаешь — режь обоснования, НЕ действия. Начни сразу с сути, без приветствия.
-- Простой текст. Без Markdown (звёздочки, решётки, жирный). Абзацы и редкие эмодзи.
-- Запрещены слова: z-score, z-скор, p-value, p-значение, стандартное отклонение, baseline, медиана. По-человечески.
+ТЕКСТ РАЗБОРА (2026-09-26, «досье — тонкое ядро», Часть 2.5: Владу больше не
+показывается напрямую — код печатает только дельту от прошлой недели отдельно;
+этот текст остаётся только для истории/аудита и как твоё собственное
+рассуждение перед машинным блоком):
+- Коротко, 2-4 предложения. Простой текст, без Markdown. Запрещены слова: z-score, p-value, стандартное отклонение, baseline, медиана.
 - Не назначай препараты и дозы. Про грыжу — только режим. Про терапию — «обсуди с лечащим врачом», но не назначай.
 
 МАШИННЫЙ БЛОК (обязателен, в самом конце, СРАЗУ после текста разбора, в лимит 1200 не входит):
@@ -1112,6 +1115,121 @@ def _format_anomaly_fates_table(fates: list[dict]) -> str:
     return "📋 Аномалии недели с судьбами:\n" + "\n".join(lines)
 
 
+# =====================================================================
+# Дельта недели (2026-09-26, «досье — тонкое ядро», Часть 2) — Владу
+# печатается ТОЛЬКО изменившееся с прошлого разбора, не пересчёт картины
+# заново. Якорь состояния — Date прошлой строки health.recommendations_log
+# (_prev_weekly() выше, уже существующий механизм) — новое хранилище не
+# потребовалось: вердикты/судьбы аномалий фильтруются по времени прямо в БД
+# (ts_computed/disposed_ts > since_date), тренды — из уже посчитанного
+# ctx['wellness'] (week vs prev_week, build_context выше), вторая аналитика
+# не изобреталась нигде в этом блоке.
+# =====================================================================
+
+WEEKLY_REPORT_MAX_CHARS = 900  # Часть 2.4 — лимит длины обрезкой в коде, не просьбой в промпте
+
+_TREND_SHIFT_MIN_RATIO = 0.10  # 10% от прошлой недели — простой порог значимости,
+# тот же принцип, что min_abs_delta в dashboard.py::METRIC_CONFIG, не новая
+# персональная база с нуля.
+_TREND_METRICS = [  # (label, wellness-ключ, единица, направление "лучше")
+    ("Сон", "sleep_min", "мин", "higher_better"),
+    ("HRV", "hrv", "мс", "higher_better"),
+    ("Пульс покоя", "rhr", "уд/мин", "lower_better"),
+    ("Стресс", "stress", "", "lower_better"),
+]
+
+
+def _significant_trend_shifts(wellness: dict) -> list[str]:
+    week, prev = wellness.get("week") or {}, wellness.get("prev_week") or {}
+    lines = []
+    for label, key, unit, direction in _TREND_METRICS:
+        v, p = week.get(key), prev.get(key)
+        if v is None or p is None or not p:
+            continue
+        if abs(v - p) / abs(p) < _TREND_SHIFT_MIN_RATIO:
+            continue
+        better = (v > p) if direction == "higher_better" else (v < p)
+        arrow = "выше" if v > p else "ниже"
+        word = "лучше" if better else "хуже"
+        unit_s = f" {unit}" if unit else ""
+        lines.append(f"{label}: {arrow}, чем на прошлой неделе ({p:g}{unit_s} → {v:g}{unit_s}) — {word}")
+    return lines
+
+
+def _new_recommendations_line(actions: list[dict]) -> Optional[str]:
+    if not actions:
+        return None
+    parts = [a["title"] + (f" — {a['why']}" if a.get("why") else "") for a in actions]
+    return "Новое на неделю: " + "; ".join(parts) + "."
+
+
+def _verdicts_since(cur, since_date: Optional[str]) -> Optional[str]:
+    """Одной сводной строкой, БЕЗ повторения деталей — сами вердикты уже
+    показаны в ленте решений как уведомления (П3: один факт — одно место,
+    «Пересборка вычитанием», 2026-09-26)."""
+    if not since_date:
+        return None
+    cur.execute(
+        sql.SQL("SELECT verdict FROM {t} WHERE status = 'current' AND ts_computed::date > %s")
+        .format(t=sql.Identifier(schema(), "recommendation_verdict")),
+        (since_date,),
+    )
+    verdicts = [r[0] for r in cur.fetchall()]
+    if not verdicts:
+        return None
+    good = sum(1 for v in verdicts if v in ("effective", "partial"))
+    bad = len(verdicts) - good
+    if bad:
+        return f"Вердикты за неделю: {len(verdicts)} — {good} сработало, {bad} нет."
+    return f"Вердикты за неделю: {len(verdicts)}, все сработали."
+
+
+def _fates_since(cur, since_date: Optional[str]) -> list[dict]:
+    """Новые/изменившиеся судьбы аномалий с прошлого разбора — disposed_ts
+    (не сама дата аномалии) обновляется при КАЖДОМ изменении диспозиции, так
+    что фильтр по нему естественно ловит и новые, и изменившиеся решения,
+    без отдельного снимка состояния."""
+    if not since_date:
+        return []
+    cur.execute(
+        sql.SQL("SELECT date, metric_label, metric_key, disposition FROM {t} "
+                "WHERE disposition != 'pending' AND disposed_ts::date > %s ORDER BY disposed_ts")
+        .format(t=sql.Identifier(schema(), "anomaly_disposition")),
+        (since_date,),
+    )
+    return [{"date": str(d), "metric": label or key, "disposition": disp} for d, label, key, disp in cur.fetchall()]
+
+
+def build_weekly_delta_text(cur, ctx: dict, row: dict, prev_weekly: Optional[dict]) -> str:
+    """Собирает то, что реально уходит в Telegram — ровно 5 пунктов Части 2.2
+    (новые рекомендации / вердикты сводно / сдвиги трендов / новости
+    детектива добавляются в run_once() отдельно, как и раньше / новые-
+    изменившиеся судьбы аномалий), либо «спокойная неделя» (Часть 2.3 —
+    правильный результат, не пустой). Alert_Text (эскалация, gate-фильтр,
+    нераспознанные поля) — операционные сигналы, не часть дельты, идут
+    первыми безусловно."""
+    since_date = (prev_weekly or {}).get("Date")
+
+    lines = []
+    new_rec_line = _new_recommendations_line(row.get("actions") or [])
+    if new_rec_line:
+        lines.append(new_rec_line)
+    verdict_line = _verdicts_since(cur, since_date)
+    if verdict_line:
+        lines.append(verdict_line)
+    lines.extend(_significant_trend_shifts(ctx.get("wellness") or {}))
+    fates_table = _format_anomaly_fates_table(_fates_since(cur, since_date))
+    if fates_table:
+        lines.append(fates_table)
+
+    body = "\n\n".join(lines) if lines else "Спокойная неделя, без изменений."
+    if row.get("Alert_Text"):
+        body = row["Alert_Text"] + "\n\n━━━━━━━━━━\n\n" + body
+    if len(body) > WEEKLY_REPORT_MAX_CHARS:
+        body = body[:WEEKLY_REPORT_MAX_CHARS - 1].rstrip() + "…"
+    return body
+
+
 def run_once() -> None:
     with get_conn() as conn, conn.cursor() as cur:
         src = _fetch_all(cur)
@@ -1138,15 +1256,19 @@ def run_once() -> None:
     if summary:
         logger.info("weekly_advisor: card-синхронизация действий недели:\n%s", summary)
 
-    fates_table = _format_anomaly_fates_table(ctx.get("anomaly_fates") or [])
-    if fates_table:
-        row["Telegram_Text"] = row["Telegram_Text"] + "\n\n" + fates_table
+    # «Досье — тонкое ядро; недельный разбор — дельта» (2026-09-26, Часть 2):
+    # row["Telegram_Text"] (текст модели + алерты) хранится в логе как раньше
+    # (write_recommendations_log ниже) — Владу уходит НЕ он, а delta_text,
+    # собранный build_weekly_delta_text() отдельно: только то, что изменилось
+    # с прошлого разбора, плюс сами алерты (эскалация и т.п.) безусловно.
+    with get_conn() as conn, conn.cursor() as cur:
+        delta_text = build_weekly_delta_text(cur, ctx, row, prev_weekly)
 
-    # «Детектив» (2026-09-26, часть 3.3) — тот же приём, что и fates_table:
-    # детерминированный блок, добавляется ПОСЛЕ того, как модель уже написала
-    # текст, не встраивается в сам prompt. Пусто -> "" -> блока в тексте нет.
-    # Сбой анализа не должен ронять весь недельный разбор (тот же принцип, что
-    # у action_loops в dashboard.py) — только сам блок молча отсутствует.
+    # «Детектив» (2026-09-26, часть 3.3) — детерминированный блок, добавляется
+    # ПОСЛЕ дельты, не встраивается в сам prompt. Пусто -> "" -> блока в
+    # тексте нет. Сбой анализа не должен ронять весь недельный разбор (тот же
+    # принцип, что у action_loops в dashboard.py) — только сам блок молча
+    # отсутствует.
     try:
         with get_conn() as conn, conn.cursor() as cur:
             detective_block = detective.build_weekly_block(cur)
@@ -1154,13 +1276,13 @@ def run_once() -> None:
         logger.exception("weekly_advisor: detective.build_weekly_block упал — блок пропущен")
         detective_block = ""
     if detective_block:
-        row["Telegram_Text"] = row["Telegram_Text"] + "\n\n" + detective_block
+        delta_text = delta_text + "\n\n" + detective_block
 
     with get_conn() as conn, conn.cursor() as cur:
         write_recommendations_log(cur, row)
         conn.commit()
 
-    notify.notify("weekly_advisor", "normal", f"🩺 Еженедельный разбор ({row['Date']})\n\n{row['Telegram_Text']}")
+    notify.notify("weekly_advisor", "normal", f"🩺 Еженедельный разбор ({row['Date']})\n\n{delta_text}")
     logger.info("weekly_advisor: разбор недели %s готов, статус=%s", row["Date"], row["Status"])
 
 

@@ -396,8 +396,10 @@ def test_run_once_does_not_leak_card_sync_debug_block_into_telegram_text(monkeyp
 
 
 def test_run_once_appends_detective_block_when_present(monkeypatch):
-    """«Детектив» (2026-09-26, часть 3.3) — тот же приём, что и fates_table:
-    добавляется ПОСЛЕ текста модели, не встраивается в prompt."""
+    """«Детектив» (2026-09-26, часть 3.3) — добавляется ПОСЛЕ дельты недели,
+    не встраивается в prompt. С «досье — тонкое ядро» (Часть 2) Владу уходит
+    delta_text (build_weekly_delta_text), не row["Telegram_Text"] — детектив
+    проверяем по факту ОТПРАВКИ, не по логу."""
     monkeypatch.setattr(wa, "_fetch_all", lambda cur: {"recs": [], "targets": [], "pheno_log": [], "lab_plan": []})
     monkeypatch.setattr(wa, "build_context", lambda s: {"window": {"to": "2026-09-20"}})
     monkeypatch.setattr(wa, "build_prompt", lambda ctx: "промпт")
@@ -405,12 +407,12 @@ def test_run_once_appends_detective_block_when_present(monkeypatch):
     monkeypatch.setattr(wa, "sync_actions_to_card", lambda actions, date, pheno_log=None, lab_plan=None: "")
     monkeypatch.setattr(wa.detective, "build_weekly_block", lambda cur: "🕵️ Детектив:\n«Тест»: что-то нашли")
 
-    written = {}
-    monkeypatch.setattr(wa, "write_recommendations_log", lambda cur, row: written.update(row))
-    monkeypatch.setattr(wa.notify, "notify", lambda source, priority, text: None)
+    monkeypatch.setattr(wa, "write_recommendations_log", lambda cur, row: None)
+    sent = []
+    monkeypatch.setattr(wa.notify, "notify", lambda source, priority, text: sent.append(text))
 
     wa.run_once()
-    assert "🕵️ Детектив" in written["Telegram_Text"]
+    assert "🕵️ Детектив" in sent[0]
 
 
 def test_run_once_detective_failure_does_not_break_weekly_run(monkeypatch):
@@ -426,12 +428,12 @@ def test_run_once_detective_failure_does_not_break_weekly_run(monkeypatch):
         raise RuntimeError("detective упал")
     monkeypatch.setattr(wa.detective, "build_weekly_block", boom)
 
-    written = {}
-    monkeypatch.setattr(wa, "write_recommendations_log", lambda cur, row: written.update(row))
-    monkeypatch.setattr(wa.notify, "notify", lambda source, priority, text: None)
+    monkeypatch.setattr(wa, "write_recommendations_log", lambda cur, row: None)
+    sent = []
+    monkeypatch.setattr(wa.notify, "notify", lambda source, priority, text: sent.append(text))
 
     wa.run_once()  # не бросает, несмотря на упавший detective
-    assert "Детектив" not in written["Telegram_Text"]
+    assert "Детектив" not in sent[0]
 
 
 def test_run_once_model_silent_skips_write(monkeypatch):
@@ -449,3 +451,118 @@ def test_run_once_model_silent_skips_write(monkeypatch):
 
     assert called == []
     assert sent and sent[0][1] == "critical"  # предупредили немедленно, что модель не ответила
+
+
+# =====================================================================
+# Дельта недели («досье — тонкое ядро», 2026-09-26, Часть 2) —
+# build_weekly_delta_text() и её составляющие
+# =====================================================================
+
+def test_significant_trend_shifts_flags_large_moves():
+    wellness = {"week": {"hrv": 50, "rhr": 65, "sleep_min": None, "stress": None},
+                "prev_week": {"hrv": 44, "rhr": 55, "sleep_min": None, "stress": None}}
+    lines = wa._significant_trend_shifts(wellness)
+    assert any("HRV" in l and "лучше" in l for l in lines)
+    assert any("Пульс покоя" in l and "хуже" in l for l in lines)  # выше = хуже для пульса покоя
+
+
+def test_significant_trend_shifts_ignores_small_moves():
+    wellness = {"week": {"hrv": 45}, "prev_week": {"hrv": 44}}
+    assert wa._significant_trend_shifts(wellness) == []
+
+
+def test_significant_trend_shifts_missing_data_is_skipped():
+    assert wa._significant_trend_shifts({"week": {}, "prev_week": {}}) == []
+    assert wa._significant_trend_shifts({}) == []
+
+
+def test_new_recommendations_line_empty_is_none():
+    assert wa._new_recommendations_line([]) is None
+
+
+def test_new_recommendations_line_joins_titles_and_why():
+    actions = [{"title": "Спать раньше", "why": "ВСР ниже базы"}, {"title": "Меньше сахара"}]
+    assert wa._new_recommendations_line(actions) == "Новое на неделю: Спать раньше — ВСР ниже базы; Меньше сахара."
+
+
+def test_verdicts_since_none_when_no_anchor():
+    with get_conn() as conn, conn.cursor() as cur:
+        assert wa._verdicts_since(cur, None) is None
+
+
+def _seed_verdict(cur, rec_id, verdict, ts_computed):
+    from app.db import schema
+    cur.execute(
+        f'INSERT INTO {schema()}.recommendation_verdict '
+        '(id, rec_id, engine_version, verdict, ts_computed, status) '
+        "VALUES (%s, %s, 'v1', %s, %s, 'current')",
+        (f"rv_test_{rec_id}", rec_id, verdict, ts_computed),
+    )
+
+
+def test_verdicts_since_summarizes_effective_and_failed():
+    with get_conn() as conn, conn.cursor() as cur:
+        _seed_verdict(cur, "wa_test_1", "effective", "2026-09-22")
+        _seed_verdict(cur, "wa_test_2", "no_effect", "2026-09-23")
+        _seed_verdict(cur, "wa_test_old", "effective", "2026-09-10")  # до анкера — не считается
+        conn.commit()
+        line = wa._verdicts_since(cur, "2026-09-20")
+    assert line == "Вердикты за неделю: 2 — 1 сработало, 1 нет."
+
+
+def test_verdicts_since_all_effective_has_no_bad_count():
+    with get_conn() as conn, conn.cursor() as cur:
+        _seed_verdict(cur, "wa_test_3", "partial", "2026-09-22")
+        conn.commit()
+        line = wa._verdicts_since(cur, "2026-09-20")
+    assert line == "Вердикты за неделю: 1, все сработали."
+
+
+def test_fates_since_none_when_no_anchor():
+    with get_conn() as conn, conn.cursor() as cur:
+        assert wa._fates_since(cur, None) == []
+
+
+def test_fates_since_only_new_or_changed_dispositions():
+    from app import anomaly_disposition as ad
+    with get_conn() as conn, conn.cursor() as cur:
+        ad.create_disposition_row(cur, "wa_fate_new", "Новая метрика", "2026-09-22", "strong")
+        ad.dispose(cur, "wa_fate_new", "acknowledge")
+        conn.commit()
+        fates = wa._fates_since(cur, "2026-09-20")
+    assert any(f["metric"] == "Новая метрика" and f["disposition"] == "acknowledge" for f in fates)
+
+
+def test_build_weekly_delta_text_quiet_week_is_the_right_result():
+    """Часть 2.3: спокойная неделя без изменений — «Спокойная неделя, без
+    изменений», не пустой текст."""
+    with get_conn() as conn, conn.cursor() as cur:
+        text = wa.build_weekly_delta_text(cur, {"wellness": {}}, {"actions": [], "Alert_Text": ""}, None)
+    assert text == "Спокойная неделя, без изменений."
+
+
+def test_build_weekly_delta_text_includes_new_recommendations():
+    with get_conn() as conn, conn.cursor() as cur:
+        text = wa.build_weekly_delta_text(
+            cur, {"wellness": {}},
+            {"actions": [{"title": "Больше клетчатки", "why": "дефицит недели"}], "Alert_Text": ""},
+            None,
+        )
+    assert "Новое на неделю: Больше клетчатки" in text
+    assert "Спокойная неделя" not in text
+
+
+def test_build_weekly_delta_text_alerts_come_first():
+    with get_conn() as conn, conn.cursor() as cur:
+        text = wa.build_weekly_delta_text(
+            cur, {"wellness": {}}, {"actions": [], "Alert_Text": "🔴 ЭСКАЛАЦИЯ: тест"}, None,
+        )
+    assert text.startswith("🔴 ЭСКАЛАЦИЯ: тест")
+    assert "Спокойная неделя, без изменений." in text
+
+
+def test_build_weekly_delta_text_respects_hard_char_limit():
+    long_actions = [{"title": f"Действие {i}" * 20, "why": "обоснование " * 20} for i in range(3)]
+    with get_conn() as conn, conn.cursor() as cur:
+        text = wa.build_weekly_delta_text(cur, {"wellness": {}}, {"actions": long_actions, "Alert_Text": ""}, None)
+    assert len(text) <= wa.WEEKLY_REPORT_MAX_CHARS

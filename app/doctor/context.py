@@ -15,7 +15,23 @@ sheets_to_pg_mirror.js), ни одного обращения к n8n в этом
 принято для сегодняшних приёмов пищи и климата в докторе на n8n, см. память
 `ai-agent-tool-call-doubles-latency`: любой инструмент-вызов добавляет целый
 лишний проход модели, а эти данные релевантны почти всегда).
+
+«Досье — тонкое ядро» (2026-09-26): статическая часть выросла до 13 блоков
+(~12 900 знаков) каждый ход, независимо от темы сообщения — при том что у
+доктора есть 22 инструмента, которыми он может дозапросить то, чего не хватает.
+build_dossier() теперь собирает ПОСТОЯННОЕ ЯДРО (мед. ограничения/гейт,
+активные препараты, вчерашний Garmin, активные проблемы/расследования — то,
+что относится к разговору почти всегда) + 1-3 блока из оставшихся 10,
+которые выбирает route_blocks() детерминированно по ключевым словам сообщения
+(без LLM — дешевле и предсказуемее, чем звать модель ради маршрутизации).
+Тема не распознана -> только ядро, инструменты остаются главным путём к
+деталям, досье их больше не дублирует заранее "на всякий случай".
+
+Красные флаги (app/redflag*.py, app/doctor/gate.py) читают только текст
+сообщения и не проходят через build_dossier() вообще — их независимость от
+состава/объёма досье не меняется этой правкой ни на строку.
 """
+import re
 from typing import Optional
 
 from psycopg import sql
@@ -23,6 +39,7 @@ from psycopg import sql
 from app import timeutil
 from app.db import schema
 from app.memory import get_context
+from app.patient_gate import load_gate
 
 
 def _num(v) -> Optional[float]:
@@ -258,23 +275,104 @@ def _recent_consilium_summaries(cur, limit: int = 3) -> list[dict]:
     return [{"topic": t, "date": str(d), "actions": a, "status": s} for t, d, a, s in cur.fetchall()]
 
 
+def _gate_status(cur) -> dict:
+    """Медограничения/гейт нагрузки — ЯДРО досье (Часть 1.1). Переиспользует
+    app.patient_gate.load_gate — ту же единственную реализацию, что уже
+    используют dashboard.py и weekly_advisor.py (П3, не третья независимая
+    копия gate-логики). blocked=False -> остальные поля не нужны, format_dossier
+    просто не покажет секцию."""
+    cur.execute(
+        'SELECT "Status", "Contra_Load", "Condition", "Allowed", "Provokers", '
+        '"Review_Due", "Source", "Confirmed_Date" FROM health.patient_state'
+    )
+    cols = ["Status", "Contra_Load", "Condition", "Allowed", "Provokers", "Review_Due", "Source", "Confirmed_Date"]
+    pstate = [dict(zip(cols, r)) for r in cur.fetchall()]
+    cur.execute('SELECT "ОДА и неврология" FROM health.user_profile LIMIT 1')
+    row = cur.fetchone()
+    profile = {"ОДА и неврология": row[0]} if row else {}
+    gate = load_gate(pstate, profile)
+    if not gate.get("blocked"):
+        return {"blocked": False}
+    return {"blocked": True, "condition": gate.get("condition"), "contra": gate.get("contra"),
+            "allowed": gate.get("allowed")}
+
+
+def _active_problems(cur) -> list[dict]:
+    """Активные проблемы (темы разбора длиной в несколько эпизодов) — ЯДРО
+    досье (Часть 1.1). Тот же запрос, что app/consilium.py::_active_problems
+    (card.problem) — не импортируем оттуда: app/doctor/ в этом тикете
+    ограничен context.py, consilium.py не трогаем и не тянем из него
+    внутренности ради одного SELECT."""
+    cur.execute(
+        sql.SQL("SELECT id, title, icd_hint, opened_ts::date FROM {t} "
+                "WHERE status = 'active' ORDER BY opened_ts DESC").format(t=sql.Identifier(schema(), "problem"))
+    )
+    return [{"id": i, "title": t, "icd_hint": icd, "opened": str(o)} for i, t, icd, o in cur.fetchall()]
+
+
+# =====================================================================
+# Роутер (Часть 1.2) — детерминированный, по ключевым словам, без LLM
+# =====================================================================
+
+_ROUTER_RULES: list[tuple[re.Pattern, tuple[str, ...]]] = [
+    (re.compile(r"болит|боль|тошнит|тошнот|температур|сыпь|кружится|голова.{0,6}кругом|"
+                r"онеме|отёк|отек|плохо себя чувств|симптом|обостр|знобит|слабост", re.I),
+     ("recent_doctor_notes", "room_climate", "anomaly_dispositions", "garmin_week_trend")),
+    (re.compile(r"добавк|витамин|препарат|лекарств|дозиров|таблетк|можно ли (пить|принимать)|совместим", re.I),
+     ("labs_out_of_range", "recent_publications")),
+    (re.compile(r"\bем\b|\bел\b|\bела\b|поел|поела|\bеда\b|питани|калори|белк[а-и]|углевод|жир[а-ы]|"
+                r"диет|рацион|перекус|позавтракал|пообедал|поужинал", re.I),
+     ("nutrition_today", "meals_today")),
+    (re.compile(r"анализ|лаборатор|кровь сдал|биохими|результат.{0,10}анализ", re.I),
+     ("labs_out_of_range", "planned_labs")),
+    (re.compile(r"исследован|статья|публикац|наука|изучен|доказательств", re.I),
+     ("recent_publications",)),
+    (re.compile(r"консилиум|что решили специалист|мнение специалист", re.I),
+     ("recent_consilium_summaries",)),
+]
+
+
+def route_blocks(text: str) -> set[str]:
+    """Часть 1.2: выбирает 0-неск. дополнительных блоков досье по ключевым
+    словам сообщения. Правила МОГУТ пересекаться (сообщение и про симптом, и
+    про еду) — объединяем совпадения, не выбираем одну тему произвольно.
+    Тема не распознана -> пустое множество -> досье = только ядро."""
+    text = text or ""
+    blocks: set[str] = set()
+    for rx, names in _ROUTER_RULES:
+        if rx.search(text):
+            blocks.update(names)
+    return blocks
+
+
+_ROUTABLE_BUILDERS = {
+    "garmin_week_trend": _garmin_week_trend,
+    "nutrition_today": _nutrition_today,
+    "meals_today": _meals_today,
+    "recent_doctor_notes": _recent_doctor_notes,
+    "labs_out_of_range": _labs_out_of_range,
+    "planned_labs": _planned_labs,
+    "room_climate": _room_climate,
+    "recent_publications": _recent_publications,
+    "anomaly_dispositions": _anomaly_dispositions,
+    "recent_consilium_summaries": _recent_consilium_summaries,
+}
+
+
 def build_dossier(cur, text: str = "") -> dict:
-    """Собирает всё досье одним проходом. Приёмка Phase 3: <300мс (план §4,
-    шаг 3) — все запросы дешёвые (индексы/LIMIT), климат — единственный сетевой
-    вызов, с коротким таймаутом и молчаливой деградацией."""
-    return {
+    """Ядро (5 блоков, всегда) + до 10 маршрутизируемых блоков по теме
+    сообщения (Часть 1.1-1.2). Приёмка Phase 3: <300мс (план §4, шаг 3) — все
+    запросы дешёвые (индексы/LIMIT), климат — единственный сетевой вызов, с
+    коротким таймаутом и молчаливой деградацией; маршрутизация выбирает НЕ
+    более 4 доп. запросов даже при пересечении всех правил."""
+    dossier = {
         "memory": get_context(cur, mode="question", payload={"text": text}),
-        "garmin_yesterday": _garmin_yesterday(cur),
-        "garmin_week_trend": _garmin_week_trend(cur),
-        "nutrition_today": _nutrition_today(cur),
-        "meals_today": _meals_today(cur),
+        "gate_status": _gate_status(cur),
+        "active_problems": _active_problems(cur),
         "active_meds": _active_meds(cur),
+        "garmin_yesterday": _garmin_yesterday(cur),
         "open_investigations": _open_investigations(cur),
-        "recent_doctor_notes": _recent_doctor_notes(cur),
-        "labs_out_of_range": _labs_out_of_range(cur),
-        "planned_labs": _planned_labs(cur),
-        "room_climate": _room_climate(cur),
-        "recent_publications": _recent_publications(cur),
-        "anomaly_dispositions": _anomaly_dispositions(cur),
-        "recent_consilium_summaries": _recent_consilium_summaries(cur),
     }
+    for name in route_blocks(text):
+        dossier[name] = _ROUTABLE_BUILDERS[name](cur)
+    return dossier

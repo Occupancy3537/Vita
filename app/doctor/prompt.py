@@ -122,6 +122,8 @@ def format_dossier(dossier: dict, today: str) -> str:
     hot = mem.get("hot") or []
     cold = mem.get("cold") or []
 
+    gate = dossier.get("gate_status") or {}
+    problems = dossier.get("active_problems") or []
     gy = dossier.get("garmin_yesterday")
     gw = dossier.get("garmin_week_trend") or {}
     nt = dossier.get("nutrition_today")
@@ -142,6 +144,23 @@ def format_dossier(dossier: dict, today: str) -> str:
     lines.append("## 🩸 БРАСЛЕТ (аллергии/критические факты — единственный источник, не полагайся на память)")
     lines.append(_fmt(bracelet, "браслет пуст — данных об аллергиях/критических факторах нет"))
     lines.append("")
+
+    if gate.get("blocked"):
+        # «Досье — тонкое ядро» (2026-09-26, Часть 1.1): гейт нагрузки —
+        # ЯДРО досье (всегда собирается, context.py::_gate_status), рендерится
+        # здесь же, где и остальные блоки, не только в format_dossier() новый
+        # `if` — переиспользует load_gate(), не изобретает вторую формулировку.
+        lines.append("## 🚫 МЕДИЦИНСКОЕ ОГРАНИЧЕНИЕ (жёсткий запрет, не рекомендация)")
+        lines.append(f"{_fmt(gate.get('condition'))}. Нельзя: {_fmt(gate.get('contra'))}. "
+                      f"Можно: {_fmt(gate.get('allowed'))}.")
+        lines.append("")
+
+    if problems:
+        lines.append("## 📁 АКТИВНЫЕ ПРОБЛЕМЫ (темы разбора)")
+        for p in problems:
+            lines.append(f"- {p['title']}" + (f" ({p['icd_hint']})" if p.get("icd_hint") else "")
+                          + f" — открыта {p['opened']}")
+        lines.append("")
 
     if hot:
         lines.append("## 🔥 ГОРЯЧИЙ СЛОЙ (активные темы карты)")

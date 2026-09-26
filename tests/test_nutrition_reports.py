@@ -181,7 +181,55 @@ def test_build_daily_prompt_includes_meal_data():
          "Snack_Meals": "Нет данных", "Dinner_Meals": "Нет данных", "Ultra_Processed_Today": "Нет данных"}
     text = nr.build_daily_prompt(d)
     assert "овсянка" in text
-    assert "Привет, Влад" in text
+
+
+def test_build_daily_prompt_asks_for_short_output():
+    """«Досье — тонкое ядро» (2026-09-26, Часть 3): было ~1900 знаков/4-5
+    абзацев (похвала/зона роста/лайфхак/анти-эйдж блюдо/отдельный абзац
+    NOVA-4), в промпте больше не должно быть просьбы про приветствие/5 абзацев/
+    отдельное блюдо на завтра — сообщение стало короче по конструкции промпта,
+    не только по итоговой обрезке в коде."""
+    d = {"season": "осень", "month": 9, "Breakfast_Meals": "Нет данных", "Lunch_Meals": "Нет данных",
+         "Snack_Meals": "Нет данных", "Dinner_Meals": "Нет данных", "Ultra_Processed_Today": "Нет данных"}
+    text = nr.build_daily_prompt(d)
+    assert "Привет, Влад" not in text
+    assert "4 строки" in text or "4-5 абзацев" not in text
+    assert "анти-эйдж совет на завтра" not in text.lower()
+
+
+# --- _trim_to_lines: жёсткий лимит в коде (Часть 3) -------------------------
+
+def test_trim_to_lines_keeps_short_text_unchanged():
+    assert nr._trim_to_lines("Строка 1\nСтрока 2", 4) == "Строка 1\nСтрока 2"
+
+
+def test_trim_to_lines_cuts_extra_lines():
+    text = "\n".join(f"Строка {i}" for i in range(1, 8))
+    assert nr._trim_to_lines(text, 4) == "\n".join(f"Строка {i}" for i in range(1, 5))
+
+
+def test_trim_to_lines_drops_empty_lines_without_counting_them():
+    text = "Строка 1\n\n\nСтрока 2\n\nСтрока 3\nСтрока 4\nСтрока 5"
+    assert nr._trim_to_lines(text, 4) == "Строка 1\nСтрока 2\nСтрока 3\nСтрока 4"
+
+
+def test_trim_to_lines_empty_input():
+    assert nr._trim_to_lines("", 4) == ""
+    assert nr._trim_to_lines(None, 4) == ""
+
+
+def test_trim_to_lines_caps_by_chars_when_model_ignores_newlines():
+    """Живая проверка 2026-09-26: модель иногда пишет весь ответ ОДНИМ абзацем
+    без единого переноса строки — лимит по строкам такое не ловит, нужен
+    символьный бэкстоп независимо от newline-структуры."""
+    one_paragraph = "Очень длинный ответ без единого переноса строки. " * 20
+    trimmed = nr._trim_to_lines(one_paragraph, 4, max_chars=100)
+    assert len(trimmed) <= 100
+    assert trimmed.endswith("…")
+
+
+def test_trim_to_lines_short_single_line_untouched():
+    assert nr._trim_to_lines("Короткая строка.", 4, max_chars=100) == "Короткая строка."
 
 
 def test_build_weekly_prompt_includes_data():
@@ -256,6 +304,26 @@ def test_run_daily_with_meals_sends_model_text_via_food_diary_bot(monkeypatch):
     nr.run_daily()
     assert sent == [(nr.food_diary_telegram.CHAT_ID, "Сводка дня: норм.")]
     assert logged == [("nutrition_reports", "normal")]
+
+
+def test_run_daily_trims_model_output_to_max_lines(monkeypatch):
+    """Часть 3: жёсткий лимит в коде — даже если модель проигнорирует
+    инструкцию промпта и вернёт длинный текст, в Telegram уходит не больше
+    DAILY_ESSAY_MAX_LINES строк."""
+    monkeypatch.setattr(nr, "build_daily_report", lambda cur: {"Calories": 2000})
+    monkeypatch.setattr(nr, "build_daily_prompt", lambda d: "промпт")
+    long_text = "\n".join(f"Строка {i}" for i in range(1, 9))
+    monkeypatch.setattr(nr, "call_model", lambda *a, **kw: long_text)
+    monkeypatch.setattr(nr, "_write_day_sum", lambda cur, d: None)
+    monkeypatch.setattr(nr, "_sync_nutrition_to_card", lambda d: None)
+    sent = []
+    monkeypatch.setattr(nr.food_diary_telegram, "send_message",
+                        lambda chat_id, text, **kw: sent.append((chat_id, text)))
+    monkeypatch.setattr(nr.notify, "log_external_send", lambda source, priority: None)
+    nr.run_daily()
+    assert len(sent) == 1
+    sent_lines = sent[0][1].split("\n")
+    assert len(sent_lines) == nr.DAILY_ESSAY_MAX_LINES
 
 
 def test_run_weekly_no_meals_sends_reminder_only(monkeypatch):
