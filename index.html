@@ -35,6 +35,19 @@
      не создаёт новый тред без истории.
   9. Фон hero — img/mountain.jpg (макетное фото). В продакшене — набор фото по времени суток/сезону,
      отдаётся в webp/avif с размерами под экран.
+  10. «Сегодня» v2 — каждый блок = одно поле card-service (ветка card-service), новой аналитики нет:
+      чипы            ← /vita/today ring.sleep_score · movement_score · nutrition_score + chips.energy (Body Battery)
+      статус в шапке  ← get_today_dashboard().decision.verdict (+ gate) · тап → decision.reasons
+      дуга / число    ← ring.score / longevity.phenoage + chrono_age
+      «−3,1 дня»      ← ring.bioage_days; разбор ← longevity.affects_today[] (est_years, weight, how→источник)
+      Нужен ты        ← pending_anomalies (+ POST /dashboard/dispose) и решения кейсов
+      Фокус дня       ← plan.actions (+ POST /action-ack) и nudge; ≤3 пункта, остальное — в Программе
+      Серии           ← streaks[]; «рекорд» — НОВОЕ поле: max длины серии по истории (сейчас не считается)
+      Что изменилось  ← day_issue.lines + quiet
+      Не хватает в /vita/today (всё уже считает get_today_dashboard, нужно только отдать):
+      verdict, longevity.affects_today, plan.actions, streaks, day_issue, quiet, pending_anomalies, phenoage.
+      Оговорка: affects_today берёт питание из НЕзакрытого дня — утром «недобор клетчатки» раздувается;
+      для питания брать закрытые сутки или помечать фактор как «день ещё идёт».
 -->
 <style>
 :root{
@@ -223,13 +236,14 @@ svg{display:block}
 .bioSub{margin-top:10px;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2);font-weight:500}
 .bioSub b{color:var(--ink);font-weight:600}
 .emo{margin-top:clamp(12px,2vh,18px);font-family:var(--serif);font-size:clamp(30px,4.6vh,36px);font-weight:300;line-height:1.08;letter-spacing:-.01em;color:var(--ink);max-width:330px}
-.coachline{margin-top:10px;font-size:13.5px;line-height:1.55;color:var(--ink2);max-width:310px}
-.heroMeta{margin-top:12px;font-size:12px;line-height:1.6;color:var(--muted);max-width:320px}
-.heroMeta b{color:var(--ink2);font-weight:500}
+.effect{margin-top:16px;display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 12px 0 14px;border-radius:17px;font-size:12.5px;color:var(--ink2);background:var(--chip-bg);box-shadow:inset 0 0 0 1px var(--line);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.effect b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.effect svg{width:13px;height:13px;color:var(--muted)}
+.effect.none{box-shadow:none;background:none;color:var(--muted)}
+.hdr .status{cursor:pointer}
 
 /* cards — тонированные поверхности */
 .cards{display:flex;flex-direction:column;gap:10px;margin-top:10px}
-#metrics{margin-top:26px}
 .cards:empty{display:none}
 .mcard{position:relative;display:block;width:100%;border-radius:24px;padding:15px 16px 16px;background:var(--tint,var(--t-neutral));overflow:hidden;isolation:isolate;text-align:left;box-shadow:inset 0 0 0 1px var(--card-edge);transition:scale .35s var(--ease)}
 .mcard::before{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(90% 120% at 100% 0%,var(--glow,var(--g-neutral)) 0%,transparent 60%);animation:cardglow 7s ease-in-out infinite alternate}
@@ -246,16 +260,75 @@ svg{display:block}
 .stw{display:block;margin-top:3px;font-size:10.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase}
 .stw.teal{color:var(--teal)}.stw.green{color:var(--green)}.stw.amber{color:var(--amber)}.stw.warm{color:var(--warm)}
 .mc-go{flex:none;width:15px;height:15px;color:var(--muted)}
-.mc-b{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-top:16px}
-.mc-v{font-size:42px;font-weight:300;line-height:.9;letter-spacing:-.03em;font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
-.mc-v small{font-size:13px;color:var(--muted);letter-spacing:0;margin-left:4px;font-weight:400}
-.sld{position:relative;flex:1;max-width:190px;height:34px}
-.sld .tr0{position:absolute;left:0;right:0;top:10px;height:2px;border-radius:2px;background:var(--line)}
-.sld .band{position:absolute;top:10px;height:2px;border-radius:2px;background:var(--ink);opacity:.85;width:0;transition:width 1.2s var(--ease) .15s}
-.sld .thumb{position:absolute;top:5px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px var(--accent-soft),0 0 14px var(--accent-glow);transition:left 1.2s var(--ease) .15s}
-.sld .sl{position:absolute;top:21px;font-size:10.5px;color:var(--muted);transform:translateX(-50%);white-space:nowrap;font-variant-numeric:tabular-nums}
-.sld .sl.r{transform:translateX(-100%)}
 .ncard .mc-h{align-items:flex-start}
+/* секции главной: у каждой своя задача, пустая — не рендерится */
+.sec{margin-top:26px}
+.sec:first-of-type{margin-top:28px}
+.secH{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:0 4px 10px}
+.secH>span:last-child{font-size:11.5px;color:var(--muted);text-align:right}
+#needYou .mcard{margin-top:26px}
+/* фокус дня — 1–3 действия, отметка = action-ack */
+.mcard.focus{padding:4px 14px}
+.fitem{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line-soft)}
+.fitem:first-child{border-top:0}
+.fchk{flex:none;position:relative;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;box-shadow:inset 0 0 0 1.5px var(--faint);transition:background .35s var(--ease),box-shadow .35s var(--ease),scale .35s var(--spring)}
+.fchk svg{width:14px;height:14px;color:#fff;stroke-width:2.2;opacity:0;transform:scale(.4);transition:opacity .25s ease,transform .45s var(--spring)}
+.fitem.done .fchk{background:var(--accent);box-shadow:0 0 0 0 transparent,0 0 14px var(--accent-glow)}
+.fitem.done .fchk svg{opacity:1;transform:none}
+.fitem.pop .fchk{animation:chkpop .6s var(--spring)}
+@keyframes chkpop{0%{scale:1}40%{scale:1.25}100%{scale:1}}
+.ftxt{flex:1;min-width:0;text-align:left}
+.ftxt b{display:block;font-size:14.5px;font-weight:500;color:var(--ink);line-height:1.35;transition:color .3s ease}
+.ftxt small{display:block;margin-top:3px;font-size:12px;color:var(--muted);line-height:1.35}
+.ftxt .ft{color:var(--teal);font-weight:600;letter-spacing:.06em;margin-right:6px;font-variant-numeric:tabular-nums}
+.fitem.done .ftxt b{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--faint)}
+.fic{flex:none;width:16px;height:16px;color:var(--muted)}
+/* серии */
+.streaks{display:flex;align-items:flex-start;gap:10px;overflow-x:auto;margin:0 -20px;padding:2px 20px 6px;scrollbar-width:none;touch-action:pan-x pan-y;-webkit-mask-image:linear-gradient(90deg,#000 90%,transparent);mask-image:linear-gradient(90deg,#000 90%,transparent)}
+.streaks::-webkit-scrollbar{display:none}
+.stk{flex:none;position:relative;width:118px;padding:13px 13px 12px;border-radius:20px;background:var(--t-neutral);box-shadow:inset 0 0 0 1px var(--card-edge);overflow:hidden;isolation:isolate}
+.stk::before{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(90% 90% at 100% 0%,var(--g-hrv),transparent 60%)}
+.stk.best::before{background:radial-gradient(90% 90% at 100% 0%,rgba(232,197,122,.28),transparent 62%)}
+.stk .si{width:15px;height:15px;color:var(--ink2)}
+.stk .sn{white-space:nowrap;margin-top:10px;font-size:30px;font-weight:300;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums;color:var(--ink)}
+.stk .sn small{font-size:11px;color:var(--muted);margin-left:4px;letter-spacing:0}
+.stk .sl2{margin-top:4px;font-size:12px;line-height:1.3;color:var(--ink2);min-height:31px}
+.stk .sr{margin-top:8px;height:2px;border-radius:2px;background:var(--line);overflow:hidden}
+.stk .sr i{display:block;height:100%;width:0;border-radius:2px;background:var(--accent);transition:width 1.2s var(--ease) .2s}
+.stk .sm{margin-top:5px;font-size:10.5px;color:var(--muted)}
+.stk.best .sm{color:var(--gold);font-weight:600}
+.stk.best .sr i{background:var(--gold)}
+/* что изменилось */
+.mcard.issue{padding:6px 14px}
+.irow{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line-soft);font-size:13.5px;color:var(--ink);text-align:left;width:100%}
+.irow:first-child{border-top:0}
+.irow svg{flex:none;width:14px;height:14px}
+.irow .up{color:var(--green)}
+.irow.quiet{color:var(--muted);font-size:12.5px}
+.irow.quiet svg{color:var(--teal)}
+.irow .mc-go{margin-left:auto}
+/* нужен ты */
+.nrow{display:flex;align-items:flex-start;gap:10px;padding:11px 0 2px;border-top:1px solid var(--line-soft);text-align:left;width:100%}
+.nrow+.nrow{margin-top:8px}
+.nrow .nt{font-size:14px;line-height:1.45;color:var(--ink)}
+.nacts{display:flex;gap:16px;margin-top:6px}
+.nacts button{font-size:12.5px;font-weight:600;color:var(--accent-ink)}
+.nacts button.m{color:var(--muted);font-weight:500}
+/* разбор вклада дня (overlay) */
+.efrow{display:flex;align-items:flex-start;gap:12px;padding:14px 0;border-top:1px solid var(--line)}
+.efrow:first-child{border-top:0}
+.efd{flex:none;width:64px;text-align:right;font-size:19px;font-weight:300;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.efd.good{color:var(--teal)}.efd.bad{color:var(--warm)}.efd.zero{color:var(--muted)}
+.efm{flex:1;min-width:0}
+.efm b{display:block;font-size:14px;font-weight:500}
+.efm span{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.efm .efs{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.efbar{position:relative;height:6px;margin:18px 0 6px;border-radius:3px;background:var(--line-soft)}
+.efbar i{position:absolute;top:0;bottom:0;border-radius:3px}
+.disc{margin-top:18px;font-size:12px;line-height:1.5;color:var(--muted)}
+.reason{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:1px solid var(--line);font-size:14px}
+.reason:first-child{border-top:0}
+.reason span:last-child{font-variant-numeric:tabular-nums}
 .ncard .nt{flex:1;font-size:14px;line-height:1.45;color:var(--ink)}
 .ncard .nt .stw{margin:0 0 5px}
 .pdot2{flex:none;position:relative;width:8px;height:8px;margin:5px 4px 0;border-radius:50%;background:var(--warm)}
@@ -433,6 +506,8 @@ svg{display:block}
 .delta{margin-top:10px;font-size:13px;color:var(--accent-ink);font-weight:500}
 .delta span{color:var(--muted);font-weight:400}
 .upd{margin-top:4px;font-size:12px;color:var(--muted)}
+.potent{margin-top:8px;font-size:13px;color:var(--ink2)}
+.potent b{color:var(--teal);font-weight:600}
 .drivers{display:flex;gap:8px;margin-top:16px;overflow-x:auto;scrollbar-width:none;margin-left:-20px;margin-right:-20px;padding:2px 20px 6px}
 .drivers::-webkit-scrollbar{display:none}
 .drv{flex:none;display:flex;align-items:center;gap:7px;height:36px;padding:0 13px;border-radius:18px;font-size:13px;color:var(--ink2);border:1px solid var(--line)}
@@ -593,18 +668,19 @@ svg{display:block}
       <div class="pager" id="pager">
         <div class="track" id="track">
           <div class="screen" id="s-today">
-            <div class="hdr onPhoto rise" style="--i:0"><span id="tDate"></span><span class="status" id="tStatus"></span></div>
+            <div class="hdr onPhoto rise" style="--i:0"><span id="tDate"></span><button class="status press" id="tStatus" data-a="recovery"></button></div>
             <div class="chips onPhoto rise" style="--i:1" id="chips"></div>
             <div class="hero onPhoto rise" id="heroBox" style="--i:2">
               <div class="arcBox" id="arcBox"></div>
               <div class="bioBig" id="bioBig">32,4</div>
               <div class="bioSub">Биологический · паспортный <b>41</b></div>
               <p class="emo" id="emo"></p>
-              <p class="coachline" id="coach"></p>
-              <p class="heroMeta" id="heroMeta"></p>
+              <button class="effect press" id="effectLink" data-a="effect"></button>
             </div>
-            <div class="cards" id="metrics"></div>
-            <div class="cards" id="tExtra"></div>
+            <div id="needYou"></div>
+            <section class="sec rise" style="--i:4" id="focusSec"><div class="secH"><span class="lbl">Фокус дня</span><span id="focusCount"></span></div><div class="mcard focus" id="focus"></div></section>
+            <section class="sec rise" style="--i:5"><div class="secH"><span class="lbl">Серии</span><span>держатся сами, пока ты в ритме</span></div><div class="streaks" id="streaks"></div></section>
+            <section class="sec rise" style="--i:6" id="issueSec"><div class="secH"><span class="lbl">Что изменилось</span><span>за закрытые сутки</span></div><div class="mcard issue" id="issue"></div></section>
           </div>
 
           <div class="screen" id="s-rhythm">
@@ -677,6 +753,7 @@ svg{display:block}
           <div class="lbl">Биовозраст · PhenoAge</div>
           <div class="bigme" id="bioN">41,0</div>
           <p class="delta">−8,6 к паспортному возрасту <span>· 41</span></p>
+          <p class="potent">Потенциал: ещё <b>−4,8 года</b> — жиры, сон, ВСР</p>
           <p class="upd">Обновляется только по сдачам крови — следующая 12 окт</p>
           <div id="bioSvg"></div>
         </div>
@@ -748,6 +825,12 @@ const I={
   steps:'<path d="M8.2 3.5c1.6 0 2.4 1.9 2.4 4.1S9.7 11 8.2 11 5.8 9.8 5.8 7.6s.8-4.1 2.4-4.1z"/><path d="M6.3 13.6h3.8v1.2a1.9 1.9 0 0 1-3.8 0z"/><path d="M15.8 8.5c1.6 0 2.4 1.9 2.4 4.1s-.9 3.4-2.4 3.4-2.4-1.2-2.4-3.4.8-4.1 2.4-4.1z"/><path d="M13.9 18.6h3.8v.9a1.9 1.9 0 0 1-3.8 0z"/>',
   protein:'<circle cx="5.5" cy="13" r="2.2"/><circle cx="12" cy="7" r="2.2"/><circle cx="18.5" cy="12" r="2.2"/><circle cx="13" cy="18.5" r="2.2"/><path d="M7.2 11.5l3.2-3M14.1 8l2.6 2.4M16.9 13.6l-2.4 3.2"/>',
   crown:'<path d="M4.2 17.2 3 8.4l4.9 3.9L12 5.3l4.1 7 4.9-3.9-1.2 8.8z"/><path d="M5 20.3h14"/><circle cx="12" cy="13.6" r=".9"/>',
+  shield:'<path d="M12 3.2l7 2.8v5.6c0 4.3-2.9 7.6-7 9.2-4.1-1.6-7-4.9-7-9.2V6z"/><path d="M9.2 12.2l2 2 3.8-4"/>',
+  drop:'<path d="M8 3.5h8l-.7 5.3a3.3 3.3 0 0 1-6.6 0z"/><path d="M12 12.2v7.6M8.6 20.3h6.8"/>',
+  rise:'<path d="M4.5 20.5h15"/><path d="M12 16.5V5M8 9l4-4 4 4"/>',
+  wave2:'<path d="M2.5 16.5c1.6 0 1.6-1.4 3.2-1.4s1.6 1.4 3.2 1.4 1.6-1.4 3.2-1.4 1.6 1.4 3.2 1.4 1.6-1.4 3.2-1.4 1.6 1.4 3.2 1.4"/><path d="M2.5 20.2c1.6 0 1.6-1.4 3.2-1.4s1.6 1.4 3.2 1.4 1.6-1.4 3.2-1.4 1.6 1.4 3.2 1.4 1.6-1.4 3.2-1.4 1.6 1.4 3.2 1.4"/><circle cx="15.5" cy="6.5" r="1.9"/><path d="M6.5 12.5l4.2-3.8 3.3 2.3"/>',
+  charge:'<path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5" opacity=".35"/><path d="M12.8 7.5l-3.3 5h3l-.8 4 3.3-5h-3z"/>',
+  bowl:'<path d="M3.5 11.5h17a8.5 8.5 0 0 1-17 0z"/><path d="M9 8c0-1.6 1.2-2.1 1.2-3.8M13.4 8c0-1.6 1.2-2.1 1.2-3.8"/>',
   hint:'<path d="M9.5 18.5h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.4 1.1 2.2v.5h5V16c0-.8.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/>',
   watch:'<rect x="6.5" y="6.5" width="11" height="11" rx="3.5"/><path d="M9 6.5 9.6 3h4.8l.6 3.5M9 17.5l.6 3.5h4.8l.6-3.5M12 9.5V12l1.6 1"/>',
   book:'<path d="M4 5.5C6.8 4.4 9.5 4.6 12 6.5c2.5-1.9 5.2-2.1 8-1v13c-2.8-1.1-5.5-.9-8 1-2.5-1.9-5.2-2.1-8-1z"/><path d="M12 6.5v13"/>',
@@ -774,7 +857,7 @@ function lineChart({data,w=320,h=140,color=ACCENT,min,max,base=null,labels=null,
 }
 
 /* ================= STATE ================= */
-const S={preset:'decision',time:'day',sunday:false,caseSt:'pending',fer:'proposed',medgate:true,panel:'oct'};
+const S={preset:'decision',time:'day',sunday:false,caseSt:'pending',fer:'proposed',medgate:true,panel:'oct',done:new Set(),anom:false};
 const PRESETS={
   morning:{time:'morning',caseSt:'testing',medgate:true,sunday:false,t:'Утро',c:'8:00',n:'Сон закрыт, остальное впереди'},
   day:{time:'day',caseSt:'testing',medgate:true,sunday:false,t:'День',c:'16:02',n:'Обычный день, всё идёт'},
@@ -782,28 +865,68 @@ const PRESETS={
   nowatch:{time:'nowatch',caseSt:'testing',medgate:true,sunday:false,t:'Без часов',c:'11:40',n:'День не оценивается'},
   nofood:{time:'nofood',caseSt:'testing',medgate:true,sunday:false,t:'Без еды',c:'14:00',n:'Ждёт первого приёма'},
   sunday:{time:'day',caseSt:'testing',medgate:false,sunday:true,t:'Воскресенье',c:'16:02',n:'Свежая наука недели'},
-  decision:{time:'day',caseSt:'pending',medgate:true,sunday:false,t:'Есть решение',c:'16:02',n:'«Нужен ты» и бейдж на Кейсах'}
+  decision:{time:'day',caseSt:'pending',medgate:true,sunday:false,anom:true,t:'Есть решение',c:'16:02',n:'«Нужен ты»: кейс и аномалия'}
+};
+/* Модель «Сегодня» — зеркало полей бэкенда (card-service, /vita/today + get_today_dashboard):
+   seg        ← ring.sleep_score / movement_score / nutrition_score + body_battery (чипы)
+   verdict    ← decision.verdict (режим нагрузки с учётом медгейта)
+   effect     ← longevity.affects_today_total × 365 (дни), разбор — affects_today[]
+   focus      ← plan.actions (недельный советник, отметка = POST /action-ack) + nudge
+   issue/quiet← day_issue.lines / quiet (что изменилось за закрытые сутки / что спокойно)
+   pending    ← pending_anomalies + решения кейсов («Нужен ты»)                              */
+const F={
+  walk:{id:'walk',ic:'steps',title:'Прогулка 35 мин после ужина',why:'Программа · засыпание быстрее · день 1 из 14'},
+  mg:{id:'mg',ic:'moon',title:'Магний 300 мг перед сном',why:'Программа · ВСР +6 мс за неделю · день 1 из 7'},
+  nut:{id:'nut',ic:'leaf',title:'Без грецкого ореха',why:'Проверка кейса · день 1 из 21'},
+  protein:{id:'protein',ic:'protein',t:'16:02',title:'Белок 96 из 160 г — творог вечером',why:'Рычаг дня · осталось 64 г',go:'protein'},
+  proteinDone:{id:'protein',ic:'protein',title:'Белок закрыт — 158 г',why:'Рычаг дня',done:true},
+  watch:{id:'watch',ic:'watch',t:'11:40',title:'Надеть часы',why:'С вечера нет данных — день не оценивается',go:'watch'},
+  meal:{id:'meal',ic:'hint',t:'14:00',title:'Сфотографировать первый приём',why:'Без еды рычаги дня не считаются',go:'meal'}
 };
 const TD={
-  morning:{status:['Доброе утро','sage'],ring:{v:28,ahead:72},center:{word:'Утро',label:'Сон закрыт · 7:04',sub:'остальное впереди',m:true},
-    emo:'День только начинается',potential:'Потенциал: ещё −5,2 лет — сон, ВСР, шаги',
-    coach:'День начинается — всё впереди.',chips:{sleep:'7:04',hrv:['47',''],energy:'71',food:'wait'},nudge:null,now:8,lev:{fat:null,protein:null,sodium:null}},
-  day:{status:['Всё хорошо','sage'],ring:{v:82},center:{num:82,label:'Здоровье дня',sub:'вклад дня: −3,1 дн.'},
-    emo:'День твой',potential:'Потенциал: ещё −4,8 лет — жиры, сон, ВСР',
-    coach:'Хороший день. Закрой белок — и день закончится на 86.',chips:{sleep:'7:04',hrv:['47','растёт'],energy:'62',food:'96 г'},
-    nudge:{t:'16:02',tone:'apricot',text:'35 минут прогулки после ужина закроют день. Белок 96/160 — творог вечером.',go:'protein'},now:16.03,lev:{fat:16,protein:96,sodium:3.2}},
-  evening:{status:['День закрыт','sage'],ring:{v:86},center:{num:86,label:'День закрыт',sub:'вклад дня: −3,4 дн.'},
-    emo:'Спокойного вечера — сегодня получилось',potential:'Потенциал: ещё −4,1 лет — сон, ВСР',
-    coach:'Белок закрыт, жиры в коридоре. Спокойного вечера.',chips:{sleep:'7:04',hrv:['47','растёт'],energy:'58',food:'158 г'},nudge:null,now:21.5,lev:{fat:22,protein:158,sodium:4.1}},
-  nowatch:{status:['Часы не на связи','gray'],ring:null,center:{dash:true,label:'Не оценивается',sub:'нет данных с часов',m:true},
-    emo:'Наденешь часы — вернём день',potential:null,
-    coach:'Нет данных с часов — день не оценивается.',chips:{sleep:null,hrv:null,energy:null,food:'40 г'},
-    nudge:{t:'11:40',tone:'neutral',text:'Часы не видели тебя с вечера — надеть?',go:'watch'},now:11.67,lev:{fat:6,protein:40,sodium:1.1}},
-  nofood:{status:['Всё хорошо','sage'],ring:{v:74},center:{num:74,label:'Здоровье дня',sub:'без питания — ждёт записи',m:true},
-    emo:'Держись — вечер всё решит',potential:'Потенциал: ещё −5,0 лет — питание, сон',
-    coach:'Еда пока не записана — остальное идёт хорошо.',chips:{sleep:'7:04',hrv:['47','растёт'],energy:'64',food:'wait'},
-    nudge:{t:'14:00',tone:'neutral',text:'Ждёт первого приёма — сфотографировать в дневнике.',go:'protein'},now:14,lev:{fat:null,protein:null,sodium:null}}
+  morning:{status:['Ходьба и плавание','sage'],ring:{v:28,ahead:72},center:{word:'Утро',label:'Сон закрыт · 7:04',sub:'остальное впереди'},
+    seg:{recovery:71,sleep:88,move:null,food:null},emo:'День только начинается',
+    effect:{txt:'Пока <b>−0,9 дня</b> — сон закрыт, день впереди'},
+    focus:['walk','mg'],issue:['ВСР 47 мс — выше, чем вчера','Пульс покоя 54 — ниже, чем обычно за неделю'],quiet:['SpO2','дыхание'],
+    now:8,lev:{fat:null,protein:null,sodium:null}},
+  day:{status:['Ходьба и плавание','sage'],ring:{v:82},center:{num:82},
+    seg:{recovery:62,sleep:88,move:74,food:91},emo:'День твой',
+    effect:{txt:'Сегодня <b>−3,1 дня</b> к биовозрасту'},
+    focus:['protein','walk','mg'],issue:['ВСР 47 мс — выше, чем вчера','Пульс покоя 54 — ниже, чем обычно за неделю'],quiet:['SpO2','дыхание','стресс'],
+    now:16.03,lev:{fat:16,protein:96,sodium:3.2}},
+  evening:{status:['Умеренная аэробика','sage'],ring:{v:86},center:{num:86},
+    seg:{recovery:58,sleep:88,move:92,food:94},emo:'Сегодня получилось',
+    effect:{txt:'День закрыт: <b>−3,4 дня</b> к биовозрасту'},
+    focus:['proteinDone','walk','mg'],done:['walk'],issue:['ВСР 47 мс — выше, чем вчера','Пульс покоя 54 — ниже, чем обычно за неделю'],quiet:['SpO2','дыхание','стресс'],
+    now:21.5,lev:{fat:22,protein:158,sodium:4.1}},
+  nowatch:{status:['Часы не на связи','gray'],ring:null,center:{dash:true},
+    seg:{recovery:null,sleep:null,move:null,food:80},emo:'Наденешь часы — вернём день',
+    effect:{txt:'День не оценивается — нет данных с часов',none:true},
+    focus:['watch','mg'],issue:[],quiet:[],
+    now:11.67,lev:{fat:6,protein:40,sodium:1.1}},
+  nofood:{status:['Ходьба и плавание','sage'],ring:{v:74},center:{num:74},
+    seg:{recovery:64,sleep:88,move:74,food:null},emo:'Держись — вечер всё решит',
+    effect:{txt:'Сегодня <b>−2,0 дня</b> — без питания, ждёт записи'},
+    focus:['meal','walk','mg'],issue:['ВСР 47 мс — выше, чем вчера'],quiet:['SpO2','дыхание'],
+    now:14,lev:{fat:null,protein:null,sodium:null}}
 };
+/* серии — streaks[] из get_today_dashboard; рекорд — max по истории (добавить на бэкенде) */
+const STREAKS=[
+  {ic:'shield',label:'Жиры в норме',n:12,u:'дней',rec:14},
+  {ic:'moon',label:'Сон 7–9 ч',n:3,u:'ночи',rec:9},
+  {ic:'drop',label:'Без алкоголя',n:9,u:'дней',rec:23},
+  {ic:'rise',label:'Вставал каждые 40 мин',n:6,u:'дней',rec:6},
+  {ic:'wave2',label:'Плавание на неделе',n:2,u:'раза',rec:null}
+];
+/* вклад дня — longevity.affects_today[] (est_years × 365, weight, how/источник, markers) */
+const EFFECT=[
+  {what:'Шаги вчера 12 400',sub:'+2 400 к норме 10 000',days:-3.2,w:'strong',src:'Han 2023',mk:'СРБ · лейкоциты · RDW'},
+  {what:'Клетчатка 26 из 30 г',sub:'недобор 4 г',days:1.1,w:'moderate',src:'Jiao 2015, Jain 2025',mk:'СРБ'},
+  {what:'Насыщ. жиры 80 %, сахар 70 %',sub:'от дневного лимита',days:-1.0,w:'weak',src:'Cardoso 2024',mk:'глюкоза · СРБ'},
+  {what:'Сон 7,1 ч',sub:'в зоне 7–9 ч',days:0,w:'moderate',src:'Ballesio 2025',mk:'СРБ'},
+  {what:'Без алкоголя вчера',sub:'MCV не растёт',days:0,w:'moderate',src:'Thompson 2021',mk:'MCV'}
+];
+const WLABEL={strong:'сильные данные',moderate:'умеренные',weak:'слабые'};
 
 /* ================= TODAY ================= */
 /* Дуга над числом: пологий сегмент окружности (не полукруг), своя строка в потоке — ничего не перекрывает */
@@ -826,44 +949,48 @@ function buildArc(){
 buildArc();
 
 const stepsTarget=()=>S.medgate?12000:14540;
-function chipsFor(d){const ch=d.chips,out=[];
-  if(d.center.num!=null)out.push({k:'day',ic:d.ring.v>80?'crown':'sprout',gold:d.ring.v>80,v:d.center.num,l:'Вклад',p:d.ring.v/100});
-  if(ch.sleep!=null)out.push({k:'sleep',ic:'moon',v:ch.sleep,l:'Сон'});
-  if(ch.hrv!=null)out.push({k:'hrv',ic:'wave',v:ch.hrv[0],l:'ВСР'});
-  if(ch.energy!=null)out.push({k:'energy',ic:'flame',v:ch.energy,l:'Энергия',p:+ch.energy/100});
-  if(S.time!=='nowatch'){const st=Math.round(stepsAt(d.now));out.push({k:'steps',ic:'steps',v:st>=10000?fmt(st/1000,1)+'<small>к</small>':fmt(st),l:'Шаги',p:Math.min(1,st/stepsTarget())})}
-  if(d.lev.protein!=null)out.push({k:'protein',ic:'protein',v:d.lev.protein+'<small>г</small>',l:'Белок',p:Math.min(1,d.lev.protein/160)});
+/* чипы — баллы сегментов дня (бэкенд уже считает: sleep/movement/nutrition_score) + Body Battery.
+   Сырые сон/ВСР/энергия больше не дублируются на главной — они внутри оверлеев. */
+function chipsFor(d){const g=d.seg,out=[];
+  const add=(k,ic,l,v)=>{if(v!=null)out.push({k,ic:v>=85?'crown':ic,gold:v>=85,v,l,p:v/100})};
+  add('recovery','charge','Заряд',g.recovery);add('sleep','moon','Сон',g.sleep);add('move','steps','Движение',g.move);add('food','bowl','Питание',g.food);
   return out}
-const ENERGY_BAND={morning:[48,71],day:[55,74],evening:[55,74],nofood:[55,74]};
-function cardsFor(d){const ch=d.chips,out=[];
-  if(ch.sleep!=null)out.push({k:'sleep',ic:'moon',t:'Сон',st:['Хорошо','green'],v:ch.sleep,sc:[5,9],b0:6.7,val:7.07,lab:[['ср. 6:42',6.7]]});
-  if(ch.hrv!=null)out.push({k:'hrv',ic:'wave',t:'ВСР',st:ch.hrv[1]?['Растёт','teal']:['Стабильно','teal'],v:ch.hrv[0],u:'мс',sc:[30,60],b0:42,val:+ch.hrv[0],lab:[['база 42',42]]});
-  if(ch.energy!=null){const e=+ch.energy,bd=ENERGY_BAND[S.time]||[55,74];
-    out.push({k:'energy',ic:'flame',t:'Энергия',st:e>=70?['Хорошо','green']:e>=55?['Умеренно','amber']:['Низко','warm'],v:e,u:'/100',sc:[40,90],b0:bd[0],val:e,lab:[['мин '+bd[0],bd[0]],['пик '+bd[1],bd[1]]]})}
-  return out}
-const pct=(v,sc)=>Math.max(0,Math.min(100,(v-sc[0])/(sc[1]-sc[0])*100));
+const focusItems=d=>{const ids=[...d.focus];if(S.caseSt==='testing'&&!ids.includes('nut'))ids.splice(ids.length-1,0,'nut');return ids.map(k=>({...F[k],key:k}))};
+const isDone=it=>it.done||S.done.has(it.id);
 
 function renderToday(){
-  const d=TD[S.time],c=d.center;
+  const d=TD[S.time];
   $('#tDate').textContent=S.sunday?'Воскресенье, 27 сентября':'Суббота, 26 сентября';
   $('#tStatus').innerHTML=`<i class="dot-live ${d.status[1]==='gray'?'gray':''}"></i>${d.status[0]}`;
   $('#emo').textContent=d.emo||'';
-  $('#coach').textContent=d.coach;
-  const day=c.num!=null?(c.sub.startsWith('вклад дня: ')?`Вклад дня <b>${c.sub.slice(11)}</b> к биовозрасту`:`Вклад дня · ${c.sub}`):`<b>${c.label}</b> · ${c.sub}`;
-  $('#heroMeta').innerHTML=day+(d.potential?`<br>${d.potential}`:'');
+  const ef=$('#effectLink');ef.classList.toggle('none',!!d.effect.none);ef.dataset.a=d.effect.none?'':'effect';
+  ef.innerHTML=`<span>${d.effect.txt}</span>${d.effect.none?'':svg('right')}`;
   $('#crown').classList.toggle('has',!!(d.ring&&d.ring.v>80));
   const C=2*Math.PI*28;
-  $('#chips').innerHTML=chipsFor(d).map(x=>`<button class="chip press" data-a="chip" data-k="${x.k}"><span class="chipC">${x.p!=null?`<svg class="ring" viewBox="0 0 58 58"><circle cx="29" cy="29" r="28" data-d="${(x.p*C).toFixed(1)}"/></svg>`:''}${svg(x.ic,'ic chipI'+(x.gold?' gold':''))}<span class="chipV">${x.v}</span></span><span class="chipL">${x.l}</span></button>`).join('');
-  $('#metrics').innerHTML=cardsFor(d).map((m,i)=>`<button class="mcard ${m.k} rise press" style="--i:${3+i}" data-a="topic" data-k="${m.k}">
-    <div class="mc-h"><span class="mc-ic">${svg(m.ic)}</span><span class="mc-t"><b>${m.t}</b><span class="stw ${m.st[1]}">${m.st[0]}</span></span>${svg('right','ic mc-go')}</div>
-    <div class="mc-b"><div class="mc-v">${m.v}${m.u?`<small>${m.u}</small>`:''}</div>
-    <div class="sld" data-l="${pct(m.b0,m.sc)}" data-v="${pct(m.val,m.sc)}"><i class="tr0"></i><i class="band" style="left:${pct(m.b0,m.sc)}%"></i><i class="thumb" style="left:${pct(m.b0,m.sc)}%"></i>${m.lab.map(l=>`<span class="sl${l[2]?' '+l[2]:''}" style="left:${pct(l[1],m.sc)}%">${l[0]}</span>`).join('')}</div></div></button>`).join('');
-  let x='',i=6;
-  if(d.nudge)x+=`<button class="mcard ncard rise press" style="--i:${i++}" data-a="nudge" data-go="${d.nudge.go}"><div class="mc-h"><span class="mc-ic">${svg(d.nudge.go==='watch'?'watch':'hint')}</span><span class="nt"><span class="stw teal">${d.nudge.t} · ${d.nudge.go==='watch'?'Часы':'Подсказка'}</span>${d.nudge.text}</span>${svg('right','ic mc-go')}</div></button>`;
-  if(S.caseSt==='pending')x+=`<button class="mcard ncard warm rise press" style="--i:${i++}" data-a="needyou"><div class="mc-h"><span class="mc-ic"><i class="pdot2" style="margin:0"></i></span><span class="nt"><span class="stw warm">Нужен ты</span>Кейс аллергии: вероятный аллерген найден</span>${svg('right','ic mc-go')}</div></button>`;
-  if(S.sunday)x+=`<button class="mcard ncard rise press" style="--i:${i++}" data-a="science"><div class="mc-h"><span class="mc-ic">${svg('book')}</span><span class="nt"><span class="stw teal">Воскресенье</span>Свежая наука недели — 5 исследований</span>${svg('right','ic mc-go')}</div></button>`;
-  $('#tExtra').innerHTML=x;
-  $('#caseBadge').classList.toggle('on',S.caseSt==='pending');
+  $('#chips').innerHTML=chipsFor(d).map(x=>`<button class="chip press" data-a="chip" data-k="${x.k}"><span class="chipC"><svg class="ring" viewBox="0 0 58 58"><circle cx="29" cy="29" r="28" data-d="${(x.p*C).toFixed(1)}"/></svg>${svg(x.ic,'ic chipI'+(x.gold?' gold':''))}<span class="chipV">${x.v}</span></span><span class="chipL">${x.l}</span></button>`).join('');
+
+  /* Нужен ты — только когда есть решение; стоит выше фокуса: решение важнее рутины */
+  let ny='';
+  if(S.caseSt==='pending')ny+=`<button class="nrow" data-a="needyou"><span class="nt">Кейс аллергии: вероятный триггер найден — решить, исключать ли</span>${svg('right','ic mc-go')}</button>`;
+  if(S.anom)ny+=`<div class="nrow" style="display:block"><span class="nt">Стресс днём выше твоей базы третий день</span><div class="nacts"><button data-a="anom" data-k="investigate">Разобраться</button><button class="m" data-a="anom" data-k="acknowledge">Знаю причину</button></div></div>`;
+  $('#needYou').innerHTML=ny?`<div class="mcard ncard warm rise" style="--i:3"><div class="mc-h"><span class="mc-ic"><i class="pdot2" style="margin:0"></i></span><span class="nt" style="flex:1"><span class="stw warm" style="margin:0">Нужен ты${(S.caseSt==='pending')+S.anom>1?' · 2':''}</span></span></div>${ny}</div>`:'';
+
+  const fi=focusItems(d),nd=fi.filter(isDone).length;
+  $('#focusCount').textContent=`${nd} из ${fi.length}`;
+  $('#focus').innerHTML=fi.map(it=>`<div class="fitem${isDone(it)?' done':''}" data-f="${it.id}">
+    <button class="fchk press" data-a="fdone" data-k="${it.id}" aria-label="Отметить">${svg('check')}</button>
+    <button class="ftxt" data-a="${it.go?'fgo':'fdone'}" data-k="${it.go||it.id}"><b>${it.t&&!isDone(it)?`<span class="ft">${it.t}</span>`:''}${it.title}</b><small>${it.why}</small></button>
+    ${it.go?svg('right','ic mc-go'):svg(it.ic,'ic fic')}</div>`).join('');
+
+  $('#streaks').innerHTML=STREAKS.map(k=>{const best=k.rec!=null&&k.n>=k.rec;
+    return `<div class="stk${best?' best':''}">${svg(k.ic,'ic si')}<div class="sn">${k.n}<small>${k.u}</small></div><div class="sl2">${k.label}</div>
+    ${k.rec!=null?`<div class="sr"><i data-w="${Math.min(100,k.n/k.rec*100)}"></i></div><div class="sm">${best?'рекорд — держи':`до рекорда ${k.rec-k.n}`}</div>`:`<div class="sr"><i data-w="${k.n/7*100}"></i></div><div class="sm">цель — 2 в неделю</div>`}</div>`}).join('');
+
+  const iss=d.issue.map(t=>`<div class="irow">${svg(/выше/.test(t)?'up':'down','ic up')}<span>${t}</span></div>`).join('')
+    +(d.quiet.length?`<div class="irow quiet">${svg('check')}<span>Спокойно: ${d.quiet.join(', ')}</span></div>`:'')
+    +(S.sunday?`<button class="irow press" data-a="science">${svg('book','ic')}<span>Наука недели — 5 исследований под твои темы</span>${svg('right','ic mc-go')}</button>`:'');
+  $('#issue').innerHTML=iss;$('#issueSec').hidden=!iss;
+  $('#caseBadge').classList.toggle('on',S.caseSt==='pending'||S.anom);
   requestAnimationFrame(sizeBg);
 }
 
@@ -892,8 +1019,7 @@ function enterToday(){
   countUp($('#bioBig'),32.4,{from:bioShown?33.6:41,dec:1,dur:bioShown?900:1800});bioShown=true;
   const C=2*Math.PI*28;
   $$('#chips .ring circle').forEach(c=>{c.style.transition='none';c.style.strokeDasharray=`0 ${C}`;void c.getBoundingClientRect();c.style.transition='';setTimeout(()=>c.style.strokeDasharray=`${c.dataset.d} ${C}`,260)});
-  $$('#metrics .sld').forEach(sl=>{const b=$('.band',sl),t=$('.thumb',sl);b.style.transition=t.style.transition='none';b.style.width='0';t.style.left=sl.dataset.l+'%';void sl.offsetWidth;b.style.transition=t.style.transition='';
-    setTimeout(()=>{b.style.width=(sl.dataset.v-sl.dataset.l)+'%';t.style.left=sl.dataset.v+'%'},380)});
+  $$('#streaks .sr i').forEach(b=>{b.style.transition='none';b.style.width='0';void b.offsetWidth;b.style.transition='';setTimeout(()=>b.style.width=b.dataset.w+'%',420)});
   sizeBg();updBg();
   if(!d.ring)return;
   const V=d.ring.v;dotG.classList.add('on');
@@ -934,10 +1060,10 @@ function renderRhythm(){
   }
   $('#rhythmChart').innerHTML=html;$('#rhythmChart').dataset.steps=steps??'';
   renderLevers();
-  $('#rFoot').textContent=d.lev.fat==null?'Рычаги оживут после первой записи еды.':'Серия живёт в строке жиров — 12 дней, до рекорда 2.';
+  $('#rFoot').textContent=d.lev.fat==null?'Рычаги оживут после первой записи еды.':'';
 }
 const LEV={
-  fat:{name:'Насыщенные жиры',unit:'г',target:28,max:35,zone:[0,28],tick:28,meta:()=>'серия 12 дней',
+  fat:{name:'Насыщенные жиры',unit:'г',target:28,max:35,zone:[0,28],tick:28,meta:v=>v<=28?'в коридоре':'перебор',
     src:v=>[['cheese','Сыр',v*.5],['beef','Говядина',v*.31],['butter','Масло',v*.19]],note:'Убери сыр вечером — серия живёт.'},
   protein:{name:'Белок',unit:'г',target:160,max:180,zone:[160,180],tick:160,meta:v=>v>=160?'закрыт':'осталось '+(160-v),
     src:v=>[['chicken','Курица',v*.4],['egg','Яйца',v*.25],['yogurt','Йогурт',v*.19],['dots','Прочее',v*.16]],note:'Творог вечером добавит около 30 г.'},
@@ -1111,7 +1237,7 @@ function setPage(i,force){const changed=i!==pIdx;pIdx=i;track.style.transition='
   if(changed||force)enter[curScreen()]()}
 $$('.switcher button').forEach(b=>b.addEventListener('click',()=>{haptic();setPage(+b.dataset.sw)}));
 let sx=null,sy=0,st=0,drag=null,dx=0,suppress=false;
-pager.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;if(e.target.closest('.chips')){sx=null;return}sx=e.clientX;sy=e.clientY;st=performance.now();drag=null;dx=0});
+pager.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;if(e.target.closest('.chips,.streaks')){sx=null;return}sx=e.clientX;sy=e.clientY;st=performance.now();drag=null;dx=0});
 pager.addEventListener('pointermove',e=>{if(sx===null)return;const ddx=e.clientX-sx,ddy=e.clientY-sy;
   if(drag===null&&(Math.abs(ddx)>8||Math.abs(ddy)>8)){drag=Math.abs(ddx)>Math.abs(ddy);if(drag){try{pager.setPointerCapture(e.pointerId)}catch(_){}$$('.press.down').forEach(p=>p.classList.remove('down'))}}
   if(!drag)return;e.preventDefault();const W=pager.clientWidth;dx=ddx;let off=-pIdx*W+dx;
@@ -1150,10 +1276,7 @@ const TOPICS={
     stats:[['Глубокий','1:18'],['REM','1:36'],['Качество','91%']],coach:'Отбой до 23:10 — и недосып закроется: сейчас минус полчаса.',pubs:['sleep','mg']},
   hrv:{name:'ВСР',label:'Среднее за ночь',value:'47',unit:'мс',sub:'Растёт 5 ночей подряд · база 42',
     data:[41,43,40,42,44,41,39,42,43,42,40,41,43,44,42,41,40,42,43,41,42,44,43,42,41,43,44,45,46,47],base:42,labels:[['30 дней назад','start',6],['Сегодня','end',314]],marks:[2,10,21],
-    stats:[['7 дней','45'],['30 дней','42'],['Пульс покоя','54']],coach:'Восстановление опережает нагрузку — но спина в щадящем режиме, без тяжёлого.',pubs:['mg','back']},
-  energy:{name:'Энергия',label:'Сейчас',value:'62',unit:'/100',sub:'Спад после обеда прошёл в 14:30',
-    data:[48,57,66,71,74,72,68,63,58,55,57,60,62],base:null,labels:[['7:00','start',6],['16:00','end',314]],marks:[],
-    stats:[['Пик','74'],['Минимум','55'],['Вечер','58']],coach:'Прогулка после ужина поднимет вечер сильнее, чем кофе.',pubs:[]}
+    stats:[['7 дней','45'],['30 дней','42'],['Пульс покоя','54']],coach:'Восстановление опережает нагрузку — но спина в щадящем режиме, без тяжёлого.',pubs:['mg','back']}
 };
 const B={
   topic(k){const T=TOPICS[k];return {html:`${top(T.name)}
@@ -1185,6 +1308,21 @@ const B={
     <div class="rise" style="--i:2;margin-top:22px"><div class="cl-list" style="margin:0">${CONC.map((c,i)=>`<div class="cline"><span class="n">${i+1}</span><p>${c[0]}</p>${c[1]?concBtn(c[1]):''}</div>`).join('')}</div></div>
     <div class="btns rise" style="--i:3;justify-content:center">${pendingActs()?`<button class="btn pri press" data-a="acceptall">Принять всё</button>`:''}</div>
     ${tgLink('conclusion_0922',4)}`}},
+  effect(){const d=TD[S.time],num=(d.effect.txt.match(/−?\d+,\d/)||['0'])[0];
+    const fd=v=>v===0?'0':(v<0?'−':'+')+fmt(Math.abs(v),1);
+    return {html:`${top('Вклад дня')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">Сегодня · к биовозрасту</div><div class="big">${num}<small>дня</small></div><p class="ov-sub" style="color:var(--accent-ink)">Минус — моложе. Больше всего сегодня дали шаги.</p></div>
+    <div class="rise" style="--i:2;margin-top:18px">${EFFECT.map(e=>`<div class="efrow"><div class="efd ${e.days<0?'good':e.days>0?'bad':'zero'}">${fd(e.days)}</div><div class="efm"><b>${e.what}</b><span>${e.sub} · ${e.mk}</span><div class="efs"><span class="tag">${WLABEL[e.w]}</span><span class="tag">${e.src}</span></div></div></div>`).join('')}</div>
+    <p class="disc rise" style="--i:3">Оценка направления и порядка величины по поведенческим исследованиям — не пересчёт PhenoAge. Настоящий биовозраст считается только по крови: следующая сдача 12 окт.</p>
+    <button class="tgbtn tglink rise press" style="--i:4" data-a="gome">Биовозраст и потенциал — в «Я»${svg('right')}</button>`}},
+  recovery(){const d=TD[S.time],T=TOPICS.hrv,bb=d.seg.recovery;
+    return {html:`${top('Восстановление')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">Нагрузка сегодня</div><p style="font-family:var(--serif);font-size:32px;font-weight:300;line-height:1.1;margin-top:10px">${d.status[0]}</p>
+    ${S.medgate?`<p class="ov-sub" style="color:var(--warm-ink)">Щадящий режим · спина — без бега, прыжков и ударных. Запас восстановления не отменяет ограничение.</p>`:`<p class="ov-sub" style="color:var(--accent-ink)">Ограничений по здоровью нет.</p>`}</div>
+    ${bb!=null?`<div class="rise" style="--i:2;margin-top:18px"><div class="reason"><span>Body Battery</span><span>${bb}</span></div><div class="reason"><span>ВСР к базе 42</span><span style="color:var(--green)">+5 мс</span></div><div class="reason"><span>Нагрузка 7 дн / 28 дн</span><span>1,1 · в норме</span></div></div>
+    <div class="ov-chart rise" style="--i:3" id="ovChart"><div class="lbl" style="margin-bottom:4px">ВСР за 30 ночей</div>${lineChart({data:T.data,w:320,h:130,base:T.base,labels:T.labels,marks:[]})}</div>`:`<p class="ov-coach rise" style="--i:2">Часы не на связи — восстановление не оцениваем. Пока держись ходьбы и плавания.</p>`}
+    <p class="ov-coach rise" style="--i:4">${T.coach}</p>${pubList(['back','mg'],'Свежее по теме',5)}${tgLink('recovery',6)}`,
+    after(){$('#ovChart')&&replay($('#ovChart'))}}},
   labs(){return {html:`${top('Медпаспорт')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">Тело · по системам</div><p class="labsIntro">Сгруппировано по системам организма. Разверни группу — увидишь маркеры с грейдами.</p></div>
     <div class="rise" style="--i:2">${LABS.map((g,i)=>labsGroupHTML(g,i)).join('')}</div>
@@ -1238,7 +1376,7 @@ function setTheme(mode){document.documentElement.dataset.theme=mode;$('#themeLab
 function setPhoto(on){todayTab.classList.toggle('photo',on);$('#photoLabel').textContent=on?'Hero: с фото':'Hero: без фото';requestAnimationFrame(sizeBg)}
 
 /* ================= ACTIONS ================= */
-function applyPreset(k){const p=PRESETS[k];kbNext=true;Object.assign(S,{preset:k,time:p.time,caseSt:p.caseSt,medgate:p.medgate,sunday:p.sunday});
+function applyPreset(k){const p=PRESETS[k];kbNext=true;Object.assign(S,{preset:k,time:p.time,caseSt:p.caseSt,medgate:p.medgate,sunday:p.sunday,anom:!!p.anom,done:new Set(TD[p.time].done||[])});
   renderToday();renderRhythm();renderCase();renderConcCard();renderProgram()}
 function acceptAct(k){if(k==='nut'){S.caseSt='testing';renderCase(true);renderToday();renderProgram()}
   if(k==='fer'){S.fer='moved';renderPlan()}renderConcCard();refreshConc();haptic(12)}
@@ -1246,9 +1384,17 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
   if(t.tagName==='A'&&a)e.preventDefault();
   switch(a){
     case'topic':openSheet('topic',k,t);break;
-    case'chip':haptic();if(k==='sleep'||k==='hrv'||k==='energy')openSheet('topic',k,t);else{setPage(1);if(k==='protein')setTimeout(()=>openLever('protein'),650)}break;
+    case'chip':haptic();if(k==='sleep')openSheet('topic','sleep',t);else if(k==='recovery')openSheet('recovery',null,t);else{setPage(1);if(k==='food')setTimeout(()=>openLever('protein'),650)}break;
+    case'recovery':case'effect':openSheet(a,null,t);break;
+    case'fdone':{haptic(12);const was=S.done.has(k);was?S.done.delete(k):S.done.add(k);const row=$(`.fitem[data-f="${k}"]`);
+      if(row){row.classList.toggle('done',!was);row.classList.remove('pop');void row.offsetWidth;!was&&row.classList.add('pop')}
+      const fi=focusItems(TD[S.time]);$('#focusCount').textContent=`${fi.filter(isDone).length} из ${fi.length}`;
+      if(!was)toast(k==='mg'||k==='walk'||k==='nut'?'Отмечено — Программа учтёт это в вердикте.':'Отмечено.',()=>{S.done.delete(k);renderToday()});break}
+    case'fgo':haptic();if(k==='watch')toast('Как только часы будут на руке — данные подтянутся сами.');else if(k==='meal')toast('Откроется дневник в Telegram — сфотографируй тарелку');else{setPage(1);setTimeout(()=>openLever('protein'),650)}break;
+    case'anom':haptic(12);S.anom=false;renderToday();toast(k==='investigate'?'Доктор откроет расследование — гипотезы появятся в Кейсах.':'Принято — алерт закрыт, базу это не сдвинет.');break;
     case'food':case'science':case'conclusion':case'states':case'labs':openSheet(a,null,t);break;
     case'close':closeSheet();break;
+    case'gome':closeSheet();setTimeout(()=>goTab('me'),380);break;
     case'toast':haptic();toast(t.dataset.msg);break;
     case'ask':haptic();toast(`Откроется диалог с врачом: вопрос про ${t.dataset.name} ${t.dataset.value}`);break;
     case'labgroup':haptic();openLabGroup(+t.dataset.g);break;
