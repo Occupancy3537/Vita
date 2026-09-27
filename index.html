@@ -12,7 +12,7 @@
 <title>Vita</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600&family=Newsreader:opsz,wght@6..72,300;6..72,400&display=swap" rel="stylesheet">
 <!--
   ПЛАН СБОРКИ (7.2 → редизайн 1) — что в макете заглушка, а в продакшене должно быть иначе:
   1. «Исключить», «Перенести», «Принять» и любые решения Влада — не локальный state.
@@ -48,12 +48,15 @@
   --shadow-float:0 14px 40px rgba(29,27,24,.14); --shadow-frame:0 30px 90px rgba(29,27,24,.14);
   --ease:cubic-bezier(.22,1,.36,1); --spring:cubic-bezier(.34,1.56,.64,1);
   --font:"Manrope",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --serif:"Newsreader","Iowan Old Style",Georgia,serif;
+  --surface:#EFEDE8; --surface-hi:#FBFAF8;
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
   --bg:#0F1214;
+  --surface:#181C1F; --surface-hi:#20252A;
   --ink:#F1EEE7; --ink2:#B3ADA3; --muted:#726C64; --faint:#3C3936;
   --line:rgba(241,238,231,.10); --line-soft:rgba(241,238,231,.05);
   --accent:#E2835C; --accent-ink:#F2A17B; --accent-soft:rgba(226,131,92,.16);
@@ -106,8 +109,9 @@ svg{display:block}
 /* stage & tabs */
 .stage{position:absolute;inset:0;z-index:1;transition:transform .5s var(--spring)}
 .stage.behind{transform:scale(.95) translateY(6px)}
-.tab{position:absolute;inset:0;display:flex;flex-direction:column;visibility:hidden;pointer-events:none;transform:translateY(8px);transition:transform .45s var(--spring),visibility 0s .22s}
-.tab.on{visibility:visible;pointer-events:auto;transform:none;transition:transform .45s var(--spring),visibility 0s 0s}
+.tab{position:absolute;inset:0;display:flex;flex-direction:column;visibility:hidden;pointer-events:none;opacity:0;transform:translateX(calc(var(--dir,1)*-28px));transition:transform .38s var(--ease),opacity .22s ease,visibility 0s .38s}
+.tab.on{visibility:visible;pointer-events:auto;opacity:1;transform:none;transition:transform .42s var(--spring),opacity .32s ease .06s,visibility 0s 0s}
+.tab.from{transform:translateX(calc(var(--dir,1)*36px));transition:none}
 .rise{opacity:0;transform:translateY(10px);transition:opacity .18s ease,transform .3s ease}
 .on .rise.in,.ov.open .rise{opacity:1;transform:none;transition:opacity .5s var(--ease) calc(var(--i,0)*60ms + 40ms),transform .6s var(--ease) calc(var(--i,0)*60ms + 40ms)}
 
@@ -118,7 +122,7 @@ svg{display:block}
 .sw-under{position:absolute;bottom:2px;left:0;width:78px;height:2px;border-radius:2px;background:var(--accent);transition:transform .4s var(--spring)}
 .pager{flex:1;min-height:0;overflow:hidden;touch-action:pan-y}
 .track{display:flex;width:200%;height:100%;transition:transform .5s var(--spring);will-change:transform}
-.screen{height:100%;overflow-y:auto;overflow-x:hidden;padding:0 20px 118px;scrollbar-width:none}
+.screen{height:100%;overflow-y:auto;overflow-x:hidden;padding:0 20px 112px;scrollbar-width:none}
 .screen::-webkit-scrollbar{display:none}
 .track .screen{width:50%}
 .tab>.screen{flex:1;min-height:0;padding-top:20px}
@@ -132,40 +136,50 @@ svg{display:block}
 .subtitle{font-size:13px;color:var(--muted);margin-top:6px}
 
 /* HERO */
-.hero{margin-top:10px;padding:clamp(10px,2vh,20px) 4px clamp(6px,1.4vh,14px);display:flex;flex-direction:column;align-items:center;position:relative;border-radius:20px;overflow:hidden}
-.heroPhotoLayer{position:absolute;inset:-10%;z-index:0;opacity:0;transition:opacity .5s ease;background:
-  radial-gradient(120% 90% at 30% 10%,rgba(226,163,120,.55),transparent 60%),
-  radial-gradient(100% 90% at 80% 100%,rgba(80,60,50,.65),transparent 65%),
-  linear-gradient(160deg,#8a6a54,#3c2f28 70%)}
+.hero{margin-top:6px;padding:clamp(14px,2.6vh,26px) 16px clamp(14px,2.4vh,22px);display:flex;flex-direction:column;align-items:center;position:relative;border-radius:26px;overflow:hidden;transition:margin .5s var(--ease)}
+.hero.photo{margin-left:-8px;margin-right:-8px}
+.heroPhotoLayer{position:absolute;inset:0;z-index:0;opacity:0;transition:opacity .6s ease}
+.heroPhotoLayer svg{width:100%;height:100%}
 .hero.photo .heroPhotoLayer{opacity:1}
-.hero.photo .heroPhotoLayer::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(15,14,12,.15),rgba(15,14,12,.55))}
-.hero.photo .bioBig,.hero.photo .bioSub,.hero.photo .potential,.hero.photo .emo,.hero.photo .coachline,.hero.photo .arcCaption{color:rgba(247,241,233,.75)}
-.hero.photo .bioSub b,.hero.photo .arcCaption b,.hero.photo .emo{color:#F7F1E9}
+.hero.photo .heroPhotoLayer::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(12,14,16,.10) 0%,rgba(12,14,16,.28) 45%,rgba(12,14,16,.62) 100%)}
+.hero.photo .bioSub,.hero.photo .potential,.hero.photo .coachline,.hero.photo .arcCaption,.hero.photo .arcEnd{color:rgba(247,241,233,.78);fill:rgba(247,241,233,.6)}
+.hero.photo .bioBig,.hero.photo .bioSub b,.hero.photo .arcCaption b,.hero.photo .emo,.hero.photo .arcNum{color:#F7F1E9}
+.hero.photo .arcTrack{stroke:rgba(247,241,233,.22)}
+.hero.photo .arcAhead{stroke:#F7F1E9}
+.hero.photo .arcVal,.hero.photo .arcDot{stroke:#F2A17B}
+.hero.photo .arcDot{fill:#2a2522}
+.hero.photo .crown{color:#F2A17B}
 .heroInner{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;width:100%}
-.bioBigWrap{position:relative;display:flex;align-items:flex-start;gap:8px}
-.bioBig{font-size:clamp(56px,10vh,76px);font-weight:200;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
-.crown{width:22px;height:22px;color:var(--accent);margin-top:10px;opacity:0;transform:scale(.5) translateY(4px);transition:opacity .6s var(--ease),transform .6s var(--spring)}
+.bioBigWrap{position:relative;display:flex;align-items:flex-start;justify-content:center}
+.bioBig{font-size:clamp(60px,10.5vh,80px);font-weight:200;line-height:1;letter-spacing:-.035em;font-variant-numeric:tabular-nums}
+.crown{position:absolute;left:100%;top:6px;margin-left:6px;width:22px;height:22px;color:var(--accent);opacity:0;transform:scale(.4) translateY(6px) rotate(-8deg);transition:opacity .7s var(--ease),transform .8s var(--spring)}
+.crown svg{width:22px;height:22px}
 .crown.show{opacity:1;transform:none}
-.bioSub{margin-top:2px;font-size:12.5px;color:var(--muted);letter-spacing:.01em}
+.bioSub{margin-top:6px;font-size:12.5px;color:var(--muted);letter-spacing:.01em}
 .bioSub b{color:var(--ink2);font-weight:500}
-.arcBox{margin-top:clamp(10px,2vh,18px);width:min(230px,70vw);display:flex;flex-direction:column;align-items:center}
+.arcBox{position:relative;margin-top:clamp(14px,2.6vh,24px);width:min(250px,72vw)}
 .arcSvg{width:100%;height:auto;overflow:visible}
-.arcTrack{fill:none;stroke:var(--line);stroke-width:3}
-.arcTrack.empty{stroke:var(--line);stroke-dasharray:1.2 3.2}
-.arcAhead{fill:none;stroke:var(--ink2);stroke-width:3;stroke-linecap:round;opacity:.3}
-.arcVal{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round}
+.arcTrack{fill:none;stroke:var(--line);stroke-width:2.5;stroke-linecap:round}
+.arcTrack.empty{stroke-dasharray:.6 2.4}
+.arcAhead{fill:none;stroke:var(--ink2);stroke-width:2.5;stroke-linecap:round;opacity:.28}
+.arcVal{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linecap:round}
+.arcDot{fill:var(--bg);stroke:var(--accent);stroke-width:2;opacity:0;transition:opacity .3s ease}
+.arcDot.on{opacity:1}
+.arcEnd{font-size:9px;fill:var(--faint);font-family:var(--font);letter-spacing:.04em}
+.arcNum{position:absolute;left:0;right:0;bottom:2px;text-align:center;font-size:22px;font-weight:300;letter-spacing:-.01em;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1}
 .arcCaption{margin-top:8px;font-size:12px;color:var(--muted);text-align:center;line-height:1.4}
-.arcCaption b{color:var(--ink2);font-weight:600;font-variant-numeric:tabular-nums}
-.potential{margin-top:clamp(10px,1.8vh,16px);font-size:12.5px;color:var(--muted);text-align:center}
-.emo{margin-top:6px;font-size:16px;font-weight:400;color:var(--ink);text-align:center}
-.coachline{margin-top:6px;font-size:13px;line-height:1.5;color:var(--ink2);text-align:center;max-width:290px}
-.metrics{margin-top:18px;display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:10px}
-.mchip{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--ink2);font-variant-numeric:tabular-nums}
-.mchip svg{width:15px;height:15px;color:var(--muted)}
-.mchip .ic.mtrend{width:11px;height:11px;color:var(--accent-ink)}
-.msep{color:var(--faint);font-size:13px}
+.arcCaption b{color:var(--ink2);font-weight:500}
+.potential{margin-top:clamp(8px,1.4vh,12px);font-size:12.5px;color:var(--muted);text-align:center}
+.emo{margin-top:clamp(14px,2.4vh,22px);font-family:var(--serif);font-size:27px;font-weight:300;line-height:1.15;letter-spacing:-.005em;color:var(--ink);text-align:center}
+.coachline{margin-top:8px;font-size:13px;line-height:1.5;color:var(--ink2);text-align:center;max-width:290px}
+.mrows{margin-top:clamp(10px,2vh,18px)}
+.mrow{display:flex;align-items:center;gap:12px;width:100%;padding:13px 2px;border-top:1px solid var(--line);text-align:left}
+.mrow .mi{flex:none;width:18px;height:18px;color:var(--muted)}
+.mrow .mn{flex:1;font-size:14px;color:var(--ink2)}
+.mrow .mv{font-size:18px;font-weight:300;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.mrow .mv small{font-size:12px;color:var(--muted);margin-left:3px;letter-spacing:0}
+.mrow .mt{flex:none;width:13px;height:13px;color:var(--accent-ink);margin-left:-6px}
 .thinrow{display:flex;align-items:center;gap:12px;width:100%;padding:14px 2px;border-top:1px solid var(--line);text-align:left}
-#tExtra .thinrow:first-child{border-top:1px solid var(--line)}
 .trTime{flex:none;width:42px;font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
 .trDot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .trText{flex:1;font-size:13.5px;line-height:1.4;color:var(--ink2)}
@@ -286,7 +300,7 @@ svg{display:block}
 
 /* CASES */
 .case{margin-top:22px}
-.case h2{margin-top:14px;font-size:26px;font-weight:300;line-height:1.15;letter-spacing:-.015em}
+.case h2{margin-top:14px;font-family:var(--serif);font-size:30px;font-weight:300;line-height:1.12;letter-spacing:-.01em}
 .case .line{margin-top:10px;font-size:13.5px;line-height:1.5;color:var(--ink2)}
 .btns{display:flex;align-items:center;gap:16px;margin-top:20px;flex-wrap:wrap}
 .btn{height:42px;padding:0 20px;border-radius:21px;font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:8px;transition:background .4s ease,color .4s ease,scale .35s var(--ease)}
@@ -355,7 +369,10 @@ svg{display:block}
 .labsGroup:first-child{border-top:0}
 .labsGH{width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .labsGH b{font-size:14.5px;font-weight:500}
-.labsGH .gmeta{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.labsGH .gmeta{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.gdots{display:flex;gap:3px;margin-right:2px}
+.gdots i{width:5px;height:5px;border-radius:50%}
+.gd-exc{background:var(--g-exc-fg)}.gd-normal{background:var(--faint)}.gd-watch{background:var(--g-watch-fg);opacity:.7}.gd-out{background:var(--g-out-fg)}
 .labsRows{display:grid;grid-template-rows:0fr;transition:grid-template-rows .45s var(--ease)}
 .labsGroup.open .labsRows{grid-template-rows:1fr}
 .labsGroup.open .chev{transform:rotate(180deg)}
@@ -365,16 +382,21 @@ svg{display:block}
 .labsMain{flex:1;min-width:0}
 .labsName{font-size:13.5px;color:var(--ink)}
 .labsValue{display:block;font-size:12px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
-.askBtn{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:var(--faint);border:1px solid var(--line)}
+.askBtn{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:var(--muted);opacity:.7;transition:opacity .25s ease,color .25s ease}
+.askBtn:hover{opacity:1;color:var(--accent-ink)}
 .askBtn svg{width:13px;height:13px}
 .labsLegend{margin-top:28px;padding-top:16px;border-top:1px solid var(--line)}
 .legendRow{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:13px;color:var(--ink2)}
 .legendRow .grade{width:96px;justify-content:center}
 
-/* tab bar */
-.tabbar{position:absolute;z-index:20;left:0;right:0;bottom:0;height:76px;display:grid;grid-template-columns:repeat(4,1fr);padding:10px 14px 0;border-top:1px solid var(--line);background:var(--bg);transition:transform .5s var(--spring)}
-.stage.behind~.tabbar{transform:translateY(100px)}
-.tb{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:var(--muted);font-size:10.5px;font-weight:500;letter-spacing:.02em;transition:color .3s ease,scale .35s var(--ease)}
+/* tab bar — плавающая капсула */
+.tabbar{position:absolute;z-index:20;left:16px;right:16px;bottom:max(14px,env(safe-area-inset-bottom,0px));height:62px;display:grid;grid-template-columns:repeat(4,1fr);padding:0 6px;border-radius:31px;background:var(--surface);border:1px solid var(--line-soft);box-shadow:0 10px 30px rgba(29,27,24,.08);transition:transform .5s var(--spring)}
+:root[data-theme="dark"] .tabbar{box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.tabbar::before{content:"";position:absolute;left:0;right:0;bottom:calc(100% + 1px);height:40px;background:linear-gradient(to top,var(--bg),transparent);pointer-events:none;border-radius:0}
+.stage.behind~.tabbar{transform:translateY(110px)}
+.tb-pill{position:absolute;top:6px;bottom:6px;left:6px;width:calc((100% - 12px)/4);border-radius:25px;background:var(--surface-hi);transition:transform .45s var(--spring)}
+:root:not([data-theme="dark"]) .tb-pill{box-shadow:0 1px 2px rgba(29,27,24,.06)}
+.tb{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--muted);font-size:10.5px;font-weight:500;letter-spacing:.02em;transition:color .3s ease,scale .35s var(--ease)}
 .tb svg{width:20px;height:20px}
 .tb.on{color:var(--ink)}
 .tb .ico{position:relative}
@@ -481,24 +503,44 @@ svg{display:block}
           <div class="screen" id="s-today">
             <div class="hdr rise" style="--i:0"><span id="tDate"></span><span class="status" id="tStatus"></span></div>
             <div class="hero rise" id="heroBox" style="--i:1">
-              <div class="heroPhotoLayer" aria-hidden="true"></div>
+              <div class="heroPhotoLayer" aria-hidden="true"><svg viewBox="0 0 400 440" preserveAspectRatio="xMidYMid slice"><defs>
+                  <linearGradient id="skyG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#34475a"/><stop offset=".42" stop-color="#7f95a6"/><stop offset=".66" stop-color="#d9b196"/><stop offset="1" stop-color="#c98a6a"/></linearGradient>
+                  <radialGradient id="sunG" cx=".68" cy=".56" r=".42"><stop offset="0" stop-color="#ffd9b8" stop-opacity=".75"/><stop offset="1" stop-color="#ffd9b8" stop-opacity="0"/></radialGradient>
+                  <linearGradient id="snowG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6f3ef"/><stop offset=".55" stop-color="#d9dde1"/><stop offset="1" stop-color="#9aa6b1"/></linearGradient>
+                  <linearGradient id="rockG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#56646f"/><stop offset="1" stop-color="#2d363e"/></linearGradient>
+                  <linearGradient id="mistG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9dfd6" stop-opacity="0"/><stop offset=".5" stop-color="#e9dfd6" stop-opacity=".35"/><stop offset="1" stop-color="#e9dfd6" stop-opacity="0"/></linearGradient>
+                </defs>
+                <rect width="400" height="440" fill="url(#skyG)"/><rect width="400" height="440" fill="url(#sunG)"/><g transform="translate(0 64)">
+                <path d="M0 268 L46 238 L88 252 L132 222 L170 240 L206 214 L250 236 L300 206 L346 230 L400 212 V440 H0z" fill="#8b9aa8" opacity=".55"/>
+                <path d="M-10 330 L70 262 L118 236 L160 190 L196 140 L214 118 L232 138 L262 170 L300 214 L352 250 L410 290 V440 H-10z" fill="url(#rockG)"/>
+                <path d="M214 118 L232 138 L262 170 L300 214 L352 250 L410 290 V440 L300 440 L262 300 L236 206z" fill="#1f272e" opacity=".45"/>
+                <path d="M196 140 L214 118 L232 138 L246 156 L236 160 L228 150 L220 168 L210 156 L200 172 L190 160 L178 176 L186 156z" fill="url(#snowG)"/>
+                <path d="M178 176 L190 160 L200 172 L196 190 L186 186 L176 204 L170 196z M220 168 L228 150 L236 160 L246 156 L262 170 L252 186 L240 176 L232 196 L226 180z" fill="#e6e8ea" opacity=".75"/>
+                <path d="M160 190 L170 196 L162 214 L150 206z M252 186 L262 170 L278 188 L268 196z" fill="#e6e8ea" opacity=".45"/>
+                <rect y="250" width="400" height="80" fill="url(#mistG)"/>
+                <path d="M-10 372 L60 326 L110 344 L170 312 L230 340 L290 318 L350 344 L410 326 V440 H-10z" fill="#27302f" opacity=".85"/>
+                <path d="M-10 404 L80 370 L150 392 L230 366 L320 390 L410 372 V380 H-10z" fill="#171c1f"/></g>
+              </svg></div>
               <div class="heroInner">
-                <div class="bioBigWrap"><div class="bioBig" id="bioBig">32,4</div><div class="crown" id="crown"><svg class="ic" viewBox="0 0 24 24"><path d="M4 17l1.7-8 4.3 4 2-6 2 6 4.3-4L20 17H4z"/><path d="M4 17h16v2H4z"/></svg></div></div>
+                <div class="bioBigWrap"><div class="bioBig" id="bioBig">32,4</div><div class="crown" id="crown" title="Дневной вклад выше 80"><svg class="ic" viewBox="0 0 24 24"><path d="M4.5 17.5L3.5 8l5 4 3.5-6 3.5 6 5-4-1 9.5z"/><path d="M5 20.5h14"/></svg></div></div>
                 <div class="bioSub">биологический · паспортный <b>41</b></div>
                 <div class="arcBox" id="arcBox">
-                  <svg viewBox="0 0 220 66" class="arcSvg" aria-hidden="true">
-                    <path class="arcTrack" id="arcTrack" d="M14 60 A96 96 0 0 1 206 60" pathLength="100"/>
-                    <path class="arcAhead" id="arcAhead" d="M14 60 A96 96 0 0 1 206 60" pathLength="100" stroke-dasharray="0 100"/>
-                    <path class="arcVal" id="arcVal" d="M14 60 A96 96 0 0 1 206 60" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/>
+                  <svg viewBox="0 0 240 64" class="arcSvg" aria-hidden="true">
+                    <path class="arcTrack" id="arcTrack" d="M10 52 A166 166 0 0 1 230 52"/>
+                    <path class="arcAhead" id="arcAhead" d="M10 52 A166 166 0 0 1 230 52" pathLength="100" stroke-dasharray="0 100"/>
+                    <path class="arcVal" id="arcVal" d="M10 52 A166 166 0 0 1 230 52" pathLength="100" stroke-dasharray="100 100" stroke-dashoffset="100"/>
+                    <circle class="arcDot" id="arcDot" cx="10" cy="52" r="3.6"/>
+                    <text class="arcEnd" x="10" y="64" text-anchor="middle">0</text><text class="arcEnd" x="230" y="64" text-anchor="middle">100</text>
                   </svg>
-                  <p class="arcCaption" id="arcCaption"></p>
+                  <div class="arcNum" id="arcNum"></div>
                 </div>
+                <p class="arcCaption" id="arcCaption"></p>
                 <p class="potential" id="potential"></p>
                 <p class="emo" id="emo"></p>
                 <p class="coachline" id="coach"></p>
               </div>
             </div>
-            <div class="metrics" id="metrics"></div>
+            <div class="mrows rise" style="--i:2" id="metrics"></div>
             <div id="tExtra"></div>
           </div>
 
@@ -592,6 +634,7 @@ svg{display:block}
   </main>
 
   <nav class="tabbar" id="tabbar" role="tablist">
+    <span class="tb-pill" id="tbPill"></span>
     <button class="tb on press" data-go="today"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" opacity=".35"/><path d="M12 4a8 8 0 0 1 7.2 11.5"/></svg></span>Сегодня</button>
     <button class="tb press" data-go="plan"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="3.5"/><path d="M8 3v4M16 3v4M4 10h16"/></svg></span>План</button>
     <button class="tb press" data-go="cases"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg><i class="badge" id="caseBadge"></i></span>Кейсы</button>
@@ -613,7 +656,7 @@ function tween(dur,fn,ease=eo4){return new Promise(res=>{if(reduce){fn(1);res();
 const fmt=(v,dec=0)=>dec?v.toFixed(dec).replace('.',','):Math.round(v).toLocaleString('ru-RU');
 function countUp(el,to,{dur=1400,dec=0,from=0}={}){tween(dur,p=>{el.textContent=fmt(from+(to-from)*p,dec)})}
 const replay=el=>{if(!el)return;el.classList.remove('go');void el.getBoundingClientRect();el.classList.add('go')};
-const ACCENT='#c2724b';
+const ACCENT='var(--accent)';
 
 const I={
   cheese:'<path d="M3 17l9-10 9 5v5H3z"/><circle cx="9" cy="14.5" r="1"/><circle cx="15" cy="15" r="1.2"/>',
@@ -642,6 +685,7 @@ const I={
 };
 const svg=(k,cls='ic')=>`<svg class="${cls}" viewBox="0 0 24 24">${I[k]}</svg>`;
 const thumbBg='var(--line-soft)';
+const GLABEL={exc:'Отлично',normal:'Норма',watch:'На контроле',out:'Вне референса'};
 
 function smooth(p){let d=`M${p[0][0].toFixed(1)},${p[0][1].toFixed(1)}`;for(let i=0;i<p.length-1;i++){const a=p[i-1]||p[i],b=p[i],c=p[i+1],e=p[i+2]||c,t=1/6;d+=` C${(b[0]+(c[0]-a[0])*t).toFixed(1)},${(b[1]+(c[1]-a[1])*t).toFixed(1)} ${(c[0]-(e[0]-b[0])*t).toFixed(1)},${(c[1]-(e[1]-b[1])*t).toFixed(1)} ${c[0].toFixed(1)},${c[1].toFixed(1)}`}return d}
 const pulseDot=(x,y,c)=>`<g class="pdot"><circle cx="${x}" cy="${y}" r="4" fill="${c}" opacity=".4"><animate attributeName="r" values="4;13" dur="2.6s" repeatCount="indefinite"/><animate attributeName="opacity" values=".45;0" dur="2.6s" repeatCount="indefinite"/></circle></g>`;
@@ -701,7 +745,8 @@ function renderToday(){
   $('#emo').textContent=d.emo||'';
   $('#coach').textContent=d.coach;
   const c=d.center;
-  $('#arcCaption').innerHTML=(c.num!=null?`<b>${c.num}</b> · `:'')+c.sub;
+  $('#arcCaption').innerHTML=c.num!=null?(c.sub.startsWith('вклад дня: ')?`вклад дня в биовозраст <b>${c.sub.slice(11)}</b>`:`вклад дня · ${c.sub}`):`<b>${c.label}</b> · ${c.sub}`;
+  $('#arcNum').textContent='';
   renderMetrics(d);
   let x='',i=2;
   if(d.nudge)x+=`<button class="thinrow rise press" style="--i:${i++}" data-a="nudge" data-go="${d.nudge.go}"><span class="trTime">${d.nudge.t}</span><span class="trText">${d.nudge.text}</span>${svg('right','ic trGo')}</button>`;
@@ -711,22 +756,26 @@ function renderToday(){
   $('#caseBadge').classList.toggle('on',S.caseSt==='pending');
 }
 function renderMetrics(d){
-  const ch=d.chips,items=[];
-  if(ch.sleep!=null)items.push(`<button class="mchip press" data-a="topic" data-k="sleep">${svg('moon')}<span>${ch.sleep}</span></button>`);
-  if(ch.hrv!=null)items.push(`<button class="mchip press" data-a="topic" data-k="hrv">${svg('pulse')}<span>${ch.hrv[0]}</span>${ch.hrv[1]?svg('up','ic mtrend'):''}</button>`);
-  if(ch.energy!=null)items.push(`<button class="mchip press" data-a="topic" data-k="energy">${svg('bolt')}<span>${ch.energy}</span></button>`);
-  const box=$('#metrics');box.innerHTML=items.length?items.join('<span class="msep">·</span>'):'';box.hidden=!items.length;
+  const ch=d.chips,rows=[];
+  const row=(k,ic,name,val,unit='',trend=false)=>`<button class="mrow press" data-a="topic" data-k="${k}">${svg(ic,'ic mi')}<span class="mn">${name}</span><span class="mv">${val}${unit?`<small>${unit}</small>`:''}</span>${trend?svg('up','ic mt'):''}${svg('right','ic trGo')}</button>`;
+  if(ch.sleep!=null)rows.push(row('sleep','moon','Сон',ch.sleep));
+  if(ch.hrv!=null)rows.push(row('hrv','pulse','ВСР',ch.hrv[0],'мс',!!ch.hrv[1]));
+  if(ch.energy!=null)rows.push(row('energy','bolt','Энергия',ch.energy));
+  const box=$('#metrics');box.innerHTML=rows.join('');box.hidden=!rows.length;
 }
+let bioShown=false;
 function enterToday(){
   reveal($('#s-today'));const d=TD[S.time];
-  const val=$('#arcVal'),ahead=$('#arcAhead'),track=$('#arcTrack'),crown=$('#crown');
+  const val=$('#arcVal'),ahead=$('#arcAhead'),track=$('#arcTrack'),crown=$('#crown'),dot=$('#arcDot'),num=$('#arcNum');
+  const L=track.getTotalLength(),at=v=>track.getPointAtLength(L*v/100);
   track.classList.toggle('empty',!d.ring);
   val.style.strokeDashoffset=100;ahead.setAttribute('stroke-dasharray','0 100');
-  crown.classList.remove('show');
+  crown.classList.remove('show');dot.classList.remove('on');num.textContent='';
   replay($('#heroBox'));
+  countUp($('#bioBig'),32.4,{from:bioShown?33.6:41,dec:1,dur:bioShown?900:1700});bioShown=true;
   if(!d.ring)return;
-  const V=d.ring.v;
-  tween(1500,p=>{const v=V*p;val.style.strokeDashoffset=100-v},t=>1-Math.pow(1-t,3.2)).then(()=>{
+  const V=d.ring.v,C=d.center.num;dot.classList.add('on');
+  tween(1500,p=>{const v=V*p,pt=at(v);val.style.strokeDashoffset=100-v;dot.setAttribute('cx',pt.x);dot.setAttribute('cy',pt.y);if(C!=null)num.textContent=Math.round(C*p)},t=>1-Math.pow(1-t,3.2)).then(()=>{
     if(V>80)crown.classList.add('show');
     if(d.ring.ahead){const A=Math.max(0,d.ring.ahead-V);ahead.setAttribute('stroke-dashoffset',-V);tween(1000,p=>ahead.setAttribute('stroke-dasharray',`${A*p} 100`))}
   });
@@ -879,20 +928,20 @@ function setCase(st,msg,undoTo){S.caseSt=st;haptic(12);renderCase(true);renderTo
   <path class="area" d="${d} V${h-padB} H${x(0)} Z" fill="url(#ba)"/><path class="draw" pathLength="1" d="${d}" fill="none" stroke="${ACCENT}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
   ${m.map(p=>`<circle class="pdot" cx="${x(p[0])}" cy="${y(p[1])}" r="${p===L?3.6:2.4}" fill="var(--bg)" stroke="${ACCENT}" stroke-width="1.8"/>`).join('')}${pulseDot(x(L[0]),y(L[1]),ACCENT)}
   <text class="xl" x="${x(0)}" y="${h-3}">мар 2025</text><text class="xl" x="${x(17)}" y="${h-3}" text-anchor="end">авг 2026 · 7 заборов</text></svg>`;
-  const tr=[['Вес','кг · 12 месяцев',[81.2,81,80.6,80.7,80.1,79.8,79.6,79.2,79.0,78.8,78.6,78.4],'78,4','down'],['МПК (VO2max)','мл/кг/мин · 12 месяцев',[42,42.3,42.8,43.1,43.5,43.9,44.4,44.8,45.1,45.5,45.8,46],'46','up'],['ApoB','мг/дл · 12 месяцев',[104,101,99,96,94,91,89,87,86,84,83,82],'82','down']];
-  $('#trends').innerHTML=tr.map(([n,u,d2,v,a])=>{const mn=Math.min(...d2),mx=Math.max(...d2),pts=d2.map((q,i)=>[i*70/(d2.length-1),22-(q-mn)/(mx-mn)*18]);
-    return `<div class="tr"><div class="nm">${n}<small>${u}</small></div><svg class="sp" viewBox="0 0 70 26"><path class="draw" pathLength="1" d="${smooth(pts)}" fill="none" stroke="${ACCENT}" stroke-width="1.6" stroke-linecap="round"/><circle class="pdot" cx="70" cy="${pts[pts.length-1][1]}" r="2.3" fill="${ACCENT}"/></svg><div class="val">${v}</div>${svg(a,'ic arr')}</div>`}).join('');
+  const tr=[['Вес','кг · 12 месяцев',[81.2,81,80.6,80.7,80.1,79.8,79.6,79.2,79.0,78.8,78.6,78.4],'78,4','down'],['МПК (VO2max)','мл/кг/мин · 12 месяцев',[42,42.3,42.8,43.1,43.5,43.9,44.4,44.8,45.1,45.5,45.8,46],'46','up'],['ApoB','мг/дл · 12 месяцев',[104,101,99,96,94,91,89,87,86,84,83,82],'82','down','exc']];
+  $('#trends').innerHTML=tr.map(([n,u,d2,v,a,g])=>{const mn=Math.min(...d2),mx=Math.max(...d2),pts=d2.map((q,i)=>[i*70/(d2.length-1),22-(q-mn)/(mx-mn)*18]);
+    return `<div class="tr"><div class="nm">${n}${g?` <span class="grade g-${g}" style="height:19px;font-size:10.5px;padding:0 7px;margin-left:4px">${GLABEL[g]}</span>`:''}<small>${u}</small></div><svg class="sp" viewBox="0 0 70 26"><path class="draw" pathLength="1" d="${smooth(pts)}" fill="none" stroke="${ACCENT}" stroke-width="1.6" stroke-linecap="round"/><circle class="pdot" cx="70" cy="${pts[pts.length-1][1]}" r="2.3" fill="${ACCENT}"/></svg><div class="val">${v}</div>${svg(a,'ic arr')}${g?`<button class="askBtn press" data-a="ask" data-name="${n}" data-value="${v}" aria-label="Спросить об этом">${svg('ask')}</button>`:''}</div>`}).join('');
 })();
 
 /* ================= LABS (Медпаспорт) ================= */
 const LABS=[
   {name:'Защита и воспаление',m:[
-    ['Нейтрофилы','3,1 ×10⁹/л','normal','3,1'],
-    ['Лимфоциты','2,0 ×10⁹/л','exc','2,0'],
-    ['вч-СРБ','2,6 мг/л','watch','2,6'],
-    ['Ферритин','138 нг/мл','normal','138'],
-    ['АЛТ','38 Ед/л','normal','38'],
-    ['АСТ','41 Ед/л','out','41']]},
+    ['Нейтрофилы','3,1 ×10⁹/л · реф. 1,8–6,4','normal','3,1'],
+    ['вч-СРБ','2,6 мг/л · реф. < 5, цель < 1','watch','2,6'],
+    ['АСТ','41 Ед/л · реф. < 40','out','41'],
+    ['Лимфоциты','2,0 ×10⁹/л · реф. 1,0–4,8','exc','2,0'],
+    ['Ферритин','138 нг/мл · реф. 30–400','normal','138'],
+    ['АЛТ','38 Ед/л · реф. < 41','normal','38']]},
   {name:'Липиды и сердце',m:[
     ['ApoB','82 мг/дл','exc','82'],
     ['ЛПНП','2,1 ммоль/л','normal','2,1'],
@@ -909,10 +958,9 @@ const LABS=[
     ['Витамин D','28 нг/мл','watch','28'],
     ['Тестостерон','19,2 нмоль/л','normal','19,2']]}
 ];
-const GLABEL={exc:'Отлично',normal:'Норма',watch:'На контроле',out:'Вне референса'};
-function labsGroupHTML(g,i){const good=g.m.filter(x=>x[2]==='exc'||x[2]==='normal').length;
+function labsGroupHTML(g,i){const good=g.m.filter(x=>x[2]!=='out').length;
   return `<div class="labsGroup rise" style="--i:${i}" data-g="${i}"><button class="labsGH" data-a="labgroup" data-g="${i}" aria-expanded="false">
-    <b>${g.name}</b><span class="gmeta">${good}/${g.m.length} в норме${svg('chev','ic chev')}</span></button>
+    <b>${g.name}</b><span class="gmeta"><span class="gdots">${g.m.map(x=>`<i class="gd-${x[2]}"></i>`).join('')}</span>${good}/${g.m.length} в норме${svg('chev','ic chev')}</span></button>
     <div class="labsRows"><div>${g.m.map(mk=>`<div class="labsRow"><div class="labsMain"><span class="labsName">${mk[0]}</span><span class="labsValue">${mk[1]}</span></div><span class="grade g-${mk[2]}">${GLABEL[mk[2]]}</span><button class="askBtn press" data-a="ask" data-name="${mk[0]}" data-value="${mk[3]}" aria-label="Спросить об этом">${svg('ask')}</button></div>`).join('')}</div></div></div>`}
 function openLabGroup(i){$$('.labsGroup').forEach(el=>{const on=el.dataset.g===String(i)&&!el.classList.contains('open');el.classList.toggle('open',on)})}
 
@@ -924,8 +972,11 @@ const enter={today:enterToday,rhythm:enterRhythm,
   me(){reveal($('#s-me'));replay($('#bioCard'));replay($('#trends'));countUp($('#bioN'),32.4,{from:41,dec:1,dur:1800})}};
 const order=['today','plan','cases','me'];let curTab='today',pIdx=0;
 const curScreen=()=>curTab==='today'?(pIdx?'rhythm':'today'):curTab;
-function goTab(k,force){if(k===curTab&&!force)return;haptic();curTab=k;
+function goTab(k,force){if(k===curTab&&!force)return;haptic();
+  const dir=order.indexOf(k)>=order.indexOf(curTab)?1:-1;$('#stage').style.setProperty('--dir',dir);curTab=k;
+  const nt=$(`.tab[data-tab="${k}"]`);nt.classList.add('from');void nt.offsetWidth;nt.classList.remove('from');
   $$('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===k));
+  $('#tbPill').style.transform=`translateX(${order.indexOf(k)*100}%)`;
   $$('.tb').forEach(b=>b.classList.toggle('on',b.dataset.go===k));
   enter[curScreen()]()}
 $$('.tb').forEach(b=>b.addEventListener('click',()=>goTab(b.dataset.go)));
@@ -1005,7 +1056,7 @@ const B={
     <div class="ov-hero rise" style="--i:1"><div class="lbl">Воскресенье, 27 сентября</div><div class="big">5<small>исследований</small></div><p class="ov-sub" style="color:var(--accent-ink)">Отобраны по твоим кейсам, Программе и плану</p></div>
     ${pubList(['sat','mg','nut','back','sleep'],'Эта неделя',2)}`}},
   conclusion(){return {html:`${top('Заключение врача')}
-    <div class="ov-hero rise" style="--i:1"><div class="lbl">Консилиум · 22 сентября</div><p style="font-size:24px;font-weight:300;line-height:1.25;margin-top:12px;letter-spacing:-.01em">Курс верный. Четыре действия на октябрь.</p></div>
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">Консилиум · 22 сентября</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.18;margin-top:12px">Курс верный. Четыре действия на октябрь.</p></div>
     <div class="rise" style="--i:2;margin-top:22px"><div class="cl-list" style="margin:0">${CONC.map((c,i)=>`<div class="cline"><span class="n">${i+1}</span><p>${c[0]}</p>${c[1]?concBtn(c[1]):''}</div>`).join('')}</div></div>
     <div class="btns rise" style="--i:3;justify-content:center">${pendingActs()?`<button class="btn pri press" data-a="acceptall">Принять всё</button>`:''}</div>
     ${tgLink('conclusion_0922',4)}`}},
