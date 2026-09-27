@@ -150,6 +150,24 @@ def _medrxiv_item(doi="10.64898/test.1", title="Vitamin D supplementation prepri
             "abstract": "A preprint about vitamin D supplementation (n = 60).", "published": published}
 
 
+def test_fetch_medrxiv_window_survives_total_as_string(monkeypatch):
+    """Живой сбой 2026-09-27 (issue_log errdedup:research_scan:scheduler):
+    medRxiv отдал "total" строкой, `cursor >= total` падал TypeError, весь
+    недельный скан обрывался. Регрессия — total-строка не должна ронять
+    прогон."""
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: _resp(
+        json_body={"collection": [_medrxiv_item()], "messages": [{"total": "1"}]}))
+    out = rs.fetch_medrxiv_window(7)
+    assert len(out) == 1
+
+
+def test_fetch_medrxiv_window_stops_when_total_missing(monkeypatch):
+    """total отсутствует вовсе (не только не-число) — тоже не должно уйти
+    в бесконечный цикл/упасть, честный 0 останавливает пагинацию сразу."""
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: _resp(json_body={"collection": [], "messages": [{}]}))
+    assert rs.fetch_medrxiv_window(7) == []
+
+
 def test_filter_medrxiv_by_topic_matches_title_or_abstract():
     preprints = [_medrxiv_item(), {"doi": "10.64898/other", "title": "Unrelated cardiology study",
                                     "date": "2026-09-01", "abstract": "About heart rhythm disorders.", "published": "NA"}]

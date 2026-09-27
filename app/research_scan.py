@@ -252,7 +252,16 @@ def fetch_medrxiv_window(days_back: int, timeout: float = 15.0) -> list[dict]:
         collection = data.get("collection") or []
         out.extend(collection)
         msg = (data.get("messages") or [{}])[0]
-        total = msg.get("total", 0)
+        # Живой сбой 2026-09-27 (issue_log errdedup:research_scan:scheduler):
+        # medRxiv иногда отдаёт "total" строкой ("1234" вместо 1234) —
+        # `cursor >= total` падал TypeError, весь недельный скан обрывался
+        # на этом окне (алерт ушёл честно, но результатов за неделю не было
+        # вообще). total — внешний API, не наш формат, защищаемся
+        # приведением, а не доверяем типу из ответа.
+        try:
+            total = int(msg.get("total", 0))
+        except (TypeError, ValueError):
+            total = 0
         cursor += len(collection)
         if not collection or cursor >= total:
             break
