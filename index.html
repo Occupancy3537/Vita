@@ -73,6 +73,18 @@
   12б. План: вопрос оптимизатора — прямо в карточке сдачи; секция «Оптимизатор» — история решений.
       Я: «Мои цели» — каждая цель с источником (врач / проверка / я / по умолчанию); цели врача меняются только заключением.
       Кейсы: полоса сбора = «N из 6 эпизодов для вывода» (MIN_EPISODES детектива).
+  14. Консилиум (app/consilium.py) — вход в «Кейсах», итог — «Заключение семейного врача» (План) и событие на главной.
+      Председатель-синтезатор в интерфейсе = семейный врач. НОВОЕ на бэкенде:
+      - POST /vita/consilium {topic, question} — сейчас запуск только командой «/консилиум» в Telegram и раз в месяц;
+      - статус хода (stage: подбор → специалисты → скептик → итог) в consilium_report, GET /vita/consilium/{id};
+      - поле verdict (1–2 фразы итога) в JSON синтезатора; персона — «семейный врач, ведущий пациента»;
+      - действия консилиума сейчас сразу уходят в propose_recommendation — в приложении их ПРИНИМАЕТ человек
+        (статус «ждёт решения» до «Принять»), как у заключения врача.
+      Отчёт: итог + действия, разногласия (card.disagreement: между кем, о чём, какой тест рассудит), скептик,
+      мнения специалистов свёрнуты (card.opinion), перспективное с грейдом из card.publication.
+  15. Доказательства кейса ← detective.analyze_problem(): findings {factor, lag, n, m, rate, base_rate} → «7 из 8 против 20%»;
+      эпизоды — card.episode + приёмы пищи в окне до реакции. НОВОЕ: лаг в часах (сейчас в днях 0–2) —
+      для пищевых реакций важны часы; эндпоинт /vita/cases/{id}/evidence с едой по каждому эпизоду.
   13. Технические ошибки (err_dedup, backup_alert, scheduler_alert, system_check) — НЕ в чаты Влада:
       в тех-лог + авто-повтор; Влад видит одну точку «система работает / чиню X» (Я → внизу).
       Лимит сообщений Владу — 3 в день: утро, вечер, открытие.
@@ -714,6 +726,63 @@ svg{display:block}
 .ev:nth-child(2n) .win i{animation-delay:.4s}.ev:nth-child(3n) .win i{animation-delay:.9s}
 @keyframes winpulse{0%,100%{transform:scale(1);box-shadow:0 0 6px var(--accent-glow)}50%{transform:scale(1.45);box-shadow:0 0 14px var(--accent-glow)}}
 .ev.miss{opacity:.55}
+.consCard{margin-top:16px}
+.cons{display:block;width:100%;padding:16px;border-radius:22px;background:var(--t-sleep);box-shadow:inset 0 0 0 1px var(--card-edge);text-align:left;position:relative;overflow:hidden;isolation:isolate}
+.cons::before{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(90% 120% at 100% 0%,var(--g-sleep),transparent 60%)}
+.cons b{display:block;margin-top:5px;font-size:15px;font-weight:500;line-height:1.4;color:var(--ink)}
+.cons small{display:block;margin-top:5px;font-size:12.5px;line-height:1.45;color:var(--ink2)}
+.cons .stw{margin:0}
+.cons .nacts{flex-wrap:wrap;gap:6px 16px}
+.cons .nacts button{white-space:nowrap}
+.cons .ckbar{margin-top:10px}
+.cons.ready{box-shadow:inset 0 0 0 1.5px var(--accent),0 0 22px var(--accent-soft)}
+.cq{display:flex;align-items:center;gap:10px;width:100%;padding:14px 2px;border-top:1px solid var(--line);text-align:left}
+.cq b{flex:1;display:block;font-size:14.5px;font-weight:500}
+.cq{flex-wrap:wrap}
+.cq b{flex:1 1 80%}
+.cq small{flex:1 1 100%;order:3;margin-top:-6px;font-size:12px;color:var(--muted)}
+.cq.own b{color:var(--accent-ink)}
+.fdoc{display:inline-flex;align-items:center;gap:7px;margin-top:14px;padding:5px 11px 5px 8px;border-radius:14px;background:var(--accent-soft);font-size:12px;font-weight:600;color:var(--accent-ink)}
+.fdoc svg{width:15px;height:15px}
+.skep{position:relative;padding:8px 0 8px 16px;font-size:13.5px;line-height:1.45;color:var(--ink2)}
+.skep::before{content:"";position:absolute;left:2px;top:15px;width:6px;height:6px;border-radius:50%;background:var(--amber)}
+.idxRow i.run{box-shadow:inset 0 0 0 1.5px var(--accent);animation:scanbeat 1.4s ease-out infinite}
+.proof{margin-top:26px;padding-top:20px;border-top:1px solid var(--line)}
+.pf-h{margin-top:8px;font-family:var(--serif);font-size:24px;font-weight:300;line-height:1.2}
+.pf-cmp{margin-top:16px;display:flex;flex-direction:column;gap:10px}
+.pf-bar{display:grid;grid-template-columns:118px 1fr 50px;align-items:center;gap:10px;font-size:13px;color:var(--ink2)}
+.pf-bar div{height:8px;border-radius:4px;background:var(--line-soft);overflow:hidden}
+.pf-bar i{display:block;height:100%;border-radius:4px;background:var(--accent);box-shadow:0 0 10px var(--accent-glow)}
+.pf-bar.base i{background:var(--faint);box-shadow:none}
+.pf-bar b{text-align:right;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink)}
+.pf-s{margin-top:12px;font-size:13px;line-height:1.5;color:var(--ink2)}
+.pf-next{display:flex;gap:8px;align-items:flex-start;margin-top:10px;padding:10px 12px;border-radius:14px;background:var(--accent-soft);font-size:13px;line-height:1.45;color:var(--ink)}
+.pf-next svg{flex:none;width:14px;height:14px;color:var(--accent-ink);margin-top:2px}
+.pf-list{margin-top:18px}
+.pf-axis{display:flex;justify-content:space-between;margin:0 70px 6px 58px;font-size:10.5px;color:var(--muted)}
+.pf-axis span:last-child{display:inline-flex;align-items:center;gap:3px;color:var(--warm-ink)}
+.pf-axis svg{width:11px;height:11px}
+.ep{border-top:1px solid var(--line-soft)}
+.ep-h{display:grid;grid-template-columns:48px 1fr 72px;align-items:center;gap:10px;width:100%;padding:11px 0}
+.ep-d{font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.ep-t{position:relative;height:14px;border-radius:7px;background:linear-gradient(90deg,var(--line-soft),var(--line) 92%,var(--warm-soft))}
+.ep-t::after{content:"";position:absolute;right:0;top:2px;width:2px;height:10px;border-radius:1px;background:var(--warm)}
+.ep-t i{position:absolute;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:var(--faint)}
+.ep-t i.w{z-index:1;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;background:var(--accent);box-shadow:0 0 8px var(--accent-glow)}
+.ep-l{text-align:right;font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums}
+.ep-l.miss{color:var(--muted)}
+.ep-b{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s var(--ease)}
+.ep.open .ep-b{grid-template-rows:1fr}
+.ep-b>div{overflow:hidden}
+.ep.open .ep-b>div{padding:0 0 12px 58px}
+.ep-b p{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink2);margin-top:5px}
+.ep-b p svg{width:14px;height:14px;color:var(--muted);flex:none}
+.ep-b p b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.ep-b .ep-r svg{color:var(--warm)}
+.ep-b .ep-x{color:var(--muted);font-size:12px}
+.pf-legend{display:flex;align-items:center;gap:4px 14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--muted)}
+.pf-legend i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.pf-legend i.w{background:var(--accent)}
 .case2{margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}
 .case2 .top{display:flex;justify-content:space-between;align-items:center}
 .case2 h3{font-size:17px;font-weight:400;margin-top:10px;letter-spacing:-.01em}
@@ -948,7 +1017,7 @@ svg{display:block}
               <button class="actLink press" data-a="toast" data-msg="Список для лаборатории готов"><svg class="ic" viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5 19h14"/></svg>Экспорт списка</button></div></div></div></div></div>
           <div class="accS" data-s="lab"><button class="accH" data-a="acc" data-k="lab"><span class="accT"><b>Лаборатория и цена</b><small id="m-lab"></small></span><i class="adot" id="d-lab"></i><svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><div class="accB"><div><div class="labSum" id="labSum"></div></div></div></div>
           <div class="accS" data-s="opt"><button class="accH" data-a="acc" data-k="opt"><span class="accT"><b>Оптимизатор</b><small id="m-opt"></small></span><i class="adot" id="d-opt"></i><svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><div class="accB"><div><div id="ferCallout"></div></div></div></div>
-          <button class="accS accLink" data-a="conclusion"><span class="accH"><span class="accT"><b>Заключение врача</b><small id="m-conc"></small></span><i class="adot" id="d-conc"></i><svg class="ic chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></button>
+          <button class="accS accLink" data-a="conclusion"><span class="accH"><span class="accT"><b>Заключение семейного врача</b><small id="m-conc"></small></span><i class="adot" id="d-conc"></i><svg class="ic chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></button>
           <div class="accS" data-s="prog"><button class="accH" data-a="acc" data-k="prog"><span class="accT"><b>Программа</b><small id="m-prog"></small></span><i class="adot" id="d-prog"></i><svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><div class="accB"><div><div id="program"></div></div></div></div>
           <div class="accS" data-s="closed"><button class="accH" data-a="acc" data-k="closed"><span class="accT"><b>Закрытые — что прижилось</b><small id="m-closed"></small></span><i class="adot" id="d-closed"></i><svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><div class="accB"><div><div id="closedList"></div></div></div></div>
         </div>
@@ -962,9 +1031,9 @@ svg{display:block}
           <h1 class="title">Кейсы<span class="tag" id="caseCount">2 активных</span></h1>
           <a class="symBtn press" href="https://t.me/vita_doctor_bot?start=symptom" target="_blank" rel="noopener" aria-label="Записать симптом"><span><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><small>симптом</small></a>
         </div>
+        <div class="consCard rise" style="--i:1" id="consCard"></div>
         <article class="case rise" style="--i:1" id="caseCard"><div class="case-body" id="caseBody"></div></article>
-        <div class="sectionHead rise" style="--i:2"><span class="lbl">Доказательства</span><span>8 эпизодов · окно симптома 6 ч</span></div>
-        <div class="strip rise" style="--i:3" id="strip"></div>
+        <section class="proof rise" style="--i:2" id="proof"></section>
         <article class="case2 rise" style="--i:4" id="case2"></article>
         <div class="closed rise" style="--i:5">
           <div class="lbl">Закрытые</div>
@@ -1066,6 +1135,8 @@ const I={
   snow:'<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M9.6 4.6 12 6.2l2.4-1.6M9.6 19.4 12 17.8l2.4 1.6M4.6 10.6l2.5-.6-.6-2.6M19.4 13.4l-2.5.6.6 2.6M4.6 13.4l2.5.6-.6 2.6M19.4 10.6l-2.5-.6.6-2.6"/>',
   cube:'<path d="M12 3.5l7.5 4.2v8.6L12 20.5l-7.5-4.2V7.7z"/><path d="M4.5 7.7 12 12l7.5-4.3M12 12v8.5"/>',
   tube:'<path d="M9 3h6M10 3v12.5a2 2 0 0 0 4 0V3"/><path d="M10 9.5h4"/><path d="M17.5 14.5c.9 1.2 1.5 2.2 1.5 3a1.5 1.5 0 0 1-3 0c0-.8.6-1.8 1.5-3z"/>',
+  bolt2:'<path d="M13 3 6 14h5l-1 7 7-11h-5z"/>',
+  team:'<circle cx="12" cy="7.8" r="2.6"/><circle cx="5.6" cy="10.2" r="2"/><circle cx="18.4" cy="10.2" r="2"/><path d="M7.6 19.5c.5-3 2.2-4.7 4.4-4.7s3.9 1.7 4.4 4.7"/><path d="M2.6 18c.3-2 1.4-3.3 3-3.5M21.4 18c-.3-2-1.4-3.3-3-3.5"/>',
   hint:'<path d="M9.5 18.5h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.4 1.1 2.2v.5h5V16c0-.8.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/>',
   watch:'<rect x="6.5" y="6.5" width="11" height="11" rx="3.5"/><path d="M9 6.5 9.6 3h4.8l.6 3.5M9 17.5l.6 3.5h4.8l.6-3.5M12 9.5V12l1.6 1"/>',
   book:'<path d="M4 5.5C6.8 4.4 9.5 4.6 12 6.5c2.5-1.9 5.2-2.1 8-1v13c-2.8-1.1-5.5-.9-8 1-2.5-1.9-5.2-2.1-8-1z"/><path d="M12 6.5v13"/>',
@@ -1092,7 +1163,7 @@ function lineChart({data,w=320,h=140,color=ACCENT,min,max,base=null,labels=null,
 }
 
 /* ================= STATE ================= */
-const S={preset:'decision',time:'day',sunday:false,caseSt:'pending',fer:'proposed',medgate:true,panel:'oct',done:new Set(),disc:false,travel:false,lab:null,checkWin:false,seen:new Set(),ev:[],evAll:false,past:false,date:null,rxm:new Set(),protOpen:false};
+const S={preset:'decision',time:'day',sunday:false,caseSt:'pending',fer:'proposed',medgate:true,panel:'oct',done:new Set(),disc:false,travel:false,lab:null,checkWin:false,seen:new Set(),ev:[],evAll:false,past:false,date:null,rxm:new Set(),protOpen:false,epOpen:null,cons:null,consAcc:new Set()};
 const PRESETS={
   morning:{time:'morning',caseSt:'testing',medgate:true,sunday:false,t:'Утро',c:'8:00',n:'Сон закрыт, остальное впереди'},
   day:{time:'day',caseSt:'testing',medgate:true,sunday:false,t:'День',c:'16:02',n:'Обычный день, всё идёт'},
@@ -1163,7 +1234,7 @@ const IDX={
     up:'Урок дня: соль — сыр и соленья в ужин. Сегодня ужин без них.'}
 };
 /* один слот событий: приоритет решение → вердикт → анализы → открытие → сверка → сдача скоро */
-const EV_ORDER=['needyou','verdict','labs','disc','sverka','drawSoon'];
+const EV_ORDER=['needyou','consil','verdict','labs','disc','sverka','drawSoon'];
 const EVENTS={
   needyou:{tone:'warm',dot:true,kick:'Нужен ты',title:'Аллергия: вероятный триггер — грецкий орех',sub:'Совпал в 7 из 8 эпизодов. Исключать ли на 3 недели?',go:'needyou'},
   verdict:{tone:'green',ic:'check',kick:'Вердикт проверки',title:'Орех подтверждён: 0 эпизодов за 21 день',sub:'Ожидалось 3. Триггер найден — орех остаётся исключённым.',btns:[['ev-close','Закрыть кейс'],['ev-extend','Продлить',1]]},
@@ -1250,11 +1321,11 @@ function briefHTML(d){
 
 const curD=()=>S.past?{...TD.day,ring:PAST.ring,seg:PAST.seg,emo:PAST.emo,dayLbl:'Индекс дня · вчера',effect:{txt:PAST.effect},crown:true}:TD[S.time];
 const crownOn=d=>!!(d.ring&&d.ring.v>80&&d.crown!==false);
-const evList=()=>EV_ORDER.filter(k=>(k==='needyou'&&S.caseSt==='pending')||(k==='disc'&&S.disc)||(S.ev||[]).includes(k));
+const evList=()=>EV_ORDER.filter(k=>(k==='needyou'&&S.caseSt==='pending')||(k==='disc'&&S.disc)||(k==='consil'&&S.cons&&S.cons.ready)||(S.ev||[]).includes(k));
 const TONE_STW={warm:'warm',amber:'amber',gold:'gold',green:'green',teal:'teal'};
-function evCard(k,mt){const e=EVENTS[k],ic=e.dot?'<i class="pdot2" style="margin:0"></i>':svg(e.ic),kick=`<span class="stw ${TONE_STW[e.tone]}">${e.kick}${e.hyp?'<span class="hyp">гипотеза</span>':''}</span>`;
+function evCard(k,mt){const e=k==='consil'?{tone:'teal',ic:'team',kick:'Консилиум готов · итог семейного врача',title:REP[S.cons.id].verdict,sub:S.cons.id==='gen'?'Четыре действия на октябрь':`${REP[S.cons.id].actions.length} действия — принять в План и Программу`,btns:[['consrep','Открыть итог',0,S.cons.id]]}:EVENTS[k],ic=e.dot?'<i class="pdot2" style="margin:0"></i>':svg(e.ic),kick=`<span class="stw ${TONE_STW[e.tone]}">${e.kick}${e.hyp?'<span class="hyp">гипотеза</span>':''}</span>`;
   if(e.go)return `<button class="bcard ${e.tone} press" style="margin-top:${mt}px" data-a="${e.go}"><span class="mc-ic">${ic}</span><span class="bbody">${kick}<b>${e.title}</b><small>${e.sub}</small></span>${svg('right','ic mc-go')}</button>`;
-  return `<div class="bcard ${e.tone}" style="margin-top:${mt}px"><span class="mc-ic">${ic}</span><span class="bbody">${kick}<b>${e.title}</b><small>${e.sub}</small><span class="nacts">${e.btns.map(([a,l,m])=>`<button${m?' class="m"':''} data-a="${a}">${l}</button>`).join('')}</span></span></div>`}
+  return `<div class="bcard ${e.tone}" style="margin-top:${mt}px"><span class="mc-ic">${ic}</span><span class="bbody">${kick}<b>${e.title}</b><small>${e.sub}</small><span class="nacts">${e.btns.map(([a,l,m,kk])=>`<button${m?' class="m"':''} data-a="${a}"${kk?` data-k="${kk}"`:''}>${l}</button>`).join('')}</span></span></div>`}
 
 function renderToday(){
   const d=curD(),past=!!S.past;
@@ -1292,7 +1363,7 @@ function renderToday(){
 
   $('#streaks').innerHTML=`<div class="strow-h"><span class="lbl">Серии${S.travel?' · поездка':''}</span>${svg('right')}</div><div class="strow-i">${STREAKS.map(k=>{const p=paused(k),best=!p&&k.n>=k.rec;
     return `<div class="sti${p?' pause':''}${best?' best':''}">${svg(k.ic)}<b>${k.n}</b><span>${p?'пауза':k.label}</span><span class="fzs">${k.fz?svg('snow')+k.fz:''}</span></div>`}).join('')}</div>`;
-  $('#caseBadge').classList.toggle('on',S.caseSt==='pending'||!!S.disc||(S.ev||[]).includes('verdict'));
+  $('#caseBadge').classList.toggle('on',S.caseSt==='pending'||!!S.disc||(S.ev||[]).includes('verdict')||!!(S.cons&&S.cons.ready));
   $$('.rise',sToday).forEach(e=>e.classList.add('in'));
   requestAnimationFrame(sizeBg);
 }
@@ -1437,7 +1508,7 @@ function renderPlan(){
 function renderPlanMeta(){const dots=planDots(),pa=pendingActs();
   $('#m-sostav').textContent=`${tests(cnt(S.panel))} · по поводам`;
   $('#m-opt').textContent=S.fer==='proposed'?'история решений · 1 вопрос — в карточке сдачи':'история решений';
-  $('#m-conc').textContent=`22 сентября · ${pa?`ждут тебя: ${pa}`:'всё принято'}`;
+  $('#m-conc').textContent=`консилиум 22 сент · ${pa?`ждут тебя: ${pa}`:'всё принято'}`;
   $('#m-prog').textContent=`${progActive().length} активных · ближайший вердикт 3 окт`;
   $('#m-closed').textContent=`${CLOSED.length} · 1 сработало`;
   ['opt','conc','prog'].forEach(k=>{const el=$('#d-'+k);el&&el.classList.toggle('on',!!dots[k]&&!S.seen.has(k))});
@@ -1480,8 +1551,37 @@ function renderProgram(){
   $('#closedList').innerHTML=`<div class="closedprog">${CLOSED.map(c=>`<div class="cp"><div><b>${c[0]}</b><small>${c[1]}</small></div><span class="grade ${c[3]}">${c[2]}</span></div>`).join('')}</div>`}
 
 /* ================= CASES ================= */
-const eps=[['28 июл',['walnut','leaf'],3.17,'3 ч 10 мин'],['3 авг',['walnut','yogurt'],4.67,'4 ч 40 мин'],['9 авг',['bread','cheese'],null,'без ореха'],['14 авг',['pasta','walnut'],2.42,'2 ч 25 мин'],['22 авг',['walnut','apple'],5.08,'5 ч 05 мин'],['30 авг',['fish','walnut','leaf'],3.83,'3 ч 50 мин'],['7 сен',['yogurt','walnut'],1.92,'1 ч 55 мин'],['18 сен',['leaf','walnut'],4.25,'4 ч 15 мин']];
-$('#strip').innerHTML=eps.map(([d,f,h,s])=>`<div class="ev${h==null?' miss':''}"><div class="dt">${d}</div><div class="thumbs">${f.map(x=>`<span class="th${x==='walnut'?' hit':''}" style="background:${thumbBg}">${svg(x)}</span>`).join('')}</div><div class="win">${h!=null?`<i style="left:${h/6*100}%"></i>`:''}</div><span class="tag">${s}</span></div>`).join('');
+/* доказательства кейса = detective.analyze_problem(): эпизоды × фактор с лагом 0–6 ч против контрольных дней */
+const EPS=[
+  {d:'28 июл',r:'15:50',sym:'зуд губ, покраснение щёк',m:[['walnut',3.17,'12:40','грецкий орех в салате'],['leaf',5.1,'10:45','зелень']]},
+  {d:'3 авг',r:'14:00',sym:'зуд во рту',m:[['walnut',4.67,'9:20','йогурт с орехами'],['yogurt',4.67,'9:20','']]},
+  {d:'9 авг',r:'16:00',sym:'лёгкое покраснение',m:[['bread',2.5,'13:30','бутерброд с сыром'],['cheese',2.5,'13:30','']]},
+  {d:'14 авг',r:'20:00',sym:'зуд губ',m:[['walnut',2.42,'17:35','горсть орехов'],['pasta',1.2,'18:50','паста']]},
+  {d:'22 авг',r:'13:00',sym:'лёгкий отёк губ',m:[['walnut',5.08,'7:55','каша с орехом'],['apple',3,'10:00','яблоко']]},
+  {d:'30 авг',r:'21:00',sym:'зуд',m:[['leaf',5.5,'15:30','салат'],['walnut',3.83,'17:10','орехи'],['fish',1.5,'19:30','рыба']]},
+  {d:'7 сен',r:'16:00',sym:'зуд во рту',m:[['walnut',1.92,'14:05','йогурт с орехом'],['yogurt',1.92,'14:05','']]},
+  {d:'18 сен',r:'16:00',sym:'зуд губ',m:[['walnut',4.25,'11:45','салат с орехом'],['leaf',4.25,'11:45','']]}
+];
+const hm=h=>{const H=Math.floor(h),M=Math.round((h-H)*60);return H?`${H} ч ${String(M).padStart(2,'0')} мин`:`${M} мин`};
+function renderProof(){
+  const hit=EPS.filter(e=>e.m.some(x=>x[0]==='walnut')).length,next=S.caseSt==='pending'?'Следующий шаг — исключить орех на 3 недели: если эпизоды пропадут, это доказательство.'
+    :S.caseSt==='testing'?`Идёт проверка: орех исключён, день ${S.ckDay||1} из 21 — эпизодов 0 из ожидаемых 3.`:S.caseSt==='verified'?'Доказано: 21 день без ореха — 0 эпизодов из ожидаемых 3.':'Орех снят с подозрения — ищем другой фактор.';
+  $('#proof').innerHTML=`<div class="lbl">Что доказываем</div>
+    <h3 class="pf-h">Грецкий орех вызывает реакцию в течение 6 часов после еды</h3>
+    <div class="pf-cmp">
+      <div class="pf-bar"><span>Перед эпизодами</span><div><i style="width:${hit/EPS.length*100}%"></i></div><b>${hit} из ${EPS.length}</b></div>
+      <div class="pf-bar base"><span>В обычные дни</span><div><i style="width:20%"></i></div><b>20%</b></div>
+    </div>
+    <p class="pf-s">Орех перед реакцией — в 4,4 раза чаще, чем в обычные дни. Это совпадение, а не доказательство.</p>
+    <p class="pf-next">${svg('spark')}${next}</p>
+    <div class="pf-list">
+      <div class="pf-axis"><span>6 ч до реакции</span><span>реакция ${svg('bolt2')}</span></div>
+      ${EPS.map((e,i)=>{const w=e.m.find(x=>x[0]==='walnut');return `<div class="ep${S.epOpen===i?' open':''}"><button class="ep-h" data-a="ep" data-k="${i}">
+        <span class="ep-d">${e.d}</span><span class="ep-t">${e.m.map(x=>`<i class="${x[0]==='walnut'?'w':''}" style="left:${(6-x[1])/6*100}%"></i>`).join('')}</span>
+        <span class="ep-l${w?'':' miss'}">${w?hm(w[1]):'без ореха'}</span></button>
+        <div class="ep-b"><div>${e.m.filter(x=>x[3]).map(x=>`<p>${svg(x[0])}<b>${x[2]}</b> ${x[3]}</p>`).join('')}<p class="ep-r">${svg('bolt2')}<b>${e.r}</b> реакция: ${e.sym}</p>${w?'':'<p class="ep-x">Единственный эпизод без ореха — поэтому 7 из 8, а не 8 из 8.</p>'}</div></div></div>`}).join('')}
+      <p class="pf-legend"><span><i class="w"></i> орех</span><span><i></i> другая еда</span><span>строка — эпизод, тап — что ел и что было</span></p>
+    </div>`}
 function caseHTML(){
   if(S.caseSt==='verified')return `<span class="tag" style="color:var(--green)">Пищевая аллергия · подтверждено</span><h2>Триггер найден: грецкий орех</h2>
     <p class="line">21 день без ореха — 0 эпизодов из ожидаемых 3. Орех остаётся исключённым, запись — в Медпаспорте.</p>
@@ -1496,6 +1596,50 @@ function caseHTML(){
   return `<span class="tag">Пищевая аллергия · 2 месяца</span><h2>Не оно — ищем дальше</h2>
     <p class="line">Орех снят с подозрения. Следующая гипотеза появится с новыми эпизодами.</p>
     <div class="btns"><button class="btn sec press" data-a="uncase">Вернуть к решению</button></div>`}
+/* Консилиум = app/consilium.py: 2–4 специалиста (подбор свободный) + методолог-скептик → итог председателя.
+   Председатель в интерфейсе — семейный врач: он собирает консилиум и пишет итог. */
+const CQ=[
+  {id:'side',q:'Боль в боку 10 лет — что ещё проверить?',from:'кейс «Боль в боку»',roles:['гастроэнтеролог','диетолог','терапевт превентивной медицины']},
+  {id:'numb',q:'Онемение в руке — это B12 или спина?',from:'вопрос невролога',roles:['невролог','вертебролог','эндокринолог']},
+  {id:'gen',q:'Общий профиль долголетия',from:'ежемесячно, 1-го числа',roles:['кардиолог','невролог','диетолог']}
+];
+const REP={
+  side:{date:'26 сентября',q:'Боль в боку 10 лет — что ещё проверить?',verdict:'Похоже на желчный пузырь. Сначала УЗИ, окно еды не бросать.',
+    actions:[['uzi','Сделать УЗИ брюшной полости с оценкой желчного пузыря — до 10 окт','Исключить камни и дискинезию до выводов по еде','plan'],
+      ['keepwin','Продолжать проверку «еда в окне 8:00–19:00» до вердикта 17 окт','Не менять условия посреди проверки','prog'],
+      ['dinner','Ужин не больше 700 ккал на время проверки','Большой объём за раз — общий знаменатель эпизодов','prog'],
+      ['red','При боли сильнее 7 из 10, температуре или желтушности — сразу к врачу очно','Красные флаги — не для приложения',null]],
+    dis:[['гастроэнтеролог','диетолог','Дискинезия желчных путей или реакция на жирный объём','УЗИ с желчегонным завтраком']],
+    skeptic:['6 из 7 эпизодов — мало для уверенного вывода','Боль записана словами, без шкалы — прошу оценивать 0–10'],
+    specs:[['гастроэнтеролог','Типичная картина билиарной боли после большого приёма пищи. Нужен УЗИ.','средняя'],
+      ['диетолог','Объём и жирность ужина важнее самого времени. Дробнее и легче вечером.','средняя'],
+      ['терапевт превентивной медицины','Исключить красные флаги. АСТ 41 — повод добавить печёночные пробы к УЗИ.','высокая']],
+    emerging:[['Оценка сократимости желчного пузыря с пробным завтраком','когортное']]},
+  numb:{date:'26 сентября',q:'Онемение в руке — это B12 или спина?',verdict:'Скорее шея, чем B12. Сдать B12 12 окт и показать шейный отдел вертебрологу.',
+    actions:[['b12x','Сдать B12 и метилмалоновую кислоту 12 окт — уже в плане','Закрыть вопрос дефицита до выводов','plan'],
+      ['neck','Консультация вертебролога по шейному отделу','Онемение по ночам и в одной руке — чаще корешковое','plan'],
+      ['pillow','Сон на спине, подушка ниже — 14 дней, отмечать онемение утром','Проверка позы во сне как фактора','prog']],
+    dis:[],skeptic:['Без B12 выводы преждевременны — поэтому сначала анализ'],
+    specs:[['невролог','Картина больше похожа на корешковую: одна рука, ночью.','средняя'],['вертебролог','Нужен осмотр шеи; МРТ — только если не пройдёт за 4 недели.','средняя'],['эндокринолог','B12 312 — на нижней границе оптимума; добавка разумна после анализа.','средняя']],
+    emerging:[]},
+  gen:{date:'22 сентября',q:'Общий профиль долголетия',verdict:'Курс верный. Четыре действия на октябрь.',conc:true,
+    dis:[],skeptic:['Эффект магния на ВСР доказан слабо — поэтому проверка на 7 дней, а не постоянный приём'],
+    specs:[['кардиолог','ApoB снижается на серии по жирам — продолжать, цель ниже 80.','высокая'],['невролог','Онемение — сначала исключить дефицит B12: анализ 12 окт.','средняя'],['диетолог','Белок 2 г/кг держать; магний вечером — как проверка на ВСР.','средняя']],
+    emerging:[['Омега-3 индекс вместо липидограммы для оценки рыбьего жира','когортное']]}
+};
+const consSteps=c=>['Семейный врач подбирает специалистов',...c.roles.map(r=>`${r[0].toUpperCase()+r.slice(1)} изучает анамнез, анализы и исследования`),'Методолог-скептик проверяет выводы','Семейный врач пишет итог'];
+let consTimer=null;
+function startCons(id){const c=CQ.find(x=>x.id===id);S.cons={id,stage:0,ready:false};const N=consSteps(c).length;
+  clearInterval(consTimer);consTimer=setInterval(()=>{S.cons.stage++;
+    if(S.cons.stage>=N){clearInterval(consTimer);S.cons.ready=true;renderToday();renderConsCard();
+      if(sheetKey==='consrun'){ovS.innerHTML=B.consrep(id).html;sheetKey='consrep';reveal(ov)}else toast('Консилиум готов — итог семейного врача на главной.')}
+    else{renderConsCard();if(sheetKey==='consrun'){ovS.innerHTML=B.consrun().html;$$('.rise',ovS).forEach(e=>e.classList.add('in'))}}},reduce?60:1100)}
+function renderConsCard(){const c=S.cons,cq=c&&CQ.find(x=>x.id===c.id),N=cq?consSteps(cq).length:1;
+  $('#consCard').innerHTML=c&&!c.ready?`<button class="cons run press" data-a="consrun"><span class="stw teal">Идёт консилиум · ${c.stage+1} из ${N}</span><b>${cq.q}</b><div class="ckbar"><i style="width:${(c.stage+1)/N*100}%"></i></div><small>${consSteps(cq)[c.stage]}…</small></button>`
+   :c&&c.ready?`<button class="cons ready press" data-a="consrep" data-k="${c.id}"><span class="stw teal">Консилиум готов · итог семейного врача</span><b>${REP[c.id].verdict}</b><small>${REP[c.id].actions?REP[c.id].actions.length:4} действия · открыть итог ›</small></button>`
+   :`<div class="cons"><span class="stw teal">Консилиум врачей</span><b>Сложный вопрос? Семейный врач соберёт специалистов и даст итог</b>
+     <small>2–4 специалиста под вопрос и методолог-скептик. Итог — короткий список действий.</small>
+     <span class="nacts"><button data-a="consnew">Собрать консилиум</button><button class="m" data-a="consrep" data-k="gen">Последний итог · 22 сент</button></span></div>`}
 function renderCase2(){const c=$('#case2');if(!c)return;
   c.innerHTML=S.disc?`<div class="top"><span class="tag" style="color:var(--amber)">Найдено совпадение</span><span class="lbl">Боль в боку · 10 лет</span></div>
     <h3>Еда вне привычного окна — 6 из 7 эпизодов</h3><p class="st">Против 18% в обычные дни. Гипотеза: большой объём пищи в непривычное время — выброс желчи и спазм.</p>
@@ -1506,7 +1650,7 @@ function renderCase2(){const c=$('#case2');if(!c)return;
     <h3>Собираем данные</h3><p class="st">Детектив сравнивает дни эпизодов со временем еды, сном и нагрузкой. Вывод придёт, когда найдётся совпадение.</p><div class="collect"><i style="width:${4/6*100}%"></i></div><p class="st2">4 из 6 эпизодов для вывода · собирается из твоих сообщений, поддерживать ничего не нужно</p>`}
 function renderCase(animate){const b=$('#caseBody'),go=()=>{b.innerHTML=caseHTML()};
   if(animate){b.classList.add('swap');setTimeout(()=>{go();void b.offsetWidth;b.classList.remove('swap')},200)}else go()}
-function setCase(st,msg,undoTo){S.caseSt=st;haptic(12);renderCase(true);renderToday();renderConcCard();renderProgram();
+function setCase(st,msg,undoTo){S.caseSt=st;haptic(12);renderCase(true);renderProof();renderToday();renderConcCard();renderProgram();
   if(msg)toast(msg,undoTo?()=>setCase(undoTo):null)}
 
 /* ================= ME ================= */
@@ -1645,11 +1789,36 @@ const B={
   science(){return {html:`${top('Наука недели')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">Воскресенье, 27 сентября</div><div class="big">5<small>исследований</small></div><p class="ov-sub" style="color:var(--accent-ink)">Отобраны по твоим кейсам, Программе и плану</p></div>
     ${pubList(['sat','mg','nut','back','sleep'],'Эта неделя',2)}`}},
-  conclusion(){return {html:`${top('Заключение врача')}
-    <div class="ov-hero rise" style="--i:1"><div class="lbl">Консилиум · 22 сентября</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.18;margin-top:12px">Курс верный. Четыре действия на октябрь.</p></div>
-    <div class="rise" style="--i:2;margin-top:22px"><div class="cl-list" style="margin:0">${CONC.map((c,i)=>`<div class="cline"><span class="n">${i+1}</span><p>${c[0]}</p>${c[1]?concBtn(c[1]):''}</div>`).join('')}</div></div>
-    <div class="btns rise" style="--i:3;justify-content:center">${pendingActs()?`<button class="btn pri press" data-a="acceptall">Принять всё</button>`:''}</div>
-    ${tgLink('conclusion_0922',4)}`}},
+  consnew(){return {html:`${top('Консилиум')}
+    <div class="ov-hero rise" style="--i:1"><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15">О чём спросить консилиум?</p>
+      <p class="ov-coach" style="margin-top:10px">Семейный врач подберёт 2–4 специалистов под вопрос и методолога-скептика. Итог — короткий список действий, которые можно принять в План и Программу.</p></div>
+    <div class="rise" style="--i:2;margin-top:16px">${CQ.map(c=>`<button class="cq press" data-a="consgo" data-k="${c.id}"><b>${c.q}</b><small>${c.from} · пригласит: ${c.roles.join(', ')}</small>${svg('right','ic mc-go')}</button>`).join('')}
+      <button class="cq own press" data-a="toast" data-msg="В рабочей версии — любой свой вопрос. В макете выбери один из предложенных."><b>Свой вопрос…</b><small>напиши как есть — семейный врач сам решит, кого позвать</small></button></div>
+    <div class="rise" style="--i:3;margin-top:20px"><div class="lbl" style="margin-bottom:6px">Что увидят специалисты</div>
+      <p class="ov-coach" style="margin:0">Анамнез, динамику анализов, симптомы по теме, активные назначения и проверки, свежие исследования по теме и прошлые консилиумы.</p></div>
+    <p class="disc rise" style="--i:4">Консилиум — ИИ-специалисты с доступом к твоим данным и свежим исследованиям. Он не заменяет очный приём: при красных флагах — сразу к врачу.</p>`}},
+  consrun(){const c=S.cons,cq=CQ.find(x=>x.id===c.id),st=consSteps(cq);
+    return {html:`${top('Консилиум')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">Идёт консилиум · ~10 минут</div><p style="font-family:var(--serif);font-size:26px;font-weight:300;line-height:1.18;margin-top:10px">${cq.q}</p></div>
+    <div class="rise" style="--i:2;margin-top:18px">${st.map((t,i)=>`<div class="idxRow"><i class="${i<c.stage?'y':i===c.stage?'o run':'o'}">${i<c.stage?svg('check'):''}</i><span style="${i>c.stage?'color:var(--muted)':''}">${t}</span></div>`).join('')}</div>
+    <p class="disc rise" style="--i:3">Можно закрыть — консилиум продолжится, итог придёт на главную.</p>`}},
+  consrep(id){S.repId=id;const R=REP[id];const accBtn=a=>{if(!a[3])return '';const done=S.consAcc.has(a[0]);return done?`<span class="mini ok">${svg('check')}${a[3]==='plan'?'в Плане':'в Программе'}</span>`:`<button class="mini press" data-a="consacc" data-k="${a[0]}">Принять</button>`};
+    const acts=R.conc?CONC.map((c,i)=>`<div class="cline"><span class="n">${i+1}</span><p>${c[0]}</p>${c[1]?concBtn(c[1]):''}</div>`).join('')
+      :R.actions.map((a,i)=>`<div class="cline"><span class="n">${i+1}</span><p>${a[1]}<small style="display:block;font-size:12px;color:var(--muted);margin-top:3px">${a[2]}</small></p>${accBtn(a)}</div>`).join('');
+    return {html:`${top('Итог консилиума')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">${R.date} · ${R.q}</div>
+      <div class="fdoc">${svg('team')}<span>Итог семейного врача</span></div>
+      <p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.18;margin-top:8px">${R.verdict}</p></div>
+    <div class="rise" style="--i:2;margin-top:18px"><div class="cl-list" style="margin:0">${acts}</div></div>
+    ${R.conc&&pendingActs()?`<div class="btns rise" style="--i:3;justify-content:center"><button class="btn pri press" data-a="acceptall">Принять всё</button></div>`:''}
+    ${R.dis.length?`<div class="rise" style="--i:4;margin-top:22px"><div class="lbl" style="margin-bottom:6px">Разногласия</div>${R.dis.map(d=>`<div class="reason"><span>${d[0]} ↔ ${d[1]}<small style="display:block;font-size:12px;color:var(--muted);margin-top:2px">${d[2]}</small></span><span style="font-size:12px;color:var(--accent-ink);text-align:right;max-width:42%">рассудит: ${d[3]}</span></div>`).join('')}</div>`:''}
+    <div class="rise" style="--i:5;margin-top:22px"><div class="lbl" style="margin-bottom:6px">Методолог-скептик</div>${R.skeptic.map(x=>`<p class="skep">${x}</p>`).join('')}</div>
+    <div class="accS rise" style="--i:6;margin-top:18px"><button class="accH" data-a="accx"><span class="accT"><b>Мнения специалистов</b><small>${R.specs.map(x=>x[0]).join(', ')}</small></span><svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="accB"><div>${R.specs.map(x=>`<div class="reason"><span>${x[0]}<small style="display:block;font-size:12.5px;color:var(--ink2);margin-top:3px;line-height:1.45">${x[1]}</small></span><span class="tag">уверенность: ${x[2]}</span></div>`).join('')}</div></div></div>
+    ${R.emerging.length?`<div class="rise" style="--i:7;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Перспективно — ещё не внедрено</div>${R.emerging.map(e=>`<div class="reason"><span>${e[0]}</span><span class="tag">${e[1]}</span></div>`).join('')}</div>`:''}
+    <p class="disc rise" style="--i:8">ИИ-консилиум с доступом к твоим данным и свежим исследованиям. Не заменяет очный приём.</p>
+    ${tgLink('consilium_'+id,9)}`}},
+  conclusion(){return B.consrep('gen')},
   goals(){const G=[['Белок','160 г в сутки','врач','2 г на кг — заключение 22 сент'],['Шаги','12 000 в день','врач','снижено на щадящий режим · невролог'],['Окно еды','8:00–19:00','проверка','кейс «Боль в боку» · до 17 окт'],['Насыщ. жиры','до 28 г','врач','серия под ApoB · кардиолог'],['Натрий','до 5 г','по умолчанию','норма ВОЗ'],['Сон','7–9 часов, отбой до 23:10','я','поставил сам после проверки'],['Норма кругляшей','заряд от 65, остальные от 70','по умолчанию','личные базы появятся через 30 дней']];
     const cls={'врач':'teal','проверка':'amber','я':'green','по умолчанию':''};
     return {html:`${top('Мои цели')}
@@ -1742,7 +1911,7 @@ function closeSheet(){if(!ov.classList.contains('open'))return;haptic();
   ov.classList.remove('open');ov.style.transition='clip-path .5s cubic-bezier(.65,0,.35,1)';ov.style.clipPath=rectInset(fromEl);
   stage.classList.remove('behind');sheetKey=null;
   setTimeout(()=>{if(!ov.classList.contains('open'))ov.classList.remove('show')},520)}
-const refreshConc=()=>{if(sheetKey==='conclusion'){ovS.innerHTML=B.conclusion().html;$$('.rise',ovS).forEach(e=>e.style.transition='none')}};
+const refreshConc=()=>{if(sheetKey==='conclusion'||sheetKey==='consrep'){ovS.innerHTML=B.consrep(S.repId||'gen').html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}};
 
 /* ================= TOAST ================= */
 let tt,undoFn=null;const tEl=$('#toast'),tB=$('#toastB');
@@ -1755,8 +1924,8 @@ function setPhoto(on){todayTab.classList.toggle('photo',on);$('#photoLabel').tex
 
 /* ================= ACTIONS ================= */
 function applyPreset(k){const p=PRESETS[k];kbNext=true;Object.assign(S,{preset:k,time:p.time,caseSt:p.caseSt,medgate:p.medgate,sunday:p.sunday,disc:!!p.disc,checkWin:false,done:new Set(),ckDay:p.ckDay||1,ev:[...(p.ev||[])],evAll:false,past:false,date:p.date||null,rxm:new Set()});
-  renderToday();renderRhythm();renderCase();renderCase2();renderConcCard();renderProgram()}
-function acceptAct(k){if(k==='nut'){S.caseSt='testing';renderCase(true);renderToday();renderProgram()}
+  renderToday();renderRhythm();renderCase();renderCase2();renderProof();renderConsCard();renderConcCard();renderProgram()}
+function acceptAct(k){if(k==='nut'){S.caseSt='testing';renderCase(true);renderProof();renderToday();renderProgram()}
   if(k==='fer'){S.fer='moved';renderPlan()}renderConcCard();refreshConc();haptic(12)}
 document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t)return;const a=t.dataset.a,k=t.dataset.k;
   if(t.tagName==='A'&&a)e.preventDefault();
@@ -1774,6 +1943,13 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'streaks':openSheet('streaks',null,t);break;
     case'index':openSheet('index',null,t);break;
     case'goals':openSheet('goals',null,t);break;
+    case'consnew':openSheet('consnew',null,t);break;
+    case'consgo':haptic(12);startCons(k);ovS.innerHTML=B.consrun().html;sheetKey='consrun';reveal(ov);renderConsCard();break;
+    case'consrun':openSheet('consrun',null,t);break;
+    case'consrep':S.seen.add('conc');renderPlanMeta();if(sheetKey){ovS.innerHTML=B.consrep(k).html;sheetKey='consrep';ovS.scrollTop=0;reveal(ov)}else openSheet('consrep',k,t);break;
+    case'consacc':{haptic(12);S.consAcc.add(k);const a=Object.values(REP).flatMap(r=>r.actions||[]).find(x=>x[0]===k);ovS.innerHTML=B.consrep(S.repId||'side').html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')});toast(a&&a[3]==='plan'?'Добавлено в План.':'Добавлено в Программу — с ожиданием и вердиктом.');break}
+    case'accx':{const sec=t.closest('.accS');sec.classList.toggle('open');break}
+    case'ep':{haptic();const i=+k;S.epOpen=S.epOpen===i?null:i;$$('#proof .ep').forEach((el,j)=>el.classList.toggle('open',j===S.epOpen));break}
     case'macsrc':haptic();S.protOpen=!S.protOpen;renderMacros();break;
     case'dayback':haptic();S.past=true;renderToday();sToday.scrollTo({top:0});enterToday();break;
     case'dayfwd':haptic();if(!S.past){toast('В макете доступен один день назад.');break}S.past=false;renderToday();sToday.scrollTo({top:0});enterToday();break;
