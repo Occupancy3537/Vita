@@ -8,8 +8,8 @@ get_health_dashboard()/get_today_nutrition() (app/dashboard.py), не копир
 или тривиально агрегируемых чисел (ПЛАН СБОРКИ в макете требует именно так:
 «вся логика на сервере, фронтенд только рендерит»).
 
-Табы «План», «Кейсы», «Я» в этом тикете не собираются (следующий тикет) —
-здесь их нет ни на бэкенде, ни во фронтенде.
+Vita v2 (сверка с макетом v7, 2026-09-28): «Врач» и «Я» собраны поверх уже
+существующих источников — /vita/doctor, /vita/medpassport, /vita/me (см. ниже).
 """
 import json
 import logging
@@ -588,9 +588,10 @@ def build_chips(today: dict, health: dict, tn: dict) -> dict:
 
 def build_nudge(state: dict, steps: dict, protein: dict, now_local) -> Optional[dict]:
     if state["no_watch"]:
-        return {"tone": "neutral", "text": "Часы не видели тебя с утра — надеть?", "go": "watch"}
+        return {"tone": "neutral", "text": "Часы не видели тебя с утра — надеть?", "go": "watch", "short": "Надень часы"}
     if state["no_food"]:
-        return {"tone": "neutral", "text": "Ждёт первого приёма — сфотографировать в дневнике.", "go": "protein"}
+        return {"tone": "neutral", "text": "Ждёт первого приёма — сфотографировать в дневнике.", "go": "protein",
+                "short": "Запиши первый приём"}
     if state["time_of_day"] == "evening":
         return None  # день закрыт — подсказывать поздно, коуч ниже уже сказал итог
     left = None
@@ -600,11 +601,13 @@ def build_nudge(state: dict, steps: dict, protein: dict, now_local) -> Optional[
     if behind_pace and left and left > 20:
         return {"tone": "apricot",
                 "text": f"Прогулка после ужина поможет с темпом. Белок {round(protein['consumed'])}/{round(protein['target'])} — творог вечером.",
-                "go": "protein"}
+                "go": "protein", "short": "Прогулка и творог вечером"}
     if left and left > 20:
-        return {"tone": "apricot", "text": f"Белок {round(protein['consumed'])}/{round(protein['target'])} — ещё один приём с творогом или курицей закроет цель.", "go": "protein"}
+        return {"tone": "apricot", "text": f"Белок {round(protein['consumed'])}/{round(protein['target'])} — ещё один приём с творогом или курицей закроет цель.", "go": "protein",
+                "short": "Творог или курица на ужин"}
     if behind_pace:
-        return {"tone": "apricot", "text": "Темп шагов чуть ниже обычного — короткая прогулка выправит день.", "go": None}
+        return {"tone": "apricot", "text": "Темп шагов чуть ниже обычного — короткая прогулка выправит день.", "go": "steps",
+                "short": "Короткая прогулка"}
     return None
 
 
@@ -730,6 +733,7 @@ def build_levers(cur, today: dict, tn: dict) -> dict:
 
 STREAK_FREEZE_POOL = 2  # заморозок в копилке — то же малое число, что в фитнес-приложениях (Duolingo и т.п.), не измерено отдельно
 STREAK_MILESTONES = [7, 14, 30, 60, 90]
+STREAK_STRIP_DAYS = 14  # полоса дней в шторке «Серии» (макет v7)
 
 _STREAK_CRITERIA = [
     {"key": "sleep_zone", "label": "Сон в зоне 7–9 ч"},
@@ -1024,9 +1028,23 @@ def build_streaks(rows: list[dict], meals: list[dict], targets: list[dict], toda
             # met is None (нет данных) — пропускаем день, не рвём и не продлеваем
         today_status = series[-1] if series else None
         next_milestone = next((m for m in STREAK_MILESTONES if m > current), None)
+        # Полоса последних STREAK_STRIP_DAYS дней (макет v7, шторка «Серии»):
+        # y — выполнено, f — провал закрыт заморозкой, x — провал, p — нет
+        # данных (пауза), t — сегодня ещё идёт, r — сегодня под угрозой.
+        strip = []
+        for day in series[-STREAK_STRIP_DAYS:]:
+            if day["date"] == today_iso:
+                code = "r" if day["at_risk"] else ("p" if not day["has_data"] else "t")
+            elif day["met"] is True:
+                code = "y"
+            elif day["met"] is False:
+                code = "f" if (day["date"], crit["key"]) in frozen else "x"
+            else:
+                code = "p"
+            strip.append({"date": day["date"], "c": code})
         out.append({
             "key": crit["key"], "label": crit["label"], "count": current, "record": record,
-            "next_milestone": next_milestone,
+            "next_milestone": next_milestone, "days": strip,
             "at_risk": bool(today_status and today_status["at_risk"]),
             "status": "paused" if not (today_status and today_status["has_data"]) else ("at_risk" if today_status["at_risk"] else "alive"),
         })
@@ -1126,7 +1144,135 @@ def build_today(cur) -> dict:
         # гореть при ЛЮБОМ нерешённом вопросе, не только свежих из inbox
         # (разногласия консилиума там никогда не появляются, см. checks.py).
         "pending_questions": checks.pending_questions_count(cur),
+        # Неделя — заголовок главной по воскресеньям (макет v7).
+        "week": build_week(cur, today.get("date") or timeutil.now_local().date().isoformat()),
     }
+
+
+# =====================================================================
+# Неделя (макет v7: по воскресеньям заголовок главной — «5 из 7 дней в зелёной
+# зоне»). Источник — card.vita_day_snapshot (пишет finalize_yesterday каждую
+# ночь), ничего не пересчитывается задним числом. «Зелёный» день — индекс от
+# WEEK_GREEN_SCORE, тот же порог, что у короны на дуге (правка Влада 28.09).
+# =====================================================================
+
+WEEK_GREEN_SCORE = 80
+
+
+def summarize_week(snapshots: list[tuple]) -> Optional[dict]:
+    """snapshots — [(date, ring_dict)] за последние 7 закрытых суток."""
+    scored = [(d, (ring or {}).get("score")) for d, ring in snapshots]
+    scored = [(d, s) for d, s in scored if s is not None]
+    if not scored:
+        return None
+    green = sum(1 for _, s in scored if s >= WEEK_GREEN_SCORE)
+    return {
+        "days": len(scored), "green": green, "avg": round(statistics.mean(s for _, s in scored)),
+        "scores": [{"date": d.isoformat() if hasattr(d, "isoformat") else str(d), "score": s} for d, s in scored],
+    }
+
+
+def build_week(cur, today_iso: str) -> Optional[dict]:
+    cur.execute(
+        sql.SQL("SELECT date, ring FROM {t} WHERE date < %s::date AND date >= %s::date - 7 ORDER BY date")
+        .format(t=sql.Identifier(schema(), "vita_day_snapshot")),
+        (today_iso, today_iso),
+    )
+    return summarize_week(cur.fetchall())
+
+
+# =====================================================================
+# «Врач» (макет v7): три строки — консилиум · заключение врача · медпаспорт —
+# и одна карточка ближайшей сдачи. Новых источников нет: консилиум —
+# consilium.get_consilium_reports, заметки врача и лабы вне референса — те же
+# частные функции, что читает досье (app.doctor.context), сдачи —
+# lab_optimizer.generate_plan. shape_doctor — чистая, тестируется без базы.
+# =====================================================================
+
+def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict], plan: dict) -> dict:
+    latest = next((r for r in reports if r.get("status") == "completed"), None)
+    consilium_block = None
+    if latest:
+        consilium_block = {
+            "id": latest["id"], "date": (latest.get("ts_recorded") or "")[:10], "topic": latest.get("topic"),
+            "question": latest.get("question"), "roles": latest.get("roles") or [],
+            "actions": [{"text": a.get("imperative"), "accepted": a.get("accepted")}
+                        for a in (latest.get("actions") or []) if a.get("imperative")],
+            "emerging": [{"method": e.get("method"), "maturity": e.get("maturity"), "grade": e.get("grade")}
+                         for e in (latest.get("emerging") or []) if e.get("method")],
+            "skeptic": list(latest.get("skeptic_notes") or []),
+        }
+    panels = plan.get("panels") or []
+    next_draw = None
+    if panels:
+        p = panels[0]
+        next_draw = {
+            "date": p["date"], "n": p["n_markers"], "fasting": p["fasting_required"], "tubes": p["tube_types"],
+            "price_rub": p.get("total_price_rub"), "export_text": p.get("export_text"),
+            "markers": [{"name": m["name"], "why": m.get("why") or "", "category": m.get("category"),
+                         "fasting": m.get("fasting_required"), "source": m.get("source_type")} for m in p["markers"]],
+            "shifted": p.get("shifted") or [],
+        }
+    return {
+        "consilium": consilium_block, "consilium_count": sum(1 for r in reports if r.get("status") == "completed"),
+        "notes": [{"date": str(n.get("date"))[:10], "category": n.get("category"), "note": n.get("note")} for n in notes],
+        "labs_flags": labs_flags,
+        "next_draw": next_draw,
+        "draws": [{"date": p["date"], "n": p["n_markers"]} for p in panels[:4]],
+        "conflicts": plan.get("conflicts") or [],
+    }
+
+
+def build_doctor(cur) -> dict:
+    from app import consilium, lab_optimizer
+    from app.doctor.context import _labs_out_of_range, _recent_doctor_notes
+    reports = consilium.get_consilium_reports(cur, limit=5)["reports"]
+    return shape_doctor(reports, _recent_doctor_notes(cur, limit=3), _labs_out_of_range(cur, limit=10),
+                        lab_optimizer.generate_plan(cur))
+
+
+# =====================================================================
+# «Я» (макет v7): паспорт и биовозраст рядом, лесенка PhenoAge, «что дало» —
+# вклад каждого маркера (drivers — те же contributions из health.phenoage_log,
+# что уже считает get_bioage_dashboard), системы органов — маркеры по группам.
+# Образ жизни по факторам за 30 дней НЕ показывается: bioage_days по дням и
+# факторам не хранится (ПЛАН СБОРКИ п.17, «НОВОЕ») — есть только сегодняшний.
+# =====================================================================
+
+def shape_me(bio: dict) -> dict:
+    pa = bio.get("phenoage") or {}
+    drivers = [d for d in (bio.get("drivers") or []) if d.get("type") != "total" and d.get("years") is not None]
+    drivers.sort(key=lambda d: -abs(d["years"]))
+    groups: dict[str, dict] = {}
+    for m in bio.get("biomarkers") or []:
+        if m.get("value") is None:
+            continue
+        g = groups.setdefault(m.get("group") or "Прочее", {"name": m.get("group") or "Прочее", "n": 0, "out": [], "watch": []})
+        g["n"] += 1
+        if m.get("in_lab_range") is False:
+            g["out"].append(m["label"])
+        elif m.get("in_opt_range") is False:
+            g["watch"].append(m["label"])
+    systems = []
+    for g in groups.values():
+        status = "out" if g["out"] else ("watch" if g["watch"] else "ok")
+        systems.append({"name": g["name"], "n": g["n"], "status": status, "flagged": g["out"] or g["watch"]})
+    systems.sort(key=lambda g: ({"out": 0, "watch": 1, "ok": 2}[g["status"]], g["name"]))
+    return {
+        "phenoage": {"value": pa.get("value"), "chrono_age": pa.get("chrono_age"), "delta": pa.get("delta"),
+                     "date": pa.get("date"), "note": pa.get("note")},
+        "history": [{"date": h["date"], "phenoage": h["phenoage"], "chrono_age": h.get("chrono_age"), "kind": h.get("kind")}
+                    for h in (bio.get("history") or []) if h.get("phenoage") is not None],
+        "drivers": [{"label": d["label"], "years": d["years"], "value": d.get("value")} for d in drivers],
+        "systems": systems,
+        "out_of_range": bio.get("out_of_range") or [],
+        "data_note": bio.get("data_note"),
+    }
+
+
+def build_me(cur) -> dict:
+    from app.dashboard import get_bioage_dashboard
+    return shape_me(get_bioage_dashboard(cur))
 
 
 def build_rhythm(cur) -> dict:
@@ -1304,6 +1450,32 @@ def vita_case_evidence_endpoint(problem_id: str, _: None = Depends(require_sessi
     if result is None:
         raise HTTPException(status_code=404, detail="кейс не найден")
     return result
+
+
+# =====================================================================
+# «Врач» и «Я» (макет v7) — вкладки были заглушками «скоро»
+# =====================================================================
+
+@router.get("/vita/doctor")
+def vita_doctor_endpoint(_: None = Depends(require_session)) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return build_doctor(cur)
+
+
+@router.get("/vita/medpassport")
+def vita_medpassport_endpoint(_: None = Depends(require_session)) -> dict:
+    from app import medpassport
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return medpassport.build_medpassport(cur)
+
+
+@router.get("/vita/me")
+def vita_me_endpoint(_: None = Depends(require_session)) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return build_me(cur)
 
 
 _TOPIC_SEGMENTS = ("recovery", "sleep", "move", "food")

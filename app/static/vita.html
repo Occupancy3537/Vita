@@ -1207,17 +1207,19 @@ svg{display:block}
               <button class="verdict press" id="verdict" data-a="verdict"><span class="vk" id="vKick"></span><span class="vt"><span id="emo"></span><svg class="ic" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></button>
             </div>
             <div id="needYou"></div>
-            <div id="checksLine"></div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ВРАЧ, ПРОВЕРКИ, Я — заглушки «скоро» (Vita v2, этап 1: логика этих вкладок не входит в объём) -->
+    <!-- ВРАЧ — макет v7: консилиум · заключение · медпаспорт строками, одна карточка сдачи -->
     <section class="tab" data-tab="plan" aria-label="Врач">
-      <div class="screen soon-screen" id="s-plan">
+      <div class="screen" id="s-plan">
         <div class="rise" style="--i:0"><h1 class="title">Врач</h1></div>
-        <div class="soon rise" style="--i:1"><span class="soon-ic">🩺</span><p>Скоро — консилиум, заключение врача, медпаспорт и план сдачи анализов.</p></div>
+        <div class="rows rise" style="--i:1;margin-top:18px" id="docRows"></div>
+        <div class="secH rise" style="--i:2;margin-top:28px" id="drawH"><span class="lbl">Анализы</span></div>
+        <div class="nextDraw rise" style="--i:2" id="nextDraw"></div>
+        <div class="dates rise" style="--i:3" id="dates"></div>
       </div>
     </section>
     <section class="tab" data-tab="cases" aria-label="Проверки">
@@ -1227,10 +1229,11 @@ svg{display:block}
         <div class="rise" style="--i:2" id="qList"></div>
       </div>
     </section>
+    <!-- Я — макет v7: паспорт и биовозраст рядом, лесенка PhenoAge, что дало, системы -->
     <section class="tab" data-tab="me" aria-label="Я">
-      <div class="screen soon-screen" id="s-me">
+      <div class="screen" id="s-me">
         <div class="rise" style="--i:0"><h1 class="title">Я</h1></div>
-        <div class="soon rise" style="--i:1"><span class="soon-ic">🧬</span><p>Скоро — биовозраст, вклад образа жизни и системы организма.</p></div>
+        <div id="meBody"></div>
       </div>
     </section>
   </main>
@@ -1251,7 +1254,9 @@ svg{display:block}
 /* Vita v2, этап 1 (2026-09-28) — перенос макета (index.html, GitHub Occupancy3537/Vita,
    ветка main) в прод на живых данных /vita/today + /vita/rhythm + /vita/yesterday.
    Дизайн (CSS, шторки-контейнер-трансформ, анимации) — без изменений из макета.
-   Врач/Проверки/Я — заглушки «скоро» (этап 1 не собирает их логику).
+   Сверка с макетом v7 (2026-09-28): «Врач» и «Я» — на живых данных
+   /vita/doctor, /vita/me, /vita/medpassport; главная — слово + короткое
+   действие «→ прогноз», без строки проверок; «Решить» — решения на месте.
    Из мокапа убраны: PRESETS/переключатель состояний, вся мок-модель TD/IDX/B_/
    EVENTS/STREAKS/CONC/CQ/REP/EPS/LABS/панели сдачи — заменены живыми данными
    ровно там, где реальный бэкенд их даёт (см. ПЛАН СБОРКИ в git-истории макета).*/
@@ -1296,6 +1301,7 @@ function pubList(pubs,title='Свежее по теме',i=6){
 }
 
 const I={
+  doc:'<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',drop:'<path d="M8 3.5h8l-.7 5.3a3.3 3.3 0 0 1-6.6 0z"/><path d="M12 12.2v7.6M8.6 20.3h6.8"/>',snow:'<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M9.6 4.6 12 6.2l2.4-1.6M9.6 19.4 12 17.8l2.4 1.6M4.6 10.6l2.5-.6-.6-2.6M19.4 13.4l-2.5.6.6 2.6M4.6 13.4l2.5.6-.6 2.6M19.4 10.6l-2.5-.6.6-2.6"/>',team:'<circle cx="12" cy="7.8" r="2.6"/><circle cx="5.6" cy="10.2" r="2"/><circle cx="18.4" cy="10.2" r="2"/><path d="M7.6 19.5c.5-3 2.2-4.7 4.4-4.7s3.9 1.7 4.4 4.7"/><path d="M2.6 18c.3-2 1.4-3.3 3-3.5M21.4 18c-.3-2-1.4-3.3-3-3.5"/>',tube:'<path d="M9 3h6M10 3v11.5a2 2 0 0 0 4 0V3"/><path d="M10 10h4"/>',cube:'<path d="M12 3.5l7.5 4.2v8.6L12 20.5l-7.5-4.2V7.7z"/><path d="M4.5 7.7 12 12l7.5-4.3M12 12v8.5"/>',
   check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>', right:'<path d="M9 6l6 6-6 6"/>', back:'<path d="M15 5l-7 7 7 7"/>',
   charge:'<path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5" opacity=".35"/><path d="M12.8 7.5l-3.3 5h3l-.8 4 3.3-5h-3z"/>',
   moon:'<path d="M18.5 15.2A7.2 7.2 0 0 1 9 5.6a7.4 7.4 0 1 0 9.5 9.6z"/><path d="M16.2 4.2v2.6M14.9 5.5h2.6"/><circle cx="19.6" cy="9.4" r=".5"/>',
@@ -1324,6 +1330,11 @@ async function fetchJSON(url){const r=await fetch(url,{credentials:'same-origin'
 async function postJSON(url,body){const r=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(r.status===401){location.href='/vita/login';throw new Error('401')}if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}
 async function loadToday(){[TODAY,RHYTHM]=await Promise.all([fetchJSON('/vita/today'),fetchJSON('/vita/rhythm')])}
 async function loadYesterday(){if(!yestLoaded){YEST=await fetchJSON('/vita/yesterday');yestLoaded=true}return YEST}
+/* ================= ВРАЧ и Я (сверка с макетом v7) — /vita/doctor, /vita/me, /vita/medpassport ================= */
+let DOC=null,ME=null,MEDP=null;
+async function loadDoctor(force){if(DOC&&!force)return;DOC=await fetchJSON('/vita/doctor')}
+async function loadMe(force){if(ME&&!force)return;ME=await fetchJSON('/vita/me')}
+async function loadMedp(){if(!MEDP)MEDP=await fetchJSON('/vita/medpassport');return MEDP}
 /* ================= ПРОВЕРКИ (Vita v2, этап 2) — /vita/checks ================= */
 let CHECKS=null,qMode='questions';
 async function loadChecks(force){if(CHECKS&&!force)return;CHECKS=await fetchJSON('/vita/checks')}
@@ -1356,6 +1367,44 @@ function renderChecksTab(){
   $$('.rise',$('#s-cases')).forEach(e=>e.classList.add('in'));
 }
 
+function renderDoctor(){if(!DOC)return;const c=DOC.consilium,n=(DOC.notes||[])[0],f=(DOC.labs_flags||[])[0],d=DOC.next_draw;
+  $('#docRows').innerHTML=(c?row(svg('team'),'teal','Консилиум',`${shortDate(c.date)} · ${c.topic||'итог'}`,'','consrep')
+      :row(svg('team'),'teal','Консилиум','собрать — командой «/консилиум» в Telegram','','toast').replace('data-a="toast"','data-a="toast" data-msg="Консилиум запускается командой «/консилиум» в Telegram; раз в месяц — сам."'))
+    +(n?row(svg('doc'),'','Заключение врача',`${shortDate(n.date)}${n.category?' · '+n.category:''}`,'','notes'):'')
+    +row(svg('tube'),f?'warm':'','Медпаспорт',f?`вне референса: ${f.marker} ${fmt(f.value,f.value%1?1:0)}`:'все маркеры в референсе',f?'<i class="rDot warm"></i>':'','medpass');
+  $('#drawH').hidden=!d;$('#nextDraw').hidden=!d;
+  if(d){const days=Math.round((new Date(d.date+'T00:00:00')-new Date(new Date().toDateString()))/864e5);
+    $('#nextDraw').innerHTML=`<div class="nd-k"><span>Следующая сдача</span><b>${days<=0?'сегодня':'через '+days+' '+plural(days,'день','дня','дней')}</b></div>
+    <div class="nd-d">${dateFmt(d.date).replace(/^[^,]*, /,'')}</div>
+    <div class="nd-m"><b>${d.n} ${plural(d.n,'анализ','анализа','анализов')}</b>${d.price_rub?` · <b>${fmt(d.price_rub)} ₽</b>`:''}${d.fasting?' · натощак':''}</div>
+    <button class="btnP press" data-a="draw">Что сдаём</button>`}
+  $('#dates').innerHTML=(DOC.draws||[]).length>1?`<span>Сдачи:</span>`+DOC.draws.map((x,i)=>`<span class="dpill${i?'':' on'}">${shortDate(x.date)}</span>`).join(''):'';
+  $$('.rise',$('#s-plan')).forEach(e=>e.classList.add('in'));
+}
+function renderMe(){if(!ME)return;const pa=ME.phenoage||{},h=ME.history||[],dr=ME.drivers||[],sy=ME.systems||[];
+  const f1=v=>v==null?'—':fmt(v,1);
+  let html=`<div class="ageCard rise" style="--i:1"><div class="ageH"><span>Биовозраст · PhenoAge</span>${pa.delta!=null?`<em>${pa.delta<0?'−':'+'}${fmt(Math.abs(pa.delta),1)} ${Math.abs(pa.delta)%1?'года':plural(Math.abs(pa.delta),'год','года','лет')}</em>`:''}</div>
+    <div class="ageT"><div><small>Паспорт</small><b>${f1(pa.chrono_age)}<span>лет</span></b></div><div class="bio"><small>Биологический</small><b>${f1(pa.value)}</b></div></div>
+    <p class="ageF">${pa.value!=null?`По крови ${pa.date?shortDate(pa.date):''} · обновится со следующей сдачей`:(pa.note||'PhenoAge ещё не рассчитан')}</p></div>`;
+  /* лесенка: между сдачами значение держится ровно; меньше 3 точек — график не рисуем (бенчмарк) */
+  if(h.length>=3){const w=320,H=124,pt=12,pb=20,ih=H-pt-pb,vs=h.map(x=>x.phenoage),mn=Math.min(...vs)-1,mx=Math.max(...vs)+1,t0=new Date(h[0].date),t1=new Date(h[h.length-1].date),sp=Math.max(1,t1-t0);
+    const X=d=>8+(new Date(d)-t0)/sp*(w-24),Y=v=>pt+ih-(v-mn)/(mx-mn)*ih;let d=`M${X(h[0].date)},${Y(vs[0])}`;for(let i=1;i<h.length;i++)d+=` H${X(h[i].date)} V${Y(vs[i])}`;
+    html+=`<div class="bioChart rise" style="--i:2" id="bioCard"><svg class="chart" viewBox="0 0 ${w} ${H}"><path class="draw" pathLength="1" d="${d}" fill="none" stroke="${ACCENT}" stroke-width="2" stroke-linejoin="round"/>${h.map(x=>`<circle class="pdot" cx="${X(x.date)}" cy="${Y(x.phenoage)}" r="2.6" fill="var(--bg)" stroke="${ACCENT}" stroke-width="1.8"/>`).join('')}<text class="xl" x="8" y="${H-3}">${shortDate(h[0].date)}</text><text class="xl" x="${w-16}" y="${H-3}" text-anchor="end">${shortDate(h[h.length-1].date)} · ${h.length} ${plural(h.length,'сдача','сдачи','сдач')}</text></svg></div>`}
+  else if(h.length)html+=`<p class="gvNote rise" style="--i:2">Для тренда нужно хотя бы 3 сдачи — сейчас ${h.length}.</p>`;
+  /* что дало: вклад маркеров от паспортного возраста к биологическому */
+  if(dr.length&&pa.chrono_age!=null&&pa.value!=null){const ends=[pa.chrono_age,pa.value];let cur=pa.chrono_age;const pts=[cur];dr.forEach(x=>{cur+=x.years;pts.push(cur)});
+    const lo=Math.min(...pts,...ends)-.5,hi=Math.max(...pts,...ends)+.5,X=v=>(v-lo)/(hi-lo)*100;cur=pa.chrono_age;
+    const fd=v=>(v<0?'−':'+')+fmt(Math.abs(v),1);
+    html+=`<div class="secH rise" style="--i:3;margin-top:28px"><span class="lbl">Что дало</span><span>кровь · ${dr.length} ${plural(dr.length,'маркер','маркера','маркеров')}</span></div>
+    <div class="gvCard rise" style="--i:3"><div class="gv end"><span class="gn">Паспорт</span><span class="gb" style="background:none"><i style="left:${X(pa.chrono_age)}%"></i></span><span class="gd">${f1(pa.chrono_age)}</span></div>
+    ${dr.map(x=>{const a=cur,b=cur+x.years;cur=b;return `<div class="gv"><span class="gn">${x.label}</span><span class="gb" style="background:none"><i class="${x.years>0?'old':''}" style="left:${X(Math.min(a,b))}%;width:${Math.max(1.5,Math.abs(x.years)/(hi-lo)*100)}%"></i></span><span class="gd ${x.years>0?'old':''}">${fd(x.years)}</span></div>`}).join('')}
+    <div class="gv end"><span class="gn">PhenoAge</span><span class="gb" style="background:none"><i style="left:${X(pa.value)}%"></i></span><span class="gd">${f1(pa.value)}</span></div></div>
+    <p class="gvNote rise" style="--i:3">Вклад маркера — по формуле PhenoAge.${TODAY&&TODAY.ring&&TODAY.ring.bioage_days?` Сегодня образ жизни — ${TODAY.ring.bioage_days<0?'моложе':'старше'} на ${fmt(Math.abs(TODAY.ring.bioage_days),1)} ${plural(Math.round(Math.abs(TODAY.ring.bioage_days)),'день','дня','дней')} (оценка по исследованиям).`:''}</p>`}
+  if(sy.length)html+=`<div class="secH rise" style="--i:4;margin-top:28px"><span class="lbl">Системы</span><span>по крови</span></div>
+    <div class="sysGrid rise" style="--i:4">${sy.map(g=>`<button class="sysC press" data-a="medpass"><span class="rIc ${g.status==='out'?'warm':g.status==='watch'?'amber':'teal'}">${svg(g.status==='ok'?'check':'tube')}</span><b>${g.name}</b><small><i class="${g.status==='out'?'o':g.status==='watch'?'w':''}"></i>${g.status==='ok'?`${g.n} в норме`:g.flagged.slice(0,2).join(', ')+(g.status==='out'?' вне референса':' — не в оптимуме')}</small></button>`).join('')}</div>`;
+  html+=`<div class="rows rise" style="--i:5;margin-top:22px">${row(svg('flame'),'','Серии','рекорды, заморозки, 14 дней','','streaks')}${row(svg('tube'),'','Медпаспорт','все маркеры и динамика','','medpass')}</div>`;
+  $('#meBody').innerHTML=html;$$('.rise',$('#s-me')).forEach(e=>e.classList.add('in'));replay($('#bioCard'));
+}
 const ICON_BY_SEGMENT={recovery:'charge',sleep:'moon',move:'steps',food:'bowl'};
 const NAME_BY_SEGMENT={recovery:'Заряд',sleep:'Сон',move:'Движение',food:'Питание'};
 
@@ -1363,14 +1412,19 @@ const NAME_BY_SEGMENT={recovery:'Заряд',sleep:'Сон',move:'Движени
    (state.no_watch/closed, ring.score), слово выбирает клиент — тот же принцип,
    что установил ещё Vita v1 (см. докстринг app/vita.py::build_state). */
 function verdictWord(){
-  const st=TODAY.state,score=TODAY.ring.score;
-  if(st.no_watch)return {k:'none',w:'Нет данных',t:'Часы не видели тебя с утра'};
-  if(st.closed)return {k:'closed',w:'День закрыт',t:score!=null?`Закрыт на ${score}`:'Сутки позади'};
-  if(st.sunday)return {k:'week',w:'Неделя',t:'Итог недели — в «Я»'};
+  /* Макет v7: слово-вердикт + ОДНО короткое действие со стрелкой к прогнозу
+     («Творог или курица на ужин → 86»). «Всё хорошо» — только когда делать
+     нечего (подсказки нет); есть подсказка — «Можно улучшить», каким бы ни
+     был индекс. Полный текст подсказки — в шторке по тапу. */
+  const st=TODAY.state,score=TODAY.ring.score,ahead=TODAY.ring.ahead,n=TODAY.nudge,w=TODAY.week;
+  const arrow=(ahead!=null&&score!=null&&ahead>score)?` → ${ahead}`:'';
+  if(st.no_watch)return {k:'none',w:'Нет данных',t:'Надень часы'};
+  if(st.closed)return {k:'closed',w:'День закрыт',t:score==null?'Сутки позади':score>80?'Главное сделано':`Закрыт на ${score}`};
+  if(st.sunday&&w&&w.days)return {k:'week',w:'Неделя',t:`${w.green} из ${w.days} ${plural(w.days,'дня','дней','дней')} в зелёной зоне`};
+  if(st.no_food)return {k:'none',w:'Видно полдня',t:n&&n.short?n.short:'Запиши первый приём'};
   if(score==null)return {k:'none',w:'Нет данных',t:'Пока рано подводить итог'};
-  const nudge=TODAY.nudge;
-  if(score>=85)return {k:'ok',w:'Всё хорошо',t:nudge?nudge.text:'Всё в коридоре'};
-  return {k:'up',w:'Можно улучшить',t:nudge?nudge.text:'Есть что подтянуть'};
+  if(n)return {k:'up',w:'Можно улучшить',t:(n.short||n.text)+arrow};
+  return {k:'ok',w:'Всё хорошо',t:'Всё в коридоре'};
 }
 /* Живая правка Влада (2026-09-28): «корона должна быть если больше 80» —
    без условия "день закрыт" (title у #crown и так всегда говорил "День
@@ -1424,7 +1478,7 @@ function renderToday(){
   $('#dBack').hidden=false;$('#dFwd').hidden=true;
   const gate=TODAY.gate;
   $('#tStatus').innerHTML=`<i class="dot-live${st.no_watch?' gray':''}"></i>${gate.blocked?gate.label:'Без ограничений'}`;
-  $('#dayLbl').textContent=st.closed?'Итог дня':'Индекс дня';
+  $('#dayLbl').textContent=st.closed?'Итог дня':TODAY.ring.score==null?'Не оценивается':'Прогноз дня';
   $('#dayNum').textContent=TODAY.ring.score!=null?TODAY.ring.score:'—';
   $('#vKick').className='vk '+v.k;$('#vKick').innerHTML=`<i></i>${v.w}`;$('#emo').textContent=v.t;
   $('#crown').classList.toggle('has',crownOn());
@@ -1437,10 +1491,6 @@ function renderToday(){
   $('#needYou').innerHTML=inbox.length?row(svg(inbox[0].kind==='verdict'?'check':'spark'),
     inbox[0].tone==='green'?'ok':'amber',inbox[0].title,inbox[0].sub,
     inbox.length>1?`<span class="rN">+${inbox.length-1}</span>`:'','inbox'):'';
-  const cs=TODAY.checks_summary;
-  $('#checksLine').innerHTML=cs?`<button class="quietRow press" data-a="gochecks">${svg('spark')}${cs.count} `
-    +`${plural(cs.count,'проверка','проверки','проверок')} ${cs.count===1?'идёт':'идут'}`
-    +(cs.nearest_verdict_date?` · ближайший вердикт ${shortDate(cs.nearest_verdict_date)}`:'')+'</button>':'';
   $('#caseBadge').classList.toggle('on',(TODAY.pending_questions||0)>0);
   /* серии — пилюля в шапке */
   const streaks=TODAY.streaks||[],pill=$('#streaks');
@@ -1502,17 +1552,45 @@ function leverRow(l){
   const src=(l.sources||[]),smax=src.length?Math.max(...src.map(s=>s.value)):1;
   return `<div class="fsec rise" style="--i:2"><div class="lbl">${l.label} · ${fmt(l.consumed,dec)}/${fmt(l.target,dec)} ${l.unit}</div>
   <div class="bb"><i class="fill${l.status==='over'?' over':''}" style="width:${Math.min(100,l.consumed/l.target*75)}%"></i><u></u></div></div>
-  ${src.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Откуда</span><div class="srcs" style="opacity:1;transform:none;padding:0">${src.map(s=>`<div class="src">${svg('dots')}<span style="width:96px">${s.name}</span><span class="sb"><i style="width:${s.value/smax*100}%"></i></span><span class="g">${fmt(s.value,1)} г</span></div>`).join('')}</div></div>`:''}
+  ${src.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Откуда</span><div class="srcs" style="opacity:1;transform:none;padding:0">${src.map(s=>`<div class="src">${svg('dots')}<span style="width:96px">${s.name}</span><span class="sb"><i style="width:${s.value/smax*100}%"></i></span><span class="g">${fmt(s.value,l.unit==='г'?1:0)} ${l.unit}</span></div>`).join('')}</div></div>`:''}
   <p class="fsec rise" style="--i:4" style="margin-top:10px">${l.note}</p>`;
 }
+const STREAK_IC={sleep_zone:'moon','Натрий':'salt','Добавленный сахар':'cube','Насыщенные жиры':'shield'};
 const B={
-  today(){const nudge=TODAY.nudge,levers=(RHYTHM&&RHYTHM.levers)||{};
-    const mainLeverKey=nudge&&nudge.go==='protein'?'protein':null;
-    const rows=Object.entries(levers).filter(([k,l])=>l&&l.has_data).map(([k,l])=>leverRow(l)).join('');
-    return {html:`${top('Сегодня')}
-    <div class="ov-hero rise" style="--i:1"><p style="font-family:var(--serif);font-size:26px;font-weight:300;line-height:1.2">${nudge?nudge.text:'Пока не за что зацепиться — данных мало.'}</p></div>
-    ${rows||'<p class="empty rise" style="--i:2">Рычаги питания появятся после первого приёма пищи.</p>'}
-    <button class="whyRow press rise" style="--i:8" data-a="index">${svg('hint')}Из чего складывается индекс</button>`}},
+  today(){const n=TODAY.nudge,lv=(RHYTHM&&RHYTHM.levers)||{},stp=(RHYTHM&&RHYTHM.steps)||{},score=TODAY.ring.score,ahead=TODAY.ring.ahead;
+    /* макет v7: главная цифра действия, полоса, откуда, что даст, ещё можно (≤2), в норме — одной строкой */
+    const main=n&&n.go==='protein'&&lv.protein&&lv.protein.has_data?'protein':n&&n.go==='steps'?'steps':null;
+    let hero,bar='',src='';
+    if(main==='protein'){const p=lv.protein,dec=0;
+      hero=`<div class="fbig"><b>${fmt(p.consumed,dec)}</b><span>из ${fmt(p.target,dec)} г белка</span></div><p class="fsub ${p.status==='done'?'':'am'}">${n.text}</p>`;
+      bar=`<div class="rise" style="--i:2"><div class="bb"><i style="width:${Math.min(100,p.consumed/p.target*75)}%"></i><u></u></div><div class="bbL"><span>0</span><span>цель ${fmt(p.target)} г</span></div></div>`;
+      const ss=p.sources||[],mx=ss.length?Math.max(...ss.map(x=>x.value)):1;
+      src=ss.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Откуда</span><div class="srcs" style="opacity:1;transform:none;padding:0">${ss.slice(0,3).map(x=>`<div class="src">${svg('dots')}<span style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.name}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,1)} г</span></div>`).join('')}</div></div>`:'';
+    }else if(main==='steps'&&stp.now_steps!=null){
+      hero=`<div class="fbig"><b>${fmt(stp.now_steps)}</b><span>из ${fmt(stp.target)} шагов</span></div><p class="fsub am">${n.text}</p>`;
+      bar=`<div class="rise" style="--i:2"><div class="bb"><i style="width:${Math.min(100,stp.now_steps/stp.target*75)}%"></i><u></u></div><div class="bbL"><span>0</span><span>цель ${fmt(stp.target)}${stp.status_word?' · '+stp.status_word:''}</span></div></div>`;
+    }else{
+      hero=`<div class="fbig"><b>${score!=null?score:'—'}</b><span>прогноз дня</span></div><p class="fsub">${n?n.text:'Делать ничего не нужно — день идёт в коридоре.'}</p>`;
+    }
+    const gives=[];
+    if(n&&ahead!=null&&score!=null&&ahead>score)gives.push(row(svg('spark'),'teal',n.short||'Главное действие',`прогноз ${ahead} · оценочно`));
+    (TODAY.streaks||[]).filter(x=>x.status==='at_risk').forEach(x=>gives.push(row(svg('flame'),'amber',`Серия «${x.label}» · ${x.count} ${plural(x.count,'день','дня','дней')}`,'сохранится')));
+    const more=[],fine=[];
+    ['fat','sodium'].forEach(k=>{const l=lv[k];if(!l||!l.has_data)return;const dec=l.target<10?1:0;
+      if(l.status==='ok')fine.push(l.label);else more.push(row(svg(k==='sodium'?'salt':'shield'),l.status==='over'?'warm':'amber',`${l.label} ${fmt(l.consumed,dec)} из ${fmt(l.target,dec)} ${l.unit}`,l.note,'','chip','food'))});
+    if(main!=='protein'&&lv.protein&&lv.protein.has_data&&lv.protein.status!=='done')more.push(row(svg('protein'),'teal',`Белок ${fmt(lv.protein.consumed)} из ${fmt(lv.protein.target)} г`,lv.protein.note,'','chip','food'));
+    (TODAY.ring.breakdown||[]).filter(r=>r.mark==='y').forEach(r=>{if(!fine.includes(r.label))fine.push(r.label)});
+    const title=main==='protein'?'Белок сегодня':main==='steps'?'Шаги сегодня':'Сегодня';
+    return {html:`${top(title)}
+    <div class="ov-hero rise" style="--i:1">${hero}</div>${bar}${src}
+    ${gives.length?`<div class="fsec rise" style="--i:4"><span class="lbl">Что даст</span><div class="rows">${gives.join('')}</div></div>`:''}
+    ${more.length?`<div class="fsec rise" style="--i:5"><span class="lbl">Ещё можно</span><div class="rows">${more.slice(0,2).join('')}</div></div>`:''}
+    ${fine.length?`<p class="quietRow rise" style="--i:6">${svg('check')}В норме: ${fine.slice(0,5).join(', ')}</p>`:''}
+    <button class="whyRow press rise" style="--i:7" data-a="index">${svg('hint')}Из чего прогноз</button>`}},
+  week(){const w=TODAY.week||{scores:[]};
+    return {html:`${top('Неделя')}
+    <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${w.green}</b><span>из ${w.days} ${plural(w.days,'дня','дней','дней')} в зелёной зоне</span></div><p class="fsub">средний индекс ${w.avg} · зелёный — от 80</p></div>
+    <div class="fsec rise" style="--i:2"><div class="rows">${w.scores.map(x=>`<div class="row"><span class="rIc ${x.score>=80?'ok':'off'}">${x.score>=80?svg('check'):''}</span><span class="rT"><b>${dateFmt(x.date)}</b></span><span class="rV">${x.score}</span></div>`).join('')}</div></div>`}},
   index(){const rows=(TODAY.ring.breakdown||[]),score=TODAY.ring.score,ahead=TODAY.ring.ahead;
     return {html:`${top(TODAY.state.closed?'Итог дня':'Прогноз дня')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">${TODAY.state.closed?'Как закрылся день':'Чем закончится день'}</div><div class="big">${score!=null?score:'—'}<small>${ahead!=null&&ahead>score?`→ можно ${ahead} · оценочно`:'из 100'}</small></div>
@@ -1522,11 +1600,17 @@ const B={
     return {html:`${top('Серии')}
     <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${alive}</b><span>из ${streaks.length} серий живы</span></div><p class="fsub">${fz} ${fz===1?'заморозка':fz>=2&&fz<=4?'заморозки':'заморозок'} в запасе — срыв не всегда обнулит серию</p></div>
     <div class="stList rise" style="--i:2">${streaks.map(s=>{const p=s.status==='paused',r=s.status==='at_risk',cap=p?'на паузе — нет данных':r?'под угрозой сегодня':s.count>=s.record?'рекорд — держи':(s.next_milestone?`ещё ${s.next_milestone-s.count} до ${s.next_milestone} · рекорд ${s.record}`:`рекорд ${s.record}`);
-      return `<div class="stR2${p?' pause':''}${r?' risk':''}"><div class="stR2h"><span class="rIc ${p?'':r?'amber':'teal'}">${svg('shield')}</span><span class="rT"><b>${s.label}</b><small>${cap}</small></span><span class="stN">${s.count}</span></div></div>`}).join('')||'<p class="empty">Пока нет ни одной серии в истории.</p>'}</div>`}},
-  inbox(){const ev=TODAY.inbox||[];
+      const strip=(s.days||[]).map(d=>`<i class="${{y:'y',f:'f',x:'',p:'p',t:'t',r:'t'}[d.c]}" title="${d.date}">${d.c==='f'?svg('snow'):''}</i>`).join('');
+      return `<div class="stR2${p?' pause':''}${r?' risk':''}"><div class="stR2h"><span class="rIc ${p?'':r?'amber':'teal'}">${svg(STREAK_IC[s.key]||'flame')}</span><span class="rT"><b>${s.label}</b><small>${cap}</small></span><span class="stN">${s.count}</span></div>${strip?`<div class="strip">${strip}</div>`:''}</div>`}).join('')||'<p class="empty">Пока нет ни одной серии в истории.</p>'}</div>
+    <div class="stLeg rise" style="--i:3"><span><i style="background:var(--accent)"></i>выполнено</span><span><i style="background:color-mix(in srgb,var(--accent) 30%,transparent)"></i>заморозка</span><span><i style="box-shadow:inset 0 0 0 1.2px var(--faint)"></i>пауза</span><span><i style="box-shadow:inset 0 0 0 1.5px var(--accent)"></i>сегодня</span></div>
+    <p class="ov-coach rise" style="--i:4">Нет данных — серия на паузе, а не сгорает. Срыв тратит заморозку из общей копилки.</p>`}},
+  inbox(){const ev=TODAY.inbox||[],qs=(CHECKS&&CHECKS.items.questions)||[];
+    /* макет v7: решения принимаются здесь же — «Проверить 3 недели · Не оно · Доказательства» */
     return {html:`${top('Решить')}
-    <div class="rise" style="--i:1;margin-top:18px;display:flex;flex-direction:column;gap:10px">${ev.length?ev.map(e=>
-      `<div class="bcard ${e.tone==='green'?'teal':'amber'}"><span class="mc-ic">${svg(e.kind==='verdict'?'check':'spark')}</span><span class="bbody"><b>${e.title}</b><small>${e.sub}</small><span class="nacts"><button data-a="gochecks" data-k="${e.kind==='verdict'?'checks':'questions'}">Открыть в Проверках</button></span></span></div>`).join(''):'<p class="empty">Пока нечего решать.</p>'}</div>`}},
+    <div class="rise" style="--i:1;margin-top:18px;display:flex;flex-direction:column;gap:10px">${ev.length?ev.map(e=>{const q=e.kind==='question'&&qs.find(x=>x.id===e.id);
+      const acts=q?`<button data-a="qcheck" data-k="${q.id}">Проверить 3 недели</button><button class="m" data-a="qdecline" data-k="${q.id}">Не оно</button>${q.source==='детектив'&&q.problem_id?`<button class="m" data-a="evidence" data-k="${q.problem_id}">Доказательства</button>`:''}`
+        :`<button data-a="gochecks" data-k="${e.kind==='verdict'?'checks':'questions'}">Открыть в Проверках</button>`;
+      return `<div class="bcard ${e.tone==='green'?'teal':'amber'}"><span class="mc-ic">${svg(e.kind==='verdict'?'check':'spark')}</span><span class="bbody"><span class="stw ${e.tone==='green'?'teal':'amber'}">${e.kind==='verdict'?'Вердикт проверки':'Нужно решение'}</span><b>${e.title}</b><small>${e.sub}</small><span class="nacts">${acts}</span></span></div>`}).join(''):'<p class="empty">Пока нечего решать.</p>'}</div>`}},
   question(qid){const q=((CHECKS&&CHECKS.items.questions)||[]).find(x=>x.id===qid);if(!q)return{html:top('Вопрос')};
     return {html:`${top('Вопрос')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">${q.source}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${q.title}</p><p class="ov-sub" style="color:var(--accent-ink)">${q.detail||q.what||''}</p></div>
@@ -1603,14 +1687,42 @@ const B={
     /* food */
     const lv=(RHYTHM&&RHYTHM.levers)||{},rows=['protein','fat','sodium'].filter(x=>lv[x]&&lv[x].has_data).map(x=>leverRow(lv[x])).join('');
     const rest=own.filter(r=>!['Насыщенные жиры','Натрий'].includes(r.label));
-    const heatColor=lvl=>lvl>=4?'var(--warm)':lvl>=2?'var(--amber)':'var(--muted)';
-    const heat=(T.micro_heatmap||[]).map(m=>`<div class="reason"><span>${m.label}</span><span class="tag" style="color:${heatColor(m.level)}">${m.avg_pct}% от нормы за неделю</span></div>`).join('');
+    /* макет v7: тепловая карта — строка = нутриент, 7 клеток = дни, в конце — среднее */
+    const cc=v=>v==null?'':v>=90?'c3':v>=75?'c2':v>=60?'c1':v>=45?'lo':'';
+    const hm=T.micro_heatmap||[],nd=hm.reduce((a,m)=>Math.max(a,(m.days_pct||[]).length),0);
+    const heat=hm.length?`<div class="hm"><div class="hmH" style="grid-template-columns:92px repeat(${nd},1fr) 44px"><span></span>${Array.from({length:nd},(_,i)=>`<span>${i===nd-1?'сег.':'−'+(nd-1-i)}</span>`).join('')}<span>ср.</span></div>`
+      +hm.map(m=>`<div class="hmR" style="grid-template-columns:92px repeat(${nd},1fr) 44px"><span>${m.label}</span>${(m.days_pct||[]).map(v=>`<i class="${cc(v)}" title="${v==null?'нет данных':Math.round(v)+'%'}"></i>`).join('')}<em>${Math.round(m.avg_pct)}%</em></div>`).join('')+`</div>`:'';
     return {html:`${top('Питание')}
     ${rows||'<p class="empty rise" style="--i:1">Рычаги появятся после первого приёма пищи.</p>'}
     ${rest.length?`<div class="rise" style="--i:3;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Ещё в лимите</div>${idxRows(rest)}</div>`:''}
-    ${heat?`<div class="rise" style="--i:4;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Микро · неделя, только отклонения</div>${heat}</div>`:''}
+    ${heat?`<div class="fsec rise" style="--i:4"><span class="lbl">Микро · неделя</span>${heat}<p class="gvNote">Только отклонения: недобор от 85% нормы или перебор 2+ дня.</p></div>`:''}
     ${pubList(T.publications,'Свежее по теме',5)}`};
   },
+  consrep(){const c=DOC&&DOC.consilium;if(!c)return {html:top('Консилиум')};
+    return {html:`${top('Консилиум')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">${dateFmt(c.date)}${c.roles.length?' · '+c.roles.join(', '):''}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${c.topic||''}</p>${c.question?`<p class="ov-sub" style="color:var(--accent-ink)">${c.question}</p>`:''}</div>
+    ${c.actions.length?`<div class="fsec rise" style="--i:2"><span class="lbl">Что делать</span><div class="rows">${c.actions.map(a=>row(svg(a.accepted?'check':'dots'),a.accepted?'teal':'',a.text,a.accepted?'принято · в Проверках':'не принято')).join('').replace(/<b>/g,'<b class="wrap">')}</div></div>`:''}
+    ${c.skeptic.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Скептик</span>${c.skeptic.map(x=>`<p class="ov-coach" style="margin-top:6px">${x}</p>`).join('')}</div>`:''}
+    ${c.emerging.length?`<div class="fsec rise" style="--i:4"><span class="lbl">Перспективное</span><div class="rows">${c.emerging.map(e=>row(svg('spark'),'amber',e.method,[e.maturity,e.grade].filter(Boolean).join(' · '))).join('').replace(/<b>/g,'<b class="wrap">')}</div></div>`:''}
+    <p class="disc rise" style="--i:5">Новый консилиум — командой «/консилиум» в Telegram; раз в месяц он собирается сам.</p>`}},
+  notes(){const ns=(DOC&&DOC.notes)||[];
+    return {html:`${top('Заключение врача')}
+    <div class="rise" style="--i:1;margin-top:18px">${ns.map(x=>`<div class="bcard teal" style="margin-top:10px"><span class="mc-ic">${svg('doc')}</span><span class="bbody"><span class="stw teal">${dateFmt(x.date)}${x.category?' · '+x.category:''}</span><b style="font-weight:400">${x.note}</b></span></div>`).join('')||'<p class="empty">Записей врача пока нет.</p>'}</div>`}},
+  draw(){const d=DOC&&DOC.next_draw;if(!d)return {html:top('Сдача')};
+    const groups={};d.markers.forEach(m=>{const g=m.category||'Прочее';(groups[g]=groups[g]||[]).push(m)});
+    return {html:`${top('Сдача · '+shortDate(d.date))}
+    <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${d.n}</b><span>${plural(d.n,'анализ','анализа','анализов')}${d.price_rub?' · '+fmt(d.price_rub)+' ₽':''}</span></div><p class="fsub">${dateFmt(d.date)}${d.fasting?' · натощак':''}${d.tubes.length?' · пробирки: '+d.tubes.join(', '):''}</p></div>
+    ${Object.entries(groups).map(([g,ms],i)=>`<div class="fsec rise" style="--i:${2+i}"><span class="lbl">${g}</span><div class="rows">${ms.map(m=>row(svg('tube'),'',m.name,m.why||'',m.fasting?'<span class="rV" style="font-size:12px">натощак</span>':'')).join('').replace(/<small>/g,'<small class="wrap">')}</div></div>`).join('')}
+    ${d.shifted.length?`<p class="gvNote rise" style="--i:8">Сдвинуто ради одного забора: ${d.shifted.map(x=>x.name).join(', ')}.</p>`:''}
+    ${d.export_text?`<button class="btnP press rise" style="--i:9" data-a="copydraw">Скопировать список для лаборатории</button>`:''}
+    <p class="disc rise" style="--i:10">${d.price_rub?'':'Цены по лабораториям пока не заведены — стоимость уточнится в лаборатории. '}Состав собирает оптимизатор: поводы врачей, консилиума, проверок и плановые панели.</p>`}},
+  medpass(mp){if(!mp)return {html:top('Медпаспорт')};const labs=mp.recent_labs||[],oor=labs.filter(l=>l.out_of_range);
+    const lrow=l=>row(svg('tube'),l.out_of_range?'warm':'',l.marker,`${l.ref_min!=null&&l.ref_max!=null?'реф. '+l.ref_min+'–'+l.ref_max:l.ref_max!=null?'реф. до '+l.ref_max:l.ref_min!=null?'реф. от '+l.ref_min:''}${l.date?' · '+shortDate(l.date):''}`,`<span class="rV ${l.out_of_range?'warm':''}">${fmt(l.value,Math.abs(l.value)<10&&l.value%1?1:0)}${l.unit?' '+l.unit:''}</span>`);
+    return {html:`${top('Медпаспорт')}
+    <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${oor.length}</b><span>вне референса из ${labs.length}</span></div>${(mp.active_conditions||[]).length?`<p class="fsub am">${mp.active_conditions.map(c=>c.condition).join(' · ')}</p>`:''}</div>
+    ${oor.length?`<div class="fsec rise" style="--i:2"><span class="lbl">Вне референса</span><div class="rows">${oor.map(lrow).join('')}</div></div>`:''}
+    ${(mp.active_meds||[]).length?`<div class="fsec rise" style="--i:3"><span class="lbl">Принимаю</span><div class="rows">${mp.active_meds.map(m=>row(svg('drop'),'teal',m.name,[m.dose,m.regimen].filter(Boolean).join(' · '))).join('')}</div></div>`:''}
+    <div class="fsec rise" style="--i:4"><span class="lbl">Все маркеры</span><div class="rows">${labs.filter(l=>!l.out_of_range).map(lrow).join('')}</div></div>`}},
   yesterday(snap){if(!snap)return {html:`${top('Вчера')}<p class="empty rise" style="--i:1" style="margin-top:20px">Снимок вчерашнего дня ещё не записан.</p>`};
     const r=snap.ring||{};
     return {html:`${top('Вчера')}
@@ -1761,6 +1873,8 @@ function attachPullToRefresh(el,onRefresh){
 }
 attachPullToRefresh(sToday,()=>loadToday().then(renderToday));
 attachPullToRefresh($('#s-cases'),()=>loadChecks(true).then(renderChecksTab));
+attachPullToRefresh($('#s-plan'),()=>loadDoctor(true).then(renderDoctor));
+attachPullToRefresh($('#s-me'),()=>loadMe(true).then(renderMe));
 
 /* ================= ВКЛАДКИ ================= */
 const order=['today','cases','plan','me'];let curTab='today';
@@ -1770,7 +1884,10 @@ function goTab(k,force){if(k===curTab&&!force)return;haptic();
   $$('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===k));
   $('#tbPill').style.transform=`translateX(${order.indexOf(k)*100}%)`;
   $$('.tb').forEach(b=>b.classList.toggle('on',b.dataset.go===k));
-  if(k==='today')enterToday();else if(k==='cases'){loadChecks().then(renderChecksTab);reveal($(`#s-${k}`))}else reveal($(`#s-${k}`));}
+  if(k==='today')enterToday();else if(k==='cases'){loadChecks().then(renderChecksTab);reveal($(`#s-${k}`))}
+  else if(k==='plan'){reveal($('#s-plan'));loadDoctor().then(renderDoctor).catch(()=>toast('Не удалось загрузить «Врача»'))}
+  else if(k==='me'){reveal($('#s-me'));loadMe().then(renderMe).catch(()=>toast('Не удалось загрузить «Я»'))}
+  else reveal($(`#s-${k}`));}
 $$('.tb').forEach(b=>b.addEventListener('click',()=>goTab(b.dataset.go)));
 
 /* ================= TOAST / THEME ================= */
@@ -1784,7 +1901,7 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
   if(t.tagName==='A'&&a)e.preventDefault();
   switch(a){
     case'chip':haptic();fetchJSON('/vita/topic/'+k).then(detail=>openSheet('segment',{k,detail},t));break;
-    case'verdict':{const v=verdictWord();if(v.k==='none')toast('Часы не видели тебя с утра — как только появятся данные, индекс посчитается.');else openSheet('today',null,t);break}
+    case'verdict':{const v=verdictWord();if(v.k==='none'&&TODAY.state.no_watch)toast('Часы не видели тебя с утра — как только появятся данные, индекс посчитается.');else openSheet(v.k==='week'?'week':'today',null,t);break}
     case'index':openSheet('index',null,t);break;
     case'streaks':openSheet('streaks',null,t);break;
     case'recovery':fetchJSON('/vita/topic/recovery').then(detail=>openSheet('segment',{k:'recovery',detail},t));break;
@@ -1792,7 +1909,11 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'close':closeSheet();break;
     case'toast':haptic();toast(t.dataset.msg);break;
     case'theme':haptic();setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');break;
-    case'inbox':haptic();openSheet('inbox',null,t);break;
+    case'inbox':haptic();loadChecks().catch(()=>{}).then(()=>openSheet('inbox',null,t));break;
+    case'consrep':case'notes':case'draw':haptic();openSheet(a,null,t);break;
+    case'medpass':haptic();loadMedp().then(mp=>openSheet('medpass',mp,t)).catch(()=>toast('Не удалось загрузить медпаспорт'));break;
+    case'copydraw':{haptic();const x=DOC&&DOC.next_draw&&DOC.next_draw.export_text;if(!x)break;
+      (navigator.clipboard?navigator.clipboard.writeText(x):Promise.reject()).then(()=>toast('Список скопирован — вставь в заявку лаборатории.')).catch(()=>toast('Не удалось скопировать'));break}
     case'gochecks':haptic();if(ov.classList.contains('open'))closeSheet();if(k)qMode=k;goTab('cases',true);break;
     case'qseg':haptic();qMode=k;renderChecksTab();break;
     case'question':haptic();openSheet('question',k,t);break;

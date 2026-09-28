@@ -1176,3 +1176,97 @@ def test_vita_topic_food_200_has_publications():
     assert r.status_code == 200
     body = r.json()
     assert "publications" in body and "micro_heatmap" in body
+
+
+# ─────── сверка с макетом v7 (2026-09-28): короткое действие, полоса серий, неделя, «Врач», «Я» ───────
+
+def test_nudge_has_short_headline_for_home():
+    """Заголовок главной — одно короткое действие (макет v7), полный текст — в шторке."""
+    day = {"no_watch": False, "no_food": False, "time_of_day": "day"}
+    for st, steps, protein in (
+        ({**day, "no_watch": True}, {}, {}),
+        ({**day, "no_food": True}, {}, {}),
+        (day, {"behind_pace": True}, {"target": 160, "consumed": 60}),
+        (day, {"behind_pace": False}, {"target": 160, "consumed": 60}),
+        (day, {"behind_pace": True}, {"target": 160, "consumed": 158}),
+    ):
+        n = vita.build_nudge(st, steps, protein, None)
+        assert n["short"] and len(n["short"]) <= 28
+
+
+def test_build_streaks_strip_marks_days():
+    days = [f"2026-09-{d:02d}" for d in range(1, 21)]
+    gap_day = days[-3]
+    rows = [_trend_row(d, sleep_min=(300 if d == gap_day else 450)) for d in days if d != days[-5]]
+    result = vita.build_streaks(rows, [], [], days[-1])
+    s = next(x for x in result["streaks"] if x["key"] == "sleep_zone")
+    strip = s["days"]
+    assert len(strip) == vita.STREAK_STRIP_DAYS
+    codes = {d["date"]: d["c"] for d in strip}
+    assert codes[gap_day] == "f"       # провал закрыт заморозкой
+    assert codes[days[-1]] == "t"      # сегодня ещё идёт
+    assert days[-5] not in codes       # дня без строки в истории в полосе нет
+    assert codes[days[-2]] == "y"
+
+
+def test_summarize_week_counts_green_days():
+    from datetime import date
+    snaps = [(date(2026, 9, d), {"score": s}) for d, s in ((21, 85), (22, 79), (23, 90), (24, None), (25, 81))]
+    w = vita.summarize_week(snaps)
+    assert w["days"] == 4 and w["green"] == 3 and w["avg"] == 84
+
+
+def test_summarize_week_empty_is_none():
+    assert vita.summarize_week([]) is None
+
+
+def test_shape_doctor_uses_latest_completed_report_and_first_panel():
+    reports = [
+        {"id": "cs_2", "status": "empty", "ts_recorded": "2026-09-27T10:00:00", "topic": "x"},
+        {"id": "cs_1", "status": "completed", "ts_recorded": "2026-09-22T10:00:00", "topic": "Общий профиль",
+         "question": "?", "roles": ["кардиолог"], "actions": [{"imperative": "Сдать ApoB", "accepted": True}],
+         "emerging": [{"method": "Омега-3 индекс", "maturity": "когортное"}], "skeptic_notes": ["мало данных"]},
+    ]
+    plan = {"panels": [
+        {"date": "2026-10-12", "n_markers": 2, "fasting_required": True, "tube_types": ["EDTA"], "total_price_rub": None,
+         "export_text": "…", "shifted": [],
+         "markers": [{"name": "ApoB", "why": "серия по жирам", "category": "Липиды", "fasting_required": True, "source_type": "consilium"},
+                     {"name": "B12", "why": "", "category": "Витамины", "fasting_required": False, "source_type": "visit"}]},
+        {"date": "2026-12-15", "n_markers": 1, "markers": [], "fasting_required": False, "tube_types": []},
+    ], "conflicts": []}
+    d = vita.shape_doctor(reports, [{"date": "2026-09-22", "category": "невролог", "note": "B12"}], [], plan)
+    assert d["consilium"]["id"] == "cs_1" and d["consilium"]["actions"][0]["text"] == "Сдать ApoB"
+    assert d["consilium_count"] == 1
+    assert d["next_draw"]["date"] == "2026-10-12" and d["next_draw"]["n"] == 2 and d["next_draw"]["price_rub"] is None
+    assert [x["date"] for x in d["draws"]] == ["2026-10-12", "2026-12-15"]
+
+
+def test_shape_doctor_empty_sources():
+    d = vita.shape_doctor([], [], [], {"panels": []})
+    assert d["consilium"] is None and d["next_draw"] is None and d["draws"] == []
+
+
+def test_shape_me_drivers_sorted_and_systems_grouped():
+    bio = {
+        "phenoage": {"value": 32.4, "chrono_age": 41.0, "delta": -8.6, "date": "2026-08-01"},
+        "drivers": [{"label": "Хроно", "years": 41, "type": "total"}, {"label": "СРБ", "years": 0.9, "type": "pos"},
+                    {"label": "Альбумин", "years": -2.1, "type": "neg"}, {"label": "PhenoAge", "years": 32.4, "type": "total"}],
+        "history": [{"date": "2026-02-01", "phenoage": 34.0}, {"date": "2026-08-01", "phenoage": 32.4}],
+        "biomarkers": [
+            {"label": "АСТ", "group": "Печень", "value": 41, "in_lab_range": False, "in_opt_range": False},
+            {"label": "АЛТ", "group": "Печень", "value": 38, "in_lab_range": True, "in_opt_range": True},
+            {"label": "СРБ", "group": "Воспаление", "value": 2.6, "in_lab_range": True, "in_opt_range": False},
+            {"label": "Глюкоза", "group": "Метаболизм", "value": 4.8, "in_lab_range": True, "in_opt_range": True},
+            {"label": "Пусто", "group": "Метаболизм", "value": None},
+        ],
+    }
+    me = vita.shape_me(bio)
+    assert [d["label"] for d in me["drivers"]] == ["Альбумин", "СРБ"]
+    assert [(s["name"], s["status"]) for s in me["systems"]] == [("Печень", "out"), ("Воспаление", "watch"), ("Метаболизм", "ok")]
+    assert me["systems"][0]["flagged"] == ["АСТ"] and me["systems"][2]["n"] == 1
+    assert me["phenoage"]["delta"] == -8.6 and len(me["history"]) == 2
+
+
+def test_new_vita_tabs_require_session():
+    for path in ("/vita/doctor", "/vita/me", "/vita/medpassport"):
+        assert client.get(path).status_code == 401
