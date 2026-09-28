@@ -179,6 +179,38 @@ def compute_ahead(today: dict, health: dict, state: dict, steps: dict, protein: 
 
 
 # =====================================================================
+# «Из чего индекс» — шторка «Прогноз дня» в макете показывает КАЖДЫЙ критерий
+# ✓/!/✗ с реальным значением (Vita v2, этап 1, ПЛАН СБОРКИ п.10/п.17). Флаги
+# состояния (no_watch/closed и т.п.) фронтенд уже решает сам словами макета
+# (см. докстринг build_state ниже — так было решено ещё в v1) — а вот
+# конкретные подписи/значения критериев ("Сон 7:04", "Натрий 3,2 из 5 г")
+# нигде в ответе не было, их не сочинить на фронте из одних скор-чисел.
+# =====================================================================
+
+_JUDGMENT_MARK = {"good": "y", "neutral": "y", "warn": "w", "bad": "n"}
+
+
+def build_index_breakdown(today: dict, health: dict) -> list[dict]:
+    decision = today.get("decision") or {}
+    metric_by_key = {m["key"]: m for m in (health.get("metrics") or [])}
+    budget = today.get("budget") or []
+    rows = []
+    for r in (decision.get("reasons") or []):
+        rows.append({"mark": _JUDGMENT_MARK.get(r["judgment"], "y"), "label": r["label"], "detail": str(r.get("value", ""))})
+    for key, label in (("sleep_min", "Сон"), ("stress", "Стресс")):
+        m = metric_by_key.get(key)
+        if m and m.get("value") is not None:
+            rows.append({"mark": _JUDGMENT_MARK.get(m["judgment"], "y"), "label": label,
+                         "detail": f"{m['value']} {m.get('unit') or ''}".strip()})
+    for b in budget:
+        if b.get("kind") != "limit":
+            continue
+        rows.append({"mark": _JUDGMENT_MARK[_budget_judgment(b)], "label": b["label"],
+                     "detail": f"{b['consumed']}/{b['cap']} {b['unit']}"})
+    return rows
+
+
+# =====================================================================
 # CHIP_NORM — пороги, по которым кругляш красится "хорошо"/"можно улучшить"
 # (Vita v2, этап 1, Часть «Бэкенд-дельта» п.5). Были захардкожены в мокапе
 # (`const CHIP_NORM={recovery:65,sleep:70,move:70,food:70}`), перенесены в
@@ -800,7 +832,8 @@ def build_today(cur) -> dict:
         # показываем ahead всё равно, но с честной пометкой "оценочно"
         # (ahead_confidence) — фронтенд обязан её показать рядом с числом,
         # не выдавать за точный прогноз.
-        "ring": {**scores, "ahead": ahead, "ahead_confidence": "estimated", "bioage_days": bioage_days},
+        "ring": {**scores, "ahead": ahead, "ahead_confidence": "estimated", "bioage_days": bioage_days,
+                 "breakdown": build_index_breakdown(today, health)},
         "chips": build_chips(today, health, tn),
         "chip_status": chip_status(scores, chip_norm),
         "nudge": nudge,

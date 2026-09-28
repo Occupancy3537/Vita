@@ -105,6 +105,36 @@ def test_scores_includes_recovery_score():
     assert scores["recovery_score"] == 100
 
 
+# ─────── build_index_breakdown — «из чего индекс» (Vita v2, этап 1) ───────
+
+def test_build_index_breakdown_includes_reasons_and_labels():
+    today = {"decision": {"reasons": _decision_reasons(bb_judgment="bad")}, "budget": []}
+    rows = vita.build_index_breakdown(today, {"metrics": []})
+    assert rows == [{"mark": "n", "label": "Body Battery", "detail": "80"}]
+
+
+def test_build_index_breakdown_includes_sleep_and_stress_metrics():
+    health = {"metrics": [{"key": "sleep_min", "value": 424, "unit": "мин", "judgment": "good"},
+                           {"key": "stress", "value": 45, "unit": "", "judgment": "warn"}]}
+    rows = vita.build_index_breakdown({"decision": {"reasons": []}, "budget": []}, health)
+    labels = {r["label"]: r for r in rows}
+    assert labels["Сон"]["mark"] == "y" and labels["Сон"]["detail"] == "424 мин"
+    assert labels["Стресс"]["mark"] == "w"
+
+
+def test_build_index_breakdown_includes_budget_limits_only():
+    today = {"decision": {"reasons": []}, "budget": [
+        {"kind": "limit", "status": "over", "label": "Натрий", "consumed": 6.2, "cap": 5, "unit": "г"},
+        {"kind": "goal", "status": "over", "label": "Клетчатка", "consumed": 30, "cap": 25, "unit": "г"},
+    ]}
+    rows = vita.build_index_breakdown(today, {"metrics": []})
+    assert rows == [{"mark": "n", "label": "Натрий", "detail": "6.2/5 г"}]
+
+
+def test_build_index_breakdown_empty_when_no_data():
+    assert vita.build_index_breakdown({"decision": {"reasons": []}, "budget": []}, {"metrics": []}) == []
+
+
 # ─────── ring.ahead — виртуальное выполнение главной подсказки ───────
 
 def test_main_action_segment_food_when_protein_gap_large():
