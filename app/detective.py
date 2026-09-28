@@ -191,6 +191,71 @@ def episode_days(cur, problem_id: str) -> list[date]:
     return [r[0] for r in cur.fetchall()]
 
 
+# «Проверки» (Vita v2, этап 2, Часть 1.4): доказательства кейса — по каждому
+# эпизоду еда в окне ЧАСОВ до реакции, не дней. analyze_problem() выше
+# ОСТАЁТСЯ дневной гранулярности (это многодневный паттерн факторов из
+# гипотез — час его не меняет и не должен: он про "сколько дней из скольки",
+# не "во сколько ел"); здесь — отдельная, детальная развёртка по времени
+# СУТОК для шторки "Доказательства", буквально по тексту тикета "для пищевых
+# реакций часы решают".
+EVIDENCE_WINDOW_HOURS = 8.0
+
+
+def _meals_before(cur, onset_ts, hours: float = EVIDENCE_WINDOW_HOURS) -> list[dict]:
+    """health.meals буквальным SQL (без REGISTRAR_HEALTH_SCHEMA) — тот же
+    приём, что health.investigations выше в этом файле: health в этом
+    проекте не имеет схемы-переключателя (CLAUDE.md, "health — реальная
+    прод-схема, не card_test")."""
+    window_from = onset_ts - timedelta(hours=hours)
+    cur.execute(
+        'SELECT "Date", "Meal_description" FROM health.meals '
+        'WHERE "Date" >= %s AND "Date" < %s ORDER BY "Date" DESC',
+        (window_from, onset_ts),
+    )
+    out = []
+    for ts, desc in cur.fetchall():
+        if ts is None:
+            continue
+        out.append({
+            "time": ts.isoformat(),
+            "hours_before": round((onset_ts - ts).total_seconds() / 3600, 2),
+            "description": desc or "",
+        })
+    return out
+
+
+def case_evidence(cur, problem_id: str, title: str) -> dict:
+    """Главная точка входа для /vita/cases/{id}/evidence (через app.checks —
+    см. её докстринг про метку гипотеза/факт, которую этот модуль намеренно
+    не знает: он ничего не знает о card.vita_question_decision). По каждому
+    эпизоду — еда за EVIDENCE_WINDOW_HOURS часов до реакции; findings —
+    переиспользованы из analyze_problem(), не пересчитаны заново."""
+    cur.execute(
+        sql.SQL("SELECT id, onset_ts, symptom_key, context FROM {t} WHERE problem_id = %s "
+                "AND onset_ts IS NOT NULL ORDER BY onset_ts")
+        .format(t=sql.Identifier(schema(), "episode")),
+        (problem_id,),
+    )
+    episodes = [
+        {
+            "episode_id": ep_id,
+            "onset_ts": onset_ts.isoformat(),
+            "symptom": context or symptom_key,
+            "meals": _meals_before(cur, onset_ts),
+        }
+        for ep_id, onset_ts, symptom_key, context in cur.fetchall()
+    ]
+    analysis = analyze_problem(cur, problem_id, title)
+    return {
+        "problem_id": problem_id,
+        "title": title,
+        "window_hours": EVIDENCE_WINDOW_HOURS,
+        "status": analysis["status"],
+        "episodes": episodes,
+        "findings": analysis["findings"],
+    }
+
+
 def analyze_problem(cur, problem_id: str, title: str) -> dict:
     """Главная точка входа Части 3. status: not_enough_data | no_hypotheses |
     no_signal (проверили — совпадений нет, тоже честный результат) | notable."""

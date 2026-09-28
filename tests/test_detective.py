@@ -249,3 +249,61 @@ def test_build_weekly_block_silent_for_stale_problem_with_nothing_new():
     with get_conn() as conn, conn.cursor() as cur:
         block = det.build_weekly_block(cur)
     assert block == ""
+
+
+# ─────── case_evidence (Vita v2, этап 2, Часть 1.4) — health.meals в окне часов ───────
+
+def _insert_meal(ts: datetime, description: str):
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            'INSERT INTO health.meals ("Entry_ID", "Date", "Meal_description") VALUES (%s, %s, %s)',
+            (f"test-meal-{ULID()}", ts, description),
+        )
+        conn.commit()
+    return ts
+
+
+def test_case_evidence_lists_meals_before_episode_with_hours_lag():
+    # health.meals — реальная живая таблица (не изолирована по схеме), у неё
+    # есть настоящая история Влада рядом с "вчера" — окно в 8ч вполне может
+    # реально что-то найти. Поэтому проверяем ПРИСУТСТВИЕ своей маркерной
+    # записи (уникальный текст, как "Плюшевый жираф..." выше в этом файле),
+    # а не точную длину списка — тот же приём, что и у остальных тестов,
+    # трогающих health.* напрямую.
+    marker_in = "тестовый-маркер-грецкий-орех-72f1"
+    marker_out = "тестовый-маркер-овсянка-вне-окна-72f1"
+    problem_id = _make_problem("Кейс доказательства тест")
+    onset = datetime.now(timezone.utc) - timedelta(days=1)
+    _insert_episode(problem_id, 1, symptom_key="test-evidence", context="зуд после ореха")
+    meal_ts = onset - timedelta(hours=3, minutes=10)
+    outside_ts = onset - timedelta(hours=20)  # вне окна EVIDENCE_WINDOW_HOURS
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE {schema()}.episode SET onset_ts = %s WHERE problem_id = %s", (onset, problem_id),
+        )
+        conn.commit()
+    try:
+        _insert_meal(meal_ts, marker_in)
+        _insert_meal(outside_ts, marker_out)
+        with get_conn() as conn, conn.cursor() as cur:
+            result = det.case_evidence(cur, problem_id, "Кейс доказательства тест")
+        assert result["window_hours"] == det.EVIDENCE_WINDOW_HOURS
+        assert len(result["episodes"]) == 1
+        meals = result["episodes"][0]["meals"]
+        descriptions = [m["description"] for m in meals]
+        assert marker_in in descriptions
+        assert marker_out not in descriptions  # вне окна — не попала
+        hit = next(m for m in meals if m["description"] == marker_in)
+        assert 3.0 < hit["hours_before"] < 3.3
+    finally:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM health.meals WHERE \"Entry_ID\" LIKE 'test-meal-%'")
+            conn.commit()
+
+
+def test_case_evidence_no_episodes_returns_empty_list():
+    problem_id = _make_problem("Кейс без эпизодов тест")
+    with get_conn() as conn, conn.cursor() as cur:
+        result = det.case_evidence(cur, problem_id, "Кейс без эпизодов тест")
+    assert result["episodes"] == []
+    assert result["status"] == "not_enough_data"
