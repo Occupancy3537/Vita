@@ -104,6 +104,29 @@
       «Ещё сегодня» ≤ 2 строки, строка проверок, привычки, серии. Вечером «Ещё сегодня» → «Итог дня» (✓ по данным).
       Вклад в биовозраст — «Вчера: моложе на N дня» (знак словами, без «−»), по закрытым суткам.
       Доступность: --muted #726C63 / #8F897F (контраст ≥ 4.5:1 на фоне), текст не мельче 11px, цели нажатия ≥ 40–44px.
+  17. Три итерации критики (пользователь · архитектор · дизайнер) + бенчмарк wellness-дашбордов:
+      Главная = взгляд и вывод. Три уровня: главная (вердикт + одно действие) → шторка по тапу → вкладки.
+      Вердикт дня — 4 состояния (decision.verdict на сервере): всё хорошо / можно улучшить / важно (клиника) / нет данных;
+      плюс «день закрыт», «неделя» (вс), «урок дня» (вчера). Слово красит точку над заголовком. Заголовок — одно действие
+      со стрелкой к прогнозу («Ужин без соли → 86»), он же кнопка: шторка «Сегодня» = цифра · bullet-бар лимита с прогнозом
+      к ночи · откуда (топ-3 источника) · что даст · ещё можно (≤2) · в норме одной строкой · «Почему я так думаю».
+      Приоритет мысли: клиника (маркер вне референса) → лимит у края → отставание темпа → всё хорошо.
+      «Решить» — одна строка (+N), решения — в шторке карточками. «Вчера: моложе» — только в «Я → Что дало».
+      С главной ушли: абзац «почему», две кнопки, «Ещё сегодня», SpO₂, строка проверок, сетка привычек (→ Проверки).
+      Серии — кольца-медали: заполнение до следующей вехи (7/14/30/60/90…), под угрозой — янтарь (TD.atRisk ←
+      серия, чей критерий сегодня у края), пауза — пунктир. Заморозки — одна копилка на все серии (НОВОЕ на бэкенде:
+      сейчас заморозки по сериям).
+      Проверки: переключатель Вопросы · Проверки · Привычки, однострочные ряды; привычки врача и вердикты — там.
+      Врач: три строки (консилиум · заключение · медпаспорт) + одна карточка сдачи; «Что сдаём» — шторка с составом,
+      лабораторией и оптимизатором.
+      Я: паспорт и биовозраст рядом, лесенка PhenoAge; «Что дало»: образ жизни — сумма bioage_days за 30 дней по
+      факторам (НОВОЕ: хранить bioage_days по дням и факторам), кровь — вклад 9 маркеров в PhenoAge от паспортного
+      возраста (считается из формулы Levine по phenoage_log); системы органов — 4 карточки со статусом.
+      Питание: лимиты — bullet-бар (лимит на 75% ширины, дальше зона перебора, заливка краснеет только за лимитом);
+      микро — тепловая карта 7 дней, только отклонения, «в норме» — одной строкой; тап — чем восполнить.
+      ДС v2: один регистр (без КАПСа и разрядки), плоские карточки без свечений, тон — только в круге иконки,
+      коралл — только клиника (вне референса, клинический лимит), янтарь — «можно улучшить», одна строка списка
+      (иконка в круге · название · значение · ›), одна основная кнопка — тёмная пилюля. Засечки и фото пока остаются.
 -->
 <style>
 :root{
@@ -1001,6 +1024,211 @@ svg{display:block}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition-duration:.01ms!important;transition-delay:0s!important}
 }
+/* ================= ДС v2 — по бенчмарку (п. 17 ПЛАНА СБОРКИ) =================
+   один регистр (без КАПСа), плоские карточки без свечений, тон — только в иконке,
+   коралл — только клиника, янтарь — «можно улучшить», одна строка списка, одна тёмная кнопка */
+:root{--card:#FFFFFF;--card-sh:0 1px 2px rgba(29,27,24,.05),0 0 0 1px rgba(29,27,24,.035);--amber-soft:rgba(154,125,30,.13);
+  --t-sleep:var(--card);--t-hrv:var(--card);--t-energy:var(--card);--t-warm:var(--card);--t-neutral:var(--card);
+  --g-sleep:transparent;--g-hrv:transparent;--g-energy:transparent;--g-warm:transparent;--g-neutral:transparent;--card-edge:transparent;
+  --g-watch-fg:#7E6512;--g-watch-bg:rgba(154,125,30,.13)}
+:root[data-theme="dark"]{--card:#1A1F22;--card-sh:0 0 0 1px rgba(255,255,255,.045);--amber-soft:rgba(224,196,106,.14);
+  --t-sleep:var(--card);--t-hrv:var(--card);--t-energy:var(--card);--t-warm:var(--card);--t-neutral:var(--card);
+  --g-sleep:transparent;--g-hrv:transparent;--g-energy:transparent;--g-warm:transparent;--g-neutral:transparent;--card-edge:transparent;
+  --g-watch-fg:#E0C46A;--g-watch-bg:rgba(224,196,106,.14)}
+/* типографика: 4 размера — число · заголовок · текст · подпись; без разрядки */
+.lbl{font-size:13px;letter-spacing:0;text-transform:none;font-weight:600;color:var(--ink2)}
+.secH{margin:0 2px 10px;align-items:center}
+.secH .lbl,.sectionHead .lbl{font-size:17px;font-weight:600;color:var(--ink);letter-spacing:-.01em}
+.secH>span:last-child,.sectionHead>span{font-size:13px}
+.secH>span.lbl,.sectionHead>span.lbl{font-size:17px;color:var(--ink);text-align:left}
+.ov-top .lbl{font-size:15px;color:var(--ink)}
+.ov-hero>.lbl{font-size:13px;font-weight:500;color:var(--muted)}
+.stw{font-size:12.5px;letter-spacing:0;text-transform:none;font-weight:600}
+.bioSub{font-size:13px;letter-spacing:.01em;text-transform:none;font-weight:500}
+.hyp,.bbody .hyp,.brow .bt .hyp{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;text-transform:none;letter-spacing:0;font-size:11px;font-weight:600;background:var(--amber-soft);color:var(--amber);vertical-align:1px}
+.pastTag,.v2 em{text-transform:none;letter-spacing:0}
+.mac .lbl{font-size:12px;font-weight:500;color:var(--muted)}
+.title{font-weight:500}
+/* поверхности: плоские, без обводки и свечения */
+.mcard,.bcard,.cons,.nextDraw,.labSum,.loop,.mac,.ckrow,.stk{background:var(--card);box-shadow:var(--card-sh)}
+.mcard::before,.bcard::before,.cons::before,.nextDraw::before,.stk::before{display:none}
+.bcard{border-radius:24px;padding:16px}
+.cons.ready{box-shadow:inset 0 0 0 1.5px var(--accent)}
+/* тон — только в круге иконки */
+.mc-ic{width:40px;height:40px;background:var(--line-soft);box-shadow:none}
+.mc-ic svg{width:18px;height:18px}
+.bcard.teal .mc-ic,.bcard.green .mc-ic{background:var(--accent-soft)}.bcard.teal .mc-ic svg,.bcard.green .mc-ic svg{color:var(--accent-ink)}
+.bcard.amber .mc-ic,.bcard.gold .mc-ic{background:var(--amber-soft)}.bcard.amber .mc-ic svg,.bcard.gold .mc-ic svg{color:var(--amber)}
+.bcard.warm .mc-ic{background:var(--warm-soft)}.bcard.warm .mc-ic svg{color:var(--warm)}
+.stw.gold{color:var(--amber)}
+.pdot2,.pdot2::after{background:var(--accent)}
+/* кнопки: одна основная — тёмная пилюля */
+.btn.pri{background:var(--ink);color:var(--bg)}
+.btnP{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:52px;margin-top:22px;border-radius:26px;background:var(--ink);color:var(--bg);font-size:15px;font-weight:600}
+.btnP.done{background:var(--accent-soft);color:var(--accent-ink)}
+/* строка списка — одна на все экраны: иконка в круге · название · значение · › */
+.rows{border-radius:24px;background:var(--card);box-shadow:var(--card-sh);overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;padding:10px 14px;text-align:left;position:relative}
+.row+.row::before{content:"";position:absolute;left:66px;right:0;top:0;border-top:1px solid var(--line-soft)}
+.rIc{flex:none;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--line-soft)}
+.rIc svg{width:18px;height:18px;color:var(--ink2)}
+.rIc.teal,.rIc.green{background:var(--accent-soft)}.rIc.teal svg,.rIc.green svg{color:var(--accent-ink)}
+.rIc.amber,.rIc.gold{background:var(--amber-soft)}.rIc.amber svg,.rIc.gold svg{color:var(--amber)}
+.rIc.warm{background:var(--warm-soft)}.rIc.warm svg{color:var(--warm)}
+.rIc.ok{background:var(--green)}.rIc.ok svg{color:#fff;stroke-width:2.4;width:15px;height:15px}
+.rIc.off{background:none;box-shadow:inset 0 0 0 1.5px var(--faint)}
+.rT{flex:1;min-width:0}
+.rT b{display:block;font-size:15px;font-weight:500;line-height:1.3;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rT small{display:block;margin-top:2px;font-size:13px;line-height:1.3;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rT small.wrap,.rT b.wrap{white-space:normal}
+.rV{flex:none;font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink2);text-align:right}
+.rV.ok{color:var(--green)}.rV.am{color:var(--amber)}.rV.warm{color:var(--warm-ink)}
+.rGo{flex:none;width:14px;height:14px;color:var(--faint)}
+.rDot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.rDot.warm{background:var(--warm)}
+.rN{flex:none;min-width:26px;height:22px;padding:0 7px;border-radius:11px;background:var(--line-soft);font-size:12px;font-weight:600;display:grid;place-items:center;color:var(--ink2)}
+.rBtn{flex:none;height:32px;padding:0 12px;border-radius:16px;font-size:13px;font-weight:600;color:var(--accent-ink);background:var(--accent-soft)}
+.rBtn.on{background:none;color:var(--green)}
+.rRing{flex:none;width:30px;height:30px}
+.rRing circle{fill:none;stroke-width:3}
+.rRing .bg{stroke:var(--line)}.rRing .fg{stroke:var(--accent);stroke-linecap:round}
+.sec>.rows+.rows{margin-top:10px}
+.gap{height:10px}
+/* главная v6: взгляд — вердикт; тап — подробности */
+.verdict{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:clamp(14px,2.2vh,22px);max-width:340px;padding:4px 10px;text-align:center}
+.vk{display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--ink)}
+.vk i{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.vk.ok i,.vk.week i{background:var(--green)}.vk.up i{background:var(--amber)}.vk.imp i{background:var(--warm)}.vk.closed i{background:var(--gold)}.vk.past i{background:var(--ink2)}
+#todayTab.photo .vk.ok i,#todayTab.photo .vk.week i{background:#9EE6A0;box-shadow:0 0 10px rgba(158,230,160,.7)}
+#todayTab.photo .vk.up i{background:#F0D27A;box-shadow:0 0 10px rgba(240,210,122,.7)}
+#todayTab.photo .vk.imp i{background:#F4A58A;box-shadow:0 0 10px rgba(244,165,138,.7)}
+#todayTab.photo .vk.closed i{background:#F0CF86}
+.vt{font-family:var(--serif);font-size:clamp(28px,4vh,34px);font-weight:300;line-height:1.1;letter-spacing:-.01em;color:var(--ink);text-wrap:balance}
+.vt svg{display:inline-block;width:18px;height:18px;margin-left:4px;vertical-align:1px;color:var(--muted);stroke-width:1.8}
+#todayTab.photo .vk,#todayTab.photo .vt{text-shadow:0 1px 14px rgba(4,12,24,.6),0 0 3px rgba(4,12,24,.5)}
+#needYou .rows{margin-top:6px}
+/* серии — кольца-медали: заполнение до следующей вехи, под угрозой — янтарь, пауза — пунктир */
+.strow{display:block;width:100%;margin-top:0;padding:14px 10px 14px;border-radius:24px;background:var(--card);box-shadow:var(--card-sh);border-top:0;text-align:left}
+.strow-h{display:flex;justify-content:space-between;align-items:center;margin:0 6px 12px}
+.strow-h b{font-size:15px;font-weight:600}
+.strow-h span{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.strow-h span svg{width:13px;height:13px}
+.strow-h .fzc{color:var(--accent-ink)}
+.stRing{display:grid;grid-template-columns:repeat(5,1fr);gap:2px}
+.sr{display:flex;flex-direction:column;align-items:center;gap:5px}
+.srC{position:relative;width:50px;height:50px;display:grid;place-items:center}
+.srC .rg{position:absolute;inset:0;width:50px;height:50px;transform:rotate(-90deg);overflow:visible}
+.srC .rg circle{fill:none;stroke-width:3.2}
+.srC .rg .bg{stroke:var(--line)}
+.srC .rg .fg{stroke:var(--accent);stroke-linecap:round;transition:stroke-dasharray 1.2s var(--ease)}
+.srC>svg.ic{width:18px;height:18px;color:var(--ink2)}
+.sr b{font-size:17px;font-weight:500;line-height:1;font-variant-numeric:tabular-nums;color:var(--ink)}
+.sr small{font-size:11.5px;line-height:1;color:var(--muted);white-space:nowrap}
+.sr.best .fg{stroke:var(--gold)}.sr.best>svg{color:var(--gold)}
+.sr.risk .fg{stroke:var(--amber)}.sr.risk .srC>svg.ic{color:var(--amber)}
+.sr.risk .srC::after{content:"";position:absolute;inset:3px;border-radius:50%;box-shadow:0 0 0 2px var(--amber);opacity:0;animation:srpulse 2.4s ease-out infinite}
+@keyframes srpulse{0%{opacity:.5;transform:scale(1)}100%{opacity:0;transform:scale(1.35)}}
+.sr.risk small{color:var(--amber);font-weight:600}
+.sr.pause .fg{stroke:var(--faint);stroke-dasharray:2 5!important}.sr.pause b{color:var(--muted)}.sr.pause small{color:var(--muted)}
+/* шторка «Сегодня»: цифры → откуда → что даст → ещё можно → в норме */
+.fbig{display:flex;align-items:baseline;gap:8px;margin-top:10px}
+.fbig b{font-size:64px;font-weight:200;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+.fbig span{font-size:15px;color:var(--muted)}
+.fsub{margin-top:8px;font-size:14px;font-weight:500;color:var(--accent-ink)}
+.fsub.am{color:var(--amber)}.fsub.warm{color:var(--warm-ink)}
+/* bullet-бар: норма на ~75% ширины, дальше — зона перебора; заливка краснеет только за лимитом */
+.bb{position:relative;height:10px;margin:22px 0 8px;border-radius:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--green) 16%,transparent) 0 75%,color-mix(in srgb,var(--warm) 16%,transparent) 75% 100%)}
+.bb i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--accent);transition:width 1.1s var(--ease)}
+.bb i.over{background:var(--warm)}
+.bb em{position:absolute;top:-5px;bottom:-5px;width:0;border-left:2px dashed var(--amber)}
+.bb u{position:absolute;left:75%;top:-6px;bottom:-6px;width:2px;border-radius:1px;background:var(--ink2);opacity:.55}
+.bbL{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.bbL b{font-weight:600;color:var(--amber)}
+.fsec{margin-top:26px}
+.fsec>.lbl{display:block;margin:0 2px 10px;font-size:17px;color:var(--ink)}
+.fsec .src{padding:9px 2px}
+.quietRow{display:flex;align-items:center;gap:8px;margin:14px 4px 0;font-size:13px;color:var(--muted)}
+.quietRow svg{width:14px;height:14px;color:var(--green)}
+.whyRow{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;min-height:44px;margin-top:16px;font-size:13.5px;color:var(--muted)}
+.whyRow svg{width:14px;height:14px}
+/* Проверки: переключатель вместо четырёх чисел, однострочные ряды */
+.seg{display:flex;gap:4px;margin-top:16px;padding:4px;border-radius:18px;background:var(--line-soft)}
+.seg button{flex:1;height:40px;border-radius:14px;font-size:14px;font-weight:500;color:var(--ink2);display:flex;align-items:center;justify-content:center;gap:6px;transition:background .3s ease,color .3s ease}
+.seg button b{font-weight:600;font-size:12px;min-width:20px;height:20px;padding:0 6px;border-radius:10px;display:grid;place-items:center;background:var(--line-soft);color:var(--muted)}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:var(--card-sh)}
+.seg button.hot b{background:var(--accent);color:#fff}
+.qsec{margin-top:22px}
+.qsec>.lbl{display:flex;justify-content:space-between;align-items:baseline;margin:0 2px 10px;font-size:17px;color:var(--ink)}
+.qsec>.lbl small{font-size:13px;font-weight:400;color:var(--muted)}
+.qsec .mcard.rx{border-radius:24px}
+/* Врач: три строки + одна карточка сдачи; подробности — в шторке «Что сдаём» */
+#docRows{margin-top:18px}
+.nextDraw{margin-top:0;padding:18px 18px 18px}
+.nd-k{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted)}
+.nd-k b{font-weight:600;color:var(--accent-ink)}
+.nd-d{margin-top:6px}
+.nd-q2{display:flex;align-items:center;gap:10px;margin-top:14px;padding:10px 12px;border-radius:16px;background:var(--amber-soft);font-size:13.5px;line-height:1.35}
+.nd-q2 span{flex:1}
+.nd-q2 button{flex:none;font-size:13px;font-weight:600;color:var(--accent-ink);min-height:36px}
+.nextDraw .btnP{margin-top:16px}
+.drawW div{display:flex;gap:10px;align-items:baseline;padding:10px 2px;border-top:1px solid var(--line-soft);font-size:14px}
+.drawW div:first-child{border-top:0}
+.drawW b{flex:none;font-weight:600}.drawW span{flex:1;color:var(--ink2)}.drawW em{font-style:normal;color:var(--muted);font-variant-numeric:tabular-nums}
+/* Я: биовозраст как у Longevity — паспорт и био рядом, дельта; «Что дало» — образ жизни и кровь; системы органов */
+.ageCard{margin-top:18px;padding:16px;border-radius:24px;background:linear-gradient(135deg,#2C8981 0%,#4F9E6E 100%);color:#fff}
+:root[data-theme="dark"] .ageCard{background:linear-gradient(135deg,#1F5F5A 0%,#2F6B4A 100%)}
+.ageH{display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:600}
+.ageH em{font-style:normal;height:26px;padding:0 10px;border-radius:13px;background:rgba(255,255,255,.2);font-size:13px;font-weight:600;display:grid;place-items:center}
+.ageT{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.ageT div{padding:12px 14px;border-radius:18px;background:#1D1B18;color:#fff}
+.ageT div.bio{background:#fff;color:#1D1B18}
+.ageT small{display:block;font-size:12.5px;opacity:.75}
+.ageT b{display:block;margin-top:6px;font-size:30px;font-weight:400;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums}
+.ageT b span{font-size:14px;font-weight:400;margin-left:4px;opacity:.7}
+.ageF{margin-top:12px;font-size:12.5px;opacity:.85}
+.bioChart{margin-top:10px;padding:10px 14px 6px;border-radius:24px;background:var(--card);box-shadow:var(--card-sh)}
+.bioChart .chart{margin-top:4px}
+.seg.sm{margin-top:0}
+.gv{display:flex;align-items:center;gap:10px;padding:11px 2px;border-top:1px solid var(--line-soft)}
+.gv:first-child{border-top:0}
+.gv>svg{flex:none;width:17px;height:17px;color:var(--ink2)}
+.gv .gn{flex:none;width:100px;font-size:14px;white-space:nowrap}
+.gv .gb{flex:1;position:relative;height:8px;border-radius:4px;background:var(--line-soft)}
+.gv .gb i{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--accent)}
+.gv .gb i.old{background:var(--amber)}
+.gv .gd{flex:none;width:76px;white-space:nowrap;text-align:right;font-size:14px;font-variant-numeric:tabular-nums;color:var(--accent-ink);font-weight:600}
+.gv .gd.old{color:var(--amber)}.gv .gd.zero{color:var(--muted);font-weight:400}
+.gv.end .gn,.gv.end .gd{font-weight:600;color:var(--ink)}
+.gv.end .gb i{background:var(--ink2);width:3px!important;border-radius:2px;top:-4px;bottom:-4px}
+.gvCard{padding:6px 14px;border-radius:24px;background:var(--card);box-shadow:var(--card-sh)}
+.gvNote{margin:10px 4px 0;font-size:12.5px;line-height:1.45;color:var(--muted)}
+.sysGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sysC{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:14px;border-radius:22px;background:var(--card);box-shadow:var(--card-sh);text-align:left}
+.sysC .rIc{width:36px;height:36px}
+.sysC b{font-size:15px;font-weight:500}
+.sysC small{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.sysC small i{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.sysC small i.w{background:var(--amber)}.sysC small i.o{background:var(--warm)}
+/* Питание: лимит — bullet-бар (лимит на 75%, дальше зона перебора); микро — тепловая карта недели */
+.lever .bb{margin:14px 0 2px}
+.lever.nodata .bb{background:none;border-top:1.5px dashed var(--faint);height:0;margin-top:16px}
+.hm{padding:6px 14px 10px;border-radius:24px;background:var(--card);box-shadow:var(--card-sh)}
+.hmH,.hmR{display:grid;grid-template-columns:92px repeat(7,1fr) 44px;align-items:center;column-gap:5px}
+.hmH{padding:8px 0 4px;font-size:11px;color:var(--muted);text-align:center}
+.hmH span:first-child{text-align:left}
+.hmR{width:100%;padding:7px 0;text-align:left;border-top:1px solid var(--line-soft)}
+.hmR>span:first-child{font-size:14px}
+.hmR i{height:22px;border-radius:6px;background:var(--line-soft)}
+.hmR i.c1{background:color-mix(in srgb,var(--green) 22%,transparent)}.hmR i.c2{background:color-mix(in srgb,var(--green) 50%,transparent)}.hmR i.c3{background:var(--green)}
+.hmR i.lo{background:color-mix(in srgb,var(--amber) 22%,transparent)}
+.hmR em{font-style:normal;text-align:right;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--amber)}
+.hmA{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s var(--ease)}
+.hmA>div{overflow:hidden}
+.hmA p{padding:2px 0 10px;font-size:13px;line-height:1.45;color:var(--ink2)}
+.hmA p b{color:var(--accent-ink);font-weight:600}
+.hmW.open .hmA{grid-template-rows:1fr}
+.hmOk{display:flex;align-items:center;gap:8px;padding:10px 0 2px;border-top:1px solid var(--line-soft);font-size:13px;color:var(--muted)}
+.hmOk svg{width:14px;height:14px;color:var(--green)}
 </style>
 </head>
 <body>
@@ -1024,17 +1252,10 @@ svg{display:block}
               <button class="idxBtn" data-a="index" aria-label="Прогноз дня: из чего он"><div class="arcBox" id="arcBox"></div>
               <div class="bioBig" id="dayNum">82</div>
               <div class="bioSub" id="dayLbl">Индекс дня</div></button>
-              <p class="emo" id="emo"></p>
-              <p class="mainWhy" id="mainWhy"></p>
-              <div class="mainActs" id="mainActs"></div>
-              <button class="effect press" id="effectLink" data-a="effect"></button>
+              <button class="verdict press" id="verdict" data-a="verdict"><span class="vk" id="vKick"></span><span class="vt"><span id="emo"></span><svg class="ic" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></button>
             </div>
             <div id="needYou"></div>
-            <div id="pastBox"></div>
-            <section class="sec rise" style="--i:4" id="briefSec"><div class="secH"><span class="lbl" id="briefLbl">Ещё сегодня</span></div><div class="brief" id="brief"></div></section>
-            <div id="checks"></div>
-            <section class="sec rise" style="--i:6" id="rxSec"><div class="secH"><span class="lbl">Привычки</span><span>от врача · спина · до 15 окт</span></div><div class="mcard rx" id="rx"></div></section>
-            <section class="sec rise" style="--i:7" id="stSec"><button class="strow press" id="streaks" data-a="streaks"></button></section>
+            <section class="sec rise" style="--i:4" id="stSec"><button class="strow press" id="streaks" data-a="streaks"></button></section>
           </div>
         </div>
       </div>
@@ -1043,21 +1264,11 @@ svg{display:block}
     <!-- ВРАЧ -->
     <section class="tab" data-tab="plan" aria-label="Врач">
       <div class="screen" id="s-plan">
-        <div class="rise" style="--i:0"><h1 class="title">Врач</h1><p class="subtitle">Семейный врач, консилиум и анализы — в одном месте</p></div>
-        <div class="consCard rise" style="--i:1" id="consCard"></div>
-        <button class="docRow press rise" style="--i:1" data-a="conclusion"><span class="accT"><b>Заключение семейного врача</b><small id="m-conc"></small></span><i class="adot" id="d-conc"></i><svg class="ic chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
-        <div class="secH rise" style="--i:2;margin-top:26px"><span class="lbl">Анализы</span></div>
+        <div class="rise" style="--i:0"><h1 class="title">Врач</h1></div>
+        <div class="rows rise" style="--i:1" id="docRows"></div>
+        <div class="secH rise" style="--i:2;margin-top:28px"><span class="lbl">Анализы</span><span id="drawIn"></span></div>
         <div class="nextDraw rise" style="--i:2" id="nextDraw"></div>
         <div class="dates rise" style="--i:3" id="dates"></div>
-        <div class="acc rise" style="--i:3" id="acc">
-          <div class="accS" data-s="sostav"><button class="accH" data-a="acc" data-k="sostav"><span class="accT"><b>Состав анализов</b><small id="m-sostav"></small></span><i class="adot" id="d-sostav"></i><svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><div class="accB"><div><div class="plist" id="pList"></div>
-            <div class="cover"><p>Запросы врачей покрыты: 11 из 12</p><div class="acts">
-              <button class="actLink press" data-a="toast" data-msg="Поиск анализа откроется здесь в рабочей версии"><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Добавить анализ</button>
-              <button class="actLink press" data-a="toast" data-msg="Список для лаборатории готов"><svg class="ic" viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5 19h14"/></svg>Экспорт списка</button></div></div></div></div></div>
-          <div class="accS" data-s="lab"><button class="accH" data-a="acc" data-k="lab"><span class="accT"><b>Лаборатория и цена</b><small id="m-lab"></small></span><i class="adot" id="d-lab"></i><svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><div class="accB"><div><div class="labSum" id="labSum"></div></div></div></div>
-          <div class="accS" data-s="opt"><button class="accH" data-a="acc" data-k="opt"><span class="accT"><b>Оптимизатор</b><small id="m-opt"></small></span><i class="adot" id="d-opt"></i><svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><div class="accB"><div><div id="ferCallout"></div></div></div></div>
-          <button class="accS accLink" data-a="labs"><span class="accH"><span class="accT"><b>Медпаспорт</b><small class="mpFlag" style="margin:2px 0 0"><i></i>вне референса: АСТ 41</small></span><svg class="ic chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></button>
-        </div>
       </div>
     </section>
 
@@ -1068,11 +1279,8 @@ svg{display:block}
           <h1 class="title">Проверки</h1>
           <a class="symBtn press" href="https://t.me/vita_doctor_bot?start=symptom" target="_blank" rel="noopener" aria-label="Записать симптом"><span><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><small>симптом</small></a>
         </div>
-        <div class="loop rise" style="--i:1" id="loopBar"></div>
-        <div class="rise" style="--i:2" id="qDecide"></div>
-        <div class="rise" style="--i:3" id="qChecks"></div>
-        <div class="rise" style="--i:4" id="qCollect"></div>
-        <div class="rise" style="--i:5" id="qDone"></div>
+        <div class="seg rise" style="--i:1" id="qSeg" role="tablist"></div>
+        <div class="rise" style="--i:2" id="qList"></div>
       </div>
     </section>
 
@@ -1080,23 +1288,22 @@ svg{display:block}
     <section class="tab" data-tab="me" aria-label="Я">
       <div class="screen" id="s-me">
         <div class="rise" style="--i:0"><h1 class="title">Я</h1></div>
-        <div class="bioc rise" style="--i:1" id="bioCard">
-          <div class="lbl">Биовозраст · PhenoAge</div>
-          <div class="bigme" id="bioN">41,0</div>
-          <p class="delta">−8,6 к паспортному возрасту <span>· 41</span></p>
-          <p class="potent">Потенциал: ещё <b>−4,8 года</b> — жиры, сон, ВСР</p>
-          <p class="upd">Обновляется только по сдачам крови — следующая 12 окт</p>
-          <div id="bioSvg"></div>
+        <div class="ageCard rise" style="--i:1">
+          <div class="ageH"><span>Биовозраст · PhenoAge</span><em>−8,6 года</em></div>
+          <div class="ageT"><div><small>Паспорт</small><b>41<span>лет</span></b></div><div class="bio"><small>Биологический</small><b id="bioN">32,4</b></div></div>
+          <p class="ageF">Потенциал — ещё −4,8 года · обновится по крови 12 окт</p>
         </div>
-        <div class="drivers rise" style="--i:2">
-          <span class="drv"><svg class="ic up" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Жиры в коридоре</span>
-          <span class="drv"><svg class="ic up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>ВСР растёт</span>
-          <span class="drv"><svg class="ic dn" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>Недосып −0,5 ч</span>
-        </div>
-        <div class="trends rise" style="--i:3" id="trends"></div>
+        <div class="bioChart rise" style="--i:2" id="bioCard"><div id="bioSvg"></div></div>
+        <div class="secH rise" style="--i:3;margin-top:28px"><span class="lbl">Что дало</span></div>
+        <div class="seg sm rise" style="--i:3" id="giveSeg"></div>
+        <div class="rise" style="--i:3;margin-top:10px" id="giveList"></div>
+        <div class="secH rise" style="--i:4;margin-top:28px"><span class="lbl">Системы</span><span>по крови · 12 окт</span></div>
+        <div class="sysGrid rise" style="--i:4" id="sysGrid"></div>
+        <div class="secH rise" style="--i:5;margin-top:28px"><span class="lbl">Тренды</span></div>
+        <div class="trends rise gvCard" style="--i:5" id="trends"></div>
+        <div class="rows rise" style="--i:6;margin-top:22px" id="meRows"></div>
         <p class="sysdot rise" style="--i:5"><i class="dot-live"></i>Система работает · сбои чиню сам, в чаты о них не пишу</p>
         <div class="melinks rise" style="--i:5">
-          <button data-a="goals">Мои цели<svg class="ic" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
           <button class="demo" data-a="states">Все состояния · макет</button>
         </div>
       </div>
@@ -1203,7 +1410,7 @@ const PRESETS={
   nowatch:{time:'nowatch',caseSt:'testing',medgate:true,sunday:false,t:'Без часов',c:'11:40',n:'День не оценивается'},
   nofood:{time:'nofood',caseSt:'testing',medgate:true,sunday:false,t:'Без еды',c:'14:00',n:'Ждёт первого приёма'},
   sunday:{time:'day',caseSt:'testing',medgate:false,sunday:true,t:'Воскресенье',c:'16:02',n:'Свежая наука недели'},
-  decision:{time:'day',caseSt:'pending',medgate:true,sunday:false,disc:true,t:'Решения',c:'16:02',n:'«Нужен ты» и открытие в одном слоте'},
+  decision:{time:'day',caseSt:'pending',medgate:true,sunday:false,disc:true,t:'Решения',c:'16:02',n:'Решить: два события одной строкой'},
   labs:{time:'day',caseSt:'testing',ckDay:18,medgate:true,sunday:false,ev:['labs','sverka'],date:'Среда, 14 октября',t:'Анализы',c:'14 окт',n:'Пришли анализы и сверка'},
   verdict:{time:'day',caseSt:'verified',medgate:true,sunday:false,ev:['verdict'],date:'Суббота, 17 октября',t:'Вердикт',c:'17 окт',n:'Проверка закончилась'},
   draw:{time:'morning',caseSt:'testing',ckDay:13,medgate:true,sunday:false,ev:['drawSoon'],date:'Пятница, 9 октября',t:'Перед сдачей',c:'9 окт',n:'Сдача через 3 дня'}
@@ -1233,19 +1440,19 @@ const B_={
   fSteps:{tone:'teal',ic:'steps',row:'Шаги по темпу — прогулка после ужина закроет цель',src:[['Данные','часы · 7 050 к 14:00']]}
 };
 const TD={
-  morning:{status:['Ходьба и плавание','sage'],ring:{v:88,ahead:94},dayLbl:'Прогноз дня · можно 94',segSt:{recovery:'ok',sleep:'ok'},main:{t:'Три прогулки и белковый завтрак — прогноз 94',w:'Щадящий режим: ходьба и плавание, цель 12 000 шагов. Последние три дня к вечеру не хватало белка.',k:'mSteps',act:['План шагов','chip','move']},rows2:['mMg'],seg:{recovery:71,sleep:88,move:null,food:null},emo:'Сон закрыт — день впереди',
+  morning:{status:['Ходьба и плавание','sage'],ring:{v:88,ahead:94},dayLbl:'Прогноз дня',v:{st:'ok',w:'Всё хорошо',t:'Три прогулки → 94',k:'mSteps'},segSt:{recovery:'ok',sleep:'ok'},main:{t:'Три прогулки и белковый завтрак — прогноз 94',w:'Щадящий режим: ходьба и плавание, цель 12 000 шагов. Последние три дня к вечеру не хватало белка.',k:'mSteps',act:['План шагов','chip','move']},rows2:['mMg'],seg:{recovery:71,sleep:88,move:null,food:null},emo:'Сон закрыт — день впереди',
     effect:{txt:'Вчера: моложе на <b>2,8 дня</b>'},ef:{steps:-2.8,fiber:'wait',fat:'wait'},brief:{main:'mSteps',rows:['mProt','mMg']},quiet:'SpO2 и дыхание — спокойно',rxToday:{swim:'t',move:'t',walk:'t'},
     now:8,lev:{fat:null,protein:null,sodium:null}},
-  day:{status:['Ходьба и плавание','sage'],ring:{v:82,ahead:86},dayLbl:'Прогноз дня · можно 86',segSt:{recovery:'risk',sleep:'ok',move:'ok',food:'risk'},main:{t:'Ужин без соли — и день закроется на 86',w:'Натрий 3,2 из 5 г к 16:00 — сыр и хлеб в обед. Перебор соли — клинический лимит, он стоит дороже всего.',k:'salt',act:['Где соль сегодня','chip','food']},rows2:['protein','calls'],seg:{recovery:62,sleep:88,move:74,food:91},emo:'Соль у края — вечер решит',
+  day:{status:['Ходьба и плавание','sage'],ring:{v:82,ahead:86},dayLbl:'Прогноз дня',v:{st:'up',w:'Можно улучшить',t:'Ужин без соли → 86',k:'salt'},atRisk:['salt'],segSt:{recovery:'risk',sleep:'ok',move:'ok',food:'risk'},main:{t:'Ужин без соли — и день закроется на 86',w:'Натрий 3,2 из 5 г к 16:00 — сыр и хлеб в обед. Перебор соли — клинический лимит, он стоит дороже всего.',k:'salt',act:['Где соль сегодня','chip','food']},rows2:['protein','calls'],seg:{recovery:62,sleep:88,move:74,food:91},emo:'Соль у края — вечер решит',
     effect:{txt:'Вчера: моложе на <b>3,1 дня</b>'},ef:{},brief:{main:'salt',rows:['protein','calls']},quiet:'SpO2, дыхание, пульс покоя — спокойно',rxToday:{swim:'t',move:'y',walk:'y'},
     now:16.03,lev:{fat:16,protein:96,sodium:3.2}},
-  evening:{status:['Умеренная аэробика','sage'],ring:{v:86},closed:true,dayLbl:'Итог дня',segSt:{recovery:'risk',sleep:'ok',move:'ok',food:'ok'},main:{t:'День закрыт на 86 — главное сделано',w:'Соль устояла, белок закрыт, ходьба 14 620 шагов. Осталось одно — магний перед сном.',k:'eDay',act:['Принял магний','bdone','mg']},rows2:['eBed'],seg:{recovery:58,sleep:88,move:92,food:94},emo:'Всё в коридоре — день удался',
+  evening:{status:['Умеренная аэробика','sage'],ring:{v:86},closed:true,dayLbl:'Итог дня',v:{st:'closed',w:'День закрыт',t:'Главное сделано',k:'eDay'},segSt:{recovery:'risk',sleep:'ok',move:'ok',food:'ok'},main:{t:'День закрыт на 86 — главное сделано',w:'Соль устояла, белок закрыт, ходьба 14 620 шагов. Осталось одно — магний перед сном.',k:'eDay',act:['Принял магний','bdone','mg']},rows2:['eBed'],seg:{recovery:58,sleep:88,move:92,food:94},emo:'Всё в коридоре — день удался',
     effect:{txt:'Вчера: моложе на <b>3,1 дня</b>'},ef:{},brief:{main:'eDay',rows:['eBed']},quiet:null,rxToday:{swim:'',move:'y',walk:'y'},
     now:21.5,lev:{fat:22,protein:158,sodium:4.1}},
-  nowatch:{status:['Часы не на связи','gray'],ring:null,dayLbl:'Не оценивается',segSt:{food:'ok'},main:{t:'Надень часы — вернём день',w:'С вечера нет данных: сон и заряд не посчитаны. Серии на паузе — не сгорят.',k:'wWatch'},rows2:['wProt'],seg:{recovery:null,sleep:null,move:null,food:80},emo:'Наденешь часы — вернём день',
+  nowatch:{status:['Часы не на связи','gray'],ring:null,dayLbl:'Не оценивается',v:{st:'none',w:'Нет данных',t:'Надень часы',k:'wWatch'},segSt:{food:'ok'},main:{t:'Надень часы — вернём день',w:'С вечера нет данных: сон и заряд не посчитаны. Серии на паузе — не сгорят.',k:'wWatch'},rows2:['wProt'],seg:{recovery:null,sleep:null,move:null,food:80},emo:'Наденешь часы — вернём день',
     effect:{txt:'Вчера: моложе на <b>1,6 дня</b>'},ef:{steps:-1.6,sleep:'wait'},brief:{main:'wWatch',rows:['wProt']},quiet:null,rxToday:{swim:'t',move:'q',walk:'q'},
     now:11.67,lev:{fat:6,protein:40,sodium:1.1}},
-  nofood:{status:['Ходьба и плавание','sage'],ring:{v:77,ahead:88},dayLbl:'Прогноз дня · видит полдня',segSt:{recovery:'risk',sleep:'risk',move:'risk'},main:{t:'Запиши первый приём — прогноз видит полдня',w:'Без еды питание не оценивается, а подсказки по соли и белку молчат.',k:'fMeal',act:['Открыть дневник','fgo','meal']},rows2:['fSteps'],seg:{recovery:64,sleep:88,move:74,food:null},emo:'Еда не записана — вечер всё решит',
+  nofood:{status:['Ходьба и плавание','sage'],ring:{v:77,ahead:88},dayLbl:'Прогноз · видно полдня',v:{st:'none',w:'Видно полдня',t:'Запиши первый приём',k:'fMeal'},segSt:{recovery:'risk',sleep:'risk',move:'risk'},main:{t:'Запиши первый приём — прогноз видит полдня',w:'Без еды питание не оценивается, а подсказки по соли и белку молчат.',k:'fMeal',act:['Открыть дневник','fgo','meal']},rows2:['fSteps'],seg:{recovery:64,sleep:88,move:74,food:null},emo:'Еда не записана — вечер всё решит',
     effect:{txt:'Вчера: моложе на <b>2,0 дня</b>'},ef:{steps:-2.0,fiber:0.4},brief:{main:'fMeal',rows:['fSteps']},quiet:'SpO2 и дыхание — спокойно',rxToday:{swim:'t',move:'y',walk:'t'},
     now:14,lev:{fat:null,protein:null,sodium:null}}
 };
@@ -1254,13 +1461,13 @@ const TD={
 const IDX={
   morning:{rows:[['y','Сон 7:04','в зоне 7–9 ч'],['y','ВСР 47 мс','+5 к базе 42'],['y','Заряд 71','Body Battery выше 70'],['w','Нагрузка 7/28 дн 1,4','на грани',-4],['o','Лимиты питания','еды ещё нет — оценим с первым приёмом']],
     up:'Держи нагрузку ровной — щадящий режим, без интенсива.'},
-  day:{rows:[['y','Сон 7:04','в зоне 7–9 ч'],['y','ВСР 47 мс','+5 к базе 42'],['o','Заряд 62','средний — индекс не тянет'],['n','Стресс днём','выше базы третий день',-14],['w','Натрий 3,2 из 5 г','близко к лимиту',-4],['y','Насыщ. жиры 16 из 28 г',''],['y','Сахар','в лимите']],
+  day:{rows:[['y','Сон 7:04','в зоне 7–9 ч'],['y','ВСР 47 мс','+5 к базе 42'],['o','Заряд 62','средний — индекс не тянет'],['w','Стресс днём','выше базы третий день',-14],['w','Натрий 3,2 из 5 г','близко к лимиту',-4],['y','Насыщ. жиры 16 из 28 г',''],['y','Сахар','в лимите']],
     up:'Ужин без соли удержит натрий — и индекс не упадёт. Прогулка вечером снимет стресс.'},
-  evening:{rows:[['y','Сон 7:04','в зоне 7–9 ч'],['y','ВСР 47 мс','+5 к базе'],['n','Стресс днём','выше базы',-14],['y','Натрий 4,1 из 5 г','устоял'],['y','Насыщ. жиры 22 из 28 г',''],['y','Сахар','в лимите']],
+  evening:{rows:[['y','Сон 7:04','в зоне 7–9 ч'],['y','ВСР 47 мс','+5 к базе'],['w','Стресс днём','выше базы',-14],['y','Натрий 4,1 из 5 г','устоял'],['y','Насыщ. жиры 22 из 28 г',''],['y','Сахар','в лимите']],
     up:'Отбой до 23:10 — завтрашний индекс начнётся со сна.'},
   nowatch:{rows:[['o','Сон, ВСР, заряд, стресс','нет данных с часов'],['y','Насыщ. жиры 6 из 28 г',''],['y','Натрий 1,1 из 5 г','']],
     up:'Надень часы — индекс посчитается, серии не сгорят.'},
-  nofood:{rows:[['y','Сон 7:04','в зоне'],['w','Сон к твоей средней','−10 мин',-5],['w','Нагрузка 7/28 дн 1,4','на грани',-4],['n','Стресс днём','выше базы',-14],['o','Лимиты питания','еда не записана']],
+  nofood:{rows:[['y','Сон 7:04','в зоне'],['w','Сон к твоей средней','−10 мин',-5],['w','Нагрузка 7/28 дн 1,4','на грани',-4],['w','Стресс днём','выше базы',-14],['o','Лимиты питания','еда не записана']],
     up:'Запиши еду — без неё индекс видит только половину дня.'},
   past:{rows:[['y','Сон 7:12','в зоне 7–9 ч'],['n','Натрий 6,2 из 5 г','клинический лимит превышен',-14],['w','Стресс днём','чуть выше базы',-4],['w','Заряд 58','ниже среднего',-5],['y','Насыщ. жиры 24 из 28 г','']],
     up:'Урок дня: соль — сыр и соленья в ужин. Сегодня ужин без них.'}
@@ -1268,12 +1475,12 @@ const IDX={
 /* один слот событий: приоритет решение → вердикт → анализы → открытие → сверка → сдача скоро */
 const EV_ORDER=['needyou','consil','verdict','labs','disc','sverka','drawSoon'];
 const EVENTS={
-  needyou:{tone:'warm',dot:true,kick:'Нужен ты',title:'Аллергия: вероятный триггер — грецкий орех',sub:'Совпал в 7 из 8 эпизодов. Исключать ли на 3 недели?',go:'needyou'},
-  verdict:{tone:'green',ic:'check',kick:'Вердикт проверки',title:'Орех подтверждён: 0 эпизодов за 21 день',sub:'Ожидалось 3. Триггер найден — орех остаётся исключённым.',btns:[['ev-close','Закрыть вопрос'],['ev-extend','Продлить',1]]},
-  labs:{tone:'teal',ic:'tube',kick:'Пришли анализы · 12 окт',title:'9 из 10 в норме · АСТ 41 выше референса',sub:'Биовозраст пересчитан: 32,4 → 31,9.',btns:[['labs','Медпаспорт'],['askast','Спросить про АСТ',1]]},
-  disc:{tone:'amber',ic:'spark',kick:'Открытие · сегодня',hyp:true,title:'Боль в боку совпадает с едой вне привычного окна',sub:'6 из 7 эпизодов — против 18% в обычные дни.',btns:[['disc-start','Проверить 3 недели'],['discovery','Подробнее',1]]},
-  sverka:{tone:'gold',ic:'spark',kick:'Сверка · полгода',title:'Поведение обещало «моложе на 1,2 года», кровь — на 0,9',sub:'Сходится на 75% — оценкам дня можно верить. Биовозраст 31,9 · паспортный 41.',btns:[['gome','Биовозраст в «Я»']]},
-  drawSoon:{tone:'teal',ic:'tube',kick:'Сдача через 3 дня',title:'12 окт · 10 анализов · натощак с 22:00',sub:'Хеликс, 3 360 ₽. Накануне — без алкоголя и тяжёлой еды.',btns:[['goplan','Что сдаём']]}
+  needyou:{tone:'teal',ic:'walnut',kick:'Нужно решение',row:'Аллергия: исключить орех?',title:'Аллергия: вероятный триггер — грецкий орех',sub:'7 из 8 эпизодов против 20% в обычные дни.',btns:[['exclude','Проверить 3 недели'],['notit','Не оно',1],['qnut','Доказательства',1]]},
+  verdict:{tone:'green',ic:'check',kick:'Вердикт проверки',row:'Орех подтверждён — закрыть вопрос',title:'Орех подтверждён: 0 эпизодов за 21 день',sub:'Ожидалось 3. Триггер найден — орех остаётся исключённым.',btns:[['ev-close','Закрыть вопрос'],['ev-extend','Продлить',1]]},
+  labs:{tone:'warm',ic:'tube',kick:'Пришли анализы · 12 окт',row:'АСТ 41 — выше референса',title:'9 из 10 в норме · АСТ 41 выше референса',sub:'Биовозраст пересчитан: 32,4 → 31,9.',btns:[['labs','Медпаспорт'],['askast','Спросить про АСТ',1]]},
+  disc:{tone:'amber',ic:'spark',kick:'Открытие',row:'Боль в боку: новое совпадение',hyp:true,title:'Боль в боку совпадает с едой вне привычного окна',sub:'6 из 7 эпизодов — против 18% в обычные дни.',btns:[['disc-start','Проверить 3 недели'],['discovery','Подробнее',1]]},
+  sverka:{tone:'teal',ic:'spark',kick:'Сверка · полгода',row:'Кровь подтвердила оценки дня',title:'Поведение обещало «моложе на 1,2 года», кровь — на 0,9',sub:'Сходится на 75% — оценкам дня можно верить. Биовозраст 31,9 · паспортный 41.',btns:[['gome','Биовозраст в «Я»']]},
+  drawSoon:{tone:'teal',ic:'tube',kick:'Сдача через 3 дня',row:'12 окт · натощак с 22:00',title:'12 окт · 10 анализов · натощак с 22:00',sub:'Хеликс, 3 360 ₽. Накануне — без алкоголя и тяжёлой еды.',btns:[['goplan','Что сдаём']]}
 };
 /* вчера — только чтение: индекс, итог, что сработало */
 const PAST={date:'Пт, 25 сентября',ring:{v:77},seg:{recovery:66,sleep:84,move:92,food:68},emo:'Соль вылетела — остальное держалось',
@@ -1290,12 +1497,15 @@ const RX=[
 ];
 /* серии — streaks[]; нет данных / поездка = пауза, срыв тратит заморозку */
 const STREAKS=[
-  {ic:'shield',label:'Жиры',full:'Жиры в норме',n:12,u:'дней',rec:14,fz:1,src:'food'},
-  {ic:'salt',label:'Соль',full:'Соль в норме',n:5,u:'дней',rec:11,fz:0,src:'food'},
-  {ic:'moon',label:'Сон 7–9 ч',full:'Сон 7–9 ч',n:3,u:'ночи',rec:9,fz:0,src:'watch'},
-  {ic:'cube',label:'Сахар',full:'Сахар в норме',n:7,u:'дней',rec:12,fz:1,src:'food'},
-  {ic:'drop',label:'Без алкоголя',full:'Без алкоголя',n:9,u:'дней',rec:23,fz:1,src:'food'}
+  {k:'fat',ic:'shield',label:'Жиры',full:'Жиры в норме',n:12,u:'дней',rec:14,fz:1,src:'food'},
+  {k:'salt',ic:'salt',label:'Соль',full:'Соль в норме',n:5,u:'дней',rec:11,fz:0,src:'food'},
+  {k:'sleep',ic:'moon',label:'Сон',full:'Сон 7–9 ч',n:3,u:'ночи',rec:9,fz:0,src:'watch'},
+  {k:'sugar',ic:'cube',label:'Сахар',full:'Сахар в норме',n:7,u:'дней',rec:12,fz:1,src:'food'},
+  {k:'alc',ic:'drop',label:'Трезвость',full:'Без алкоголя',n:9,u:'дней',rec:23,fz:1,src:'food'}
 ];
+/* заморозки — одна копилка на все серии: +1 за каждые 7 дней, в запасе до двух */
+const FREEZES=2;
+const MILES=[7,14,30,60,90,180,365];
 /* разбор вклада дня — longevity.affects_today[] (est_years × 365, weight, how → источник) */
 const EFFECT=[
   {k:'steps',what:'Шаги вчера 12 400',sub:'+2 400 к норме 10 000',days:-3.2,w:'strong',src:'Han 2023',mk:'СРБ · лейкоциты · RDW'},
@@ -1336,70 +1546,70 @@ const checksNow=()=>{const c=[];
   if(S.checkWin)c.push({t:'Еда в окне 8:00–19:00',k:'Вопрос «боль в боку»',d:1,of:21,m:'эпизодов боли 0 · вердикт 17 окт'});
   return c};
 
-/* одна главная мысль дня — в hero; ниже только короткие строки */
-function mainFor(d){
-  if(S.past)return {t:PAST.emo,w:'Индекс 77: соль 6,2 из 5 г. Остальное держалось — белок, ходьба, сон.'};
-  if(S.sunday)return {t:`Неделя: моложе на ${WEEK.days} дней`,w:'5 из 7 дней в коридоре · серия жиров 12 → 19 · магний: вердикт через 2 дня.'};
-  return d.main}
-function briefHTML(d){
-  const ckRow=(y,t,v,act)=>`<div class="brow"><i class="ckI${y?' y':''}">${y?svg('check'):''}</i><span class="bt">${t}${v?`<small>${v}</small>`:''}</span>${act&&!y?`<button class="bx" data-a="bdone" data-k="${act}">Принял</button>`:''}</div>`;
-  const hint=k=>{const r=B_[k],dn=r.act&&S.done.has(r.act);return `<div class="brow">${svg(r.ic,'ic')}<button class="bt" data-a="why" data-k="${k}">${r.row}${r.hyp?'<span class="hyp">гипотеза</span>':''}</button>${r.act?`<button class="bx${dn?' on':''}" data-a="bdone" data-k="${r.act}">${dn?'✓ принял':r.actL}</button>`:svg('right','ic')}</div>`};
-  let rows;
-  if(S.sunday)rows=WEEK.lines.map(([st,t])=>ckRow(st==='y',t)).join('')+`<div class="brow">${svg('book','ic')}<button class="bt" data-a="science">Наука недели — 5 исследований под твои темы</button>${svg('right','ic')}</div>`;
-  else if(d.closed)rows=B_.eDay.checks.map(([st,t,v])=>ckRow(st==='y'||S.done.has(st),t,v,st==='y'?null:st)).join('')+d.rows2.map(hint).join('');
-  else rows=d.rows2.map(hint).join('');
-  return `<div class="brows">${rows}</div>`+(d.quiet?`<p class="quietL">${svg('check')}${d.quiet}</p>`:'');
-}
-const curD=()=>S.past?{...TD.day,ring:PAST.ring,seg:PAST.seg,segSt:{recovery:'risk',sleep:'ok',move:'ok',food:'risk'},closed:true,dayLbl:'Итог дня · вчера',effect:{txt:PAST.effect}}:TD[S.time];
+/* вердикт дня: слово + одно действие. Клиника перебивает всё; остальное — в шторке по тапу */
+function verdictFor(d){
+  if(S.past)return {st:'past',w:'Урок дня',t:PAST.emo,k:'past'};
+  if(evList().includes('labs'))return {st:'imp',w:'Важно',t:'АСТ 41 — выше референса',k:'labsv'};
+  if(S.sunday)return {st:'week',w:'Неделя',t:'5 из 7 дней в зелёной зоне',k:'week'};
+  return d.v}
+/* шторка по тапу на заголовок: цифры → откуда → что даст → ещё можно → в норме */
+const FOCUS={
+  salt:{h:'Соль сегодня',big:'3,2',unit:'из 5 г натрия',sub:['am','к 16:02 — темп выше лимита'],bar:{v:3.2,lim:5,proj:5.6},
+    src:[['bread','Хлеб',1.1],['cheese','Сыр',0.9],['dots','Прочее',1.2]],gives:[['Ужин без соли','день закроется на 86'],['Серия «Соль» · 5 дней','сохранится']]},
+  mSteps:{h:'План на день',big:'12 000',unit:'шагов — цель',sub:['','щадящий режим: ходьба и плавание'],
+    plan:[['steps','Утро','20 мин'],['steps','Обед','30 мин'],['steps','После ужина','35 мин']],gives:[['Три прогулки','прогноз 94']]},
+  eDay:{h:'Итог дня',big:'86',unit:'из 100 · сутки закрыты',sub:['','отметки ставятся сами по данным'],closed:true},
+  wWatch:{h:'Нет данных',big:'—',unit:'часы не на связи',sub:['am','последняя синхронизация — вчера 22:10'],act:['Как вернуть данные','fgo','watch'],gives:[['Серии сна и шагов','на паузе — не сгорят']]},
+  fMeal:{h:'Еда не записана',big:'0',unit:'приёмов сегодня',sub:['am','прогноз видит только полдня'],act:['Открыть дневник','fgo','meal'],gives:[['Первый приём','прогноз увидит весь день']]}
+};
+const QUIET={morning:'SpO₂ и дыхание',day:'SpO₂, дыхание, пульс покоя',nofood:'SpO₂ и дыхание'};
+const row=(ic,tone,t,sm,right,a,k)=>`<${a?'button':'div'} class="row${a?' press':''}"${a?` data-a="${a}"`:''}${k?` data-k="${k}"`:''}><span class="rIc ${tone||''}">${ic}</span><span class="rT"><b>${t}</b>${sm?`<small>${sm}</small>`:''}</span>${right||''}${a?svg('right','ic rGo'):''}</${a?'button':'div'}>`;
+const hintRow=k=>{const r=B_[k],dn=r.act&&S.done.has(r.act),[t,sm]=r.row.split(' — ');
+  return r.act?`<div class="row"><span class="rIc teal">${svg(r.ic)}</span><span class="rT"><b>${t}</b>${sm?`<small>${sm}</small>`:''}</span><button class="rBtn${dn?' on':''}" data-a="bdone" data-k="${r.act}">${dn?'✓ принял':r.actL}</button></div>`
+    :row(svg(r.ic),r.hyp?'amber':'teal',t,r.hyp?'гипотеза'+(sm?' · '+sm:''):sm,'','why',k).replace('<b>','<b class="wrap">')};
+const curD=()=>S.past?{...TD.day,ring:PAST.ring,seg:PAST.seg,segSt:{recovery:'risk',sleep:'ok',move:'ok',food:'risk'},closed:true,dayLbl:'Итог дня',effect:{txt:PAST.effect}}:TD[S.time];
 const crownOn=d=>!!(d.ring&&d.closed&&d.ring.v>80);
 const evList=()=>EV_ORDER.filter(k=>(k==='needyou'&&S.caseSt==='pending')||(k==='disc'&&S.disc)||(k==='consil'&&S.cons&&S.cons.ready)||(S.ev||[]).includes(k));
 const TONE_STW={warm:'warm',amber:'amber',gold:'gold',green:'green',teal:'teal'};
-function evCard(k,mt){const e=k==='consil'?{tone:'teal',ic:'team',kick:'Консилиум готов · итог семейного врача',title:REP[S.cons.id].verdict,sub:S.cons.id==='gen'?'Четыре действия на октябрь':`${REP[S.cons.id].actions.length} действия — принять в Проверки и к врачу`,btns:[['consrep','Открыть итог',0,S.cons.id]]}:EVENTS[k],ic=e.dot?'<i class="pdot2" style="margin:0"></i>':svg(e.ic),kick=`<span class="stw ${TONE_STW[e.tone]}">${e.kick}${e.hyp?'<span class="hyp">гипотеза</span>':''}</span>`;
+function evCard(k,mt){const e=evData(k),ic=e.dot?'<i class="pdot2" style="margin:0"></i>':svg(e.ic),kick=`<span class="stw ${TONE_STW[e.tone]}">${e.kick}${e.hyp?'<span class="hyp">гипотеза</span>':''}</span>`;
   if(e.go)return `<button class="bcard ${e.tone} press" style="margin-top:${mt}px" data-a="${e.go}"><span class="mc-ic">${ic}</span><span class="bbody">${kick}<b>${e.title}</b><small>${e.sub}</small></span>${svg('right','ic mc-go')}</button>`;
   return `<div class="bcard ${e.tone}" style="margin-top:${mt}px"><span class="mc-ic">${ic}</span><span class="bbody">${kick}<b>${e.title}</b><small>${e.sub}</small><span class="nacts">${e.btns.map(([a,l,m,kk])=>`<button${m?' class="m"':''} data-a="${a}"${kk?` data-k="${kk}"`:''}>${l}</button>`).join('')}</span></span></div>`}
 
 function renderToday(){
-  const d=curD(),past=!!S.past;
+  const d=curD(),past=!!S.past,v=verdictFor(d);
   $('#tDate').innerHTML=past?`${PAST.date}<span class="pastTag">вчера</span>`:(S.date||(S.sunday?'Воскресенье, 27 сентября':'Суббота, 26 сентября'));
   $('#dBack').hidden=past;$('#dFwd').hidden=!past;
   $('#tStatus').innerHTML=`<i class="dot-live ${d.status[1]==='gray'?'gray':''}"></i>${d.status[0]}`;
   $('#dayLbl').textContent=d.dayLbl;$('#dayNum').textContent=d.ring?d.ring.v:'—';
-  const m=mainFor(d);$('#emo').textContent=m.t;$('#mainWhy').textContent=m.w||'';
-  $('#mainActs').innerHTML=(m.act&&!(m.act[1]==='bdone'&&S.done.has(m.act[2]))?`<button class="mact press" data-a="${m.act[1]}" data-k="${m.act[2]}">${m.act[0]}</button>`:'')+(m.k?`<button class="whyL" data-a="why" data-k="${m.k}">${svg('hint')}Почему я так думаю</button>`:'');
-  $('#briefLbl').textContent=S.sunday?'Неделя':d.closed?'Итог дня':'Ещё сегодня';
-  const ef=$('#effectLink');ef.classList.toggle('none',!!d.effect.none);ef.dataset.a=d.effect.none?'':'effect';
-  ef.innerHTML=`<span>${d.effect.txt}</span>${d.effect.none?'':svg('right')}`;
+  /* одна мысль: слово-вердикт + действие; всё остальное — в шторке по тапу */
+  $('#vKick').className='vk '+v.st;$('#vKick').innerHTML=`<i></i>${v.w}`;$('#emo').textContent=v.t;
   $('#crown').classList.toggle('has',crownOn(d));
   const C=2*Math.PI*28;
   $('#chips').innerHTML=chipsFor(d).map(x=>`<button class="chip press ${x.st==='ok'?'ok':x.st==='risk'?'low':''}" data-a="chip" data-k="${x.k}"><span class="chipC"><svg class="ring" viewBox="0 0 58 58"><circle cx="29" cy="29" r="28" data-d="${(x.p*C).toFixed(1)}"/></svg>${svg(x.ic,'ic chipI')}<span class="chipV">${x.v}</span></span><span class="chipL">${x.l}</span></button>`).join('');
 
-  /* один слот событий: самое важное — карточкой, остальные — строкой «ещё N» */
-  const ev=past?[]:evList();
-  $('#needYou').innerHTML=ev.length?`<div class="sec rise" style="--i:3"><div class="secH"><span class="lbl">Решить</span><span>${ev.length>1?ev.length+' '+plural(ev.length,'событие','события','событий'):''}</span></div>${evCard(ev[0],0)}${ev.length>1?(S.evAll?ev.slice(1).map(k=>evCard(k,10)).join(''):'')+`<button class="evmore press${S.evAll?' open':''}" data-a="evmore"><span>${S.evAll?'Свернуть':`Ещё ${ev.length-1} · <b>${EVENTS[ev[1]].kick}</b>`}</span>${svg('right')}</button>`:''}</div>`:'';
+  /* «Решить» — одна строка; решения принимаются в шторке */
+  const ev=inboxList();
+  $('#needYou').innerHTML=ev.length?`<div class="sec rise" style="--i:3;margin-top:0">${(()=>{const e=evData(ev[0]);
+    return `<div class="rows"><button class="row press" data-a="inbox"><span class="rIc ${e.tone}">${e.dot?svg('walnut'):svg(e.ic)}</span><span class="rT"><b class="wrap">${e.row||e.title}</b><small>${e.kick}</small></span>${ev.length>1?`<span class="rN">+${ev.length-1}</span>`:''}${svg('right','ic rGo')}</button></div>`})()}</div>`:'';
+  $('#stSec').hidden=past;
 
-  /* вчера — только чтение */
-  $('#pastBox').innerHTML=past?`<div class="bcard teal rise" style="--i:3;margin-top:26px"><span class="mc-ic">${svg('check')}</span><span class="bbody"><span class="stw teal">Итог дня · только чтение</span><b>Индекс 77 — соль вылетела, остальное держалось</b>
-    <div class="chkl">${PAST.sum.map(([st,t,v])=>`<div><i class="${st==='y'?'y':''}" style="${st==='n'?'background:var(--warm);box-shadow:none':''}">${st==='y'?svg('check'):st==='n'?'<b style="color:#fff;font-size:11px">!</b>':''}</i><span>${t}${v?`<small>${v}</small>`:''}</span></div>`).join('')}</div>
-    <span class="nacts"><button data-a="dayfwd">Вернуться к сегодня</button></span></span></div>`:'';
-  $('#briefSec').hidden=past;$('#rxSec').hidden=past;$('#stSec').hidden=past;
-  $('#brief').innerHTML=past?'':briefHTML(d);$('#briefSec').hidden=past||!$('#brief').textContent.trim();
-
-  const pa=past?[]:progActive();
-  $('#checks').innerHTML=pa.length?`<button class="ckline rise press" style="--i:5" data-a="gochecks"><span class="ckdots">${pa.map(c=>`<i style="--p:${c.n/c.of}"></i>`).join('')}</span><span><b>${pa.length} ${plural(pa.length,'проверка идёт','проверки идут','проверок идут')}</b> · ближайший вердикт 3 окт</span>${svg('right')}</button>`:'';
-
-  /* назначения: сегодняшний кружок нажимается — «отметить вручную» (плавал без часов) */
-  const days=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'],ti=S.sunday?6:5;
-  $('#rx').innerHTML=`<div class="rxHead"><span></span>${days.map((x,i)=>`<span class="${i===ti?'today':''}">${x}</span>`).join('')}<span></span></div>`+RX.map(r=>{
-    const man=S.rxm.has(r.k),t=man?'y m':d.rxToday[r.k],cells=S.sunday?[...r.d.map(v=>v?'y':''),r.k==='swim'?'':'y',t]:[...r.d.map(v=>v?'y':''),t,'f'],n=cells.filter(c=>c.startsWith('y')).length;
-    return `<div class="rxRow"><span class="rxT"><b>${r.t}</b><small>${r.g}</small></span>${cells.map((c,i)=>i===ti&&(c!=='y')?`<button class="rxD ${c} tap" style="--k:${i}" data-a="rxmark" data-k="${r.k}" aria-label="Отметить вручную"></button>`:`<i class="rxD ${c}" style="--k:${i}"></i>`).join('')}<span class="rxN${n>=r.need?' ok':''}">${n}/${r.need}</span></div>`}).join('')
-    +`<p class="rxNote">${S.rxm.size?'Пунктир — отмечено вручную, без часов.':'Не видно на часах — нажми на сегодняшний кружок.'}</p>`;
-
-  $('#streaks').innerHTML=`<div class="strow-h"><span class="lbl">Серии${S.travel?' · поездка':''}</span>${svg('right')}</div><div class="strow-i">${STREAKS.map(k=>{const p=paused(k),best=!p&&k.n>=k.rec;
-    return `<div class="sti${p?' pause':''}${best?' best':''}">${svg(k.ic)}<b>${k.n}</b><span>${p?'пауза':k.label}</span><span class="fzs">${k.fz?svg('snow')+k.fz:''}</span></div>`}).join('')}</div>`;
+  /* серии — кольца-медали: заполнение до следующей вехи */
+  const risk=d.atRisk||[];
+  $('#streaks').innerHTML=`<div class="strow-h"><b>Серии${S.travel?' · поездка':''}</b><span><span class="fzc">${svg('snow')}</span>${FREEZES} ${plural(FREEZES,'заморозка','заморозки','заморозок')}${svg('right')}</span></div>
+    <div class="stRing">${STREAKS.map(k=>{const p=paused(k),best=!p&&k.n>=k.rec,r=!p&&risk.includes(k.k),nx=MILES.find(m=>m>k.n)||k.n,f=Math.min(100,k.n/nx*100);
+    return `<div class="sr${p?' pause':''}${best?' best':''}${r?' risk':''}"><span class="srC"><svg class="rg" viewBox="0 0 50 50"><circle class="bg" cx="25" cy="25" r="22"/><circle class="fg" cx="25" cy="25" r="22" pathLength="100" stroke-dasharray="${f.toFixed(1)} 100"/></svg>${svg(k.ic)}</span><b>${k.n}</b><small>${p?'пауза':r?'под угрозой':k.label}</small></div>`}).join('')}</div>`;
   $('#caseBadge').classList.toggle('on',S.caseSt==='pending'||!!S.disc||(S.ev||[]).includes('verdict')||!!(S.cons&&S.cons.ready));
   $$('.rise',sToday).forEach(e=>e.classList.add('in'));
   requestAnimationFrame(sizeBg);
+  refreshSheet();
 }
+/* входящие для «Решить»: всё, кроме клиники, которая уже стала мыслью дня */
+const inboxList=()=>S.past?[]:evList().filter(k=>k!=='labs');
+const evData=k=>k==='consil'?{tone:'teal',ic:'team',kick:'Консилиум · итог семейного врача',row:'Консилиум готов',title:REP[S.cons.id].verdict,sub:S.cons.id==='gen'?'Четыре действия на октябрь':`${REP[S.cons.id].actions.length} действия — принять в Проверки и к врачу`,btns:[['consrep','Открыть итог',0,S.cons.id]]}:EVENTS[k];
+/* открытая шторка сегодняшнего дня обновляется вместе с экраном */
+function refreshSheet(){if(!['focus','inbox','week'].includes(sheetKey))return;
+  if(sheetKey==='inbox'&&!inboxList().length){closeSheet();return}
+  ovS.innerHTML=B[sheetKey](S.fk).html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}
 
 /* фон-фото: высота = низ hero + зона растворения; параллакс при скролле, уход при свайпе на «Ритм» */
 const todayTab=$('#todayTab'),todayBg=$('#todayBg'),sToday=$('#s-today');let pgProg=0;
@@ -1425,7 +1635,7 @@ function enterToday(){
   crown.classList.remove('show');dotG.classList.remove('on');
   const C=2*Math.PI*28;
   $$('#chips .ring circle').forEach(c=>{c.style.transition='none';c.style.strokeDasharray=`0 ${C}`;void c.getBoundingClientRect();c.style.transition='';setTimeout(()=>c.style.strokeDasharray=`${c.dataset.d} ${C}`,260)});
-  const rx=$('#rx');rx.classList.remove('go');void rx.offsetWidth;setTimeout(()=>rx.classList.add('go'),200);
+  $$('.srC .fg',sToday).forEach(c=>{const a=c.getAttribute('stroke-dasharray');c.style.transition='none';c.style.strokeDasharray='0 100';void c.getBoundingClientRect();c.style.transition='';setTimeout(()=>c.style.strokeDasharray=a,500)});
   sizeBg();updBg();
   if(!d.ring){num.textContent='—';return}
   const V=d.ring.v;dotG.classList.add('on');
@@ -1442,6 +1652,8 @@ const stepsAt=t=>{for(let i=1;i<BASE.length;i++)if(t<=BASE[i][0]){const a=BASE[i
 const clock={morning:'8:00',day:'16:02',evening:'21:30',nowatch:'11:40',nofood:'14:00'};
 const MACROS={day:[[1640,2300,'ккал'],[96,160,'г'],[54,75,'г'],[186,250,'г']],evening:[[2210,2300,'ккал'],[158,160,'г'],[71,75,'г'],[240,250,'г']],nowatch:[[520,2300,'ккал'],[40,160,'г'],[18,75,'г'],[60,250,'г']]};
 /* микронутриенты — только недельные средние (Вычисление дефицитов → совет AI-нутрициолога с учётом привычек) */
+/* % суточной нормы по дням недели (Пн…Вс) — строка = нутриент; показываем только отклонения */
+const MICROW={'Йод':[30,45,20,60,40,55,65],'Витамин D':[55,70,40,80,60,65,64],'Магний':[70,85,60,90,75,80,86]};
 const MICRO=[
   ['Йод',45,'Много покупных перекусов, а йода почти нет. <b>Морская капуста на перекус 3 раза в неделю</b> закроет недобор.'],
   ['Витамин D',62,'По крови 28 нг/мл — ниже оптимума. <b>Добавку D3 уже принимаешь</b>, в расчёт еды она не входит — пересдача 15 дек.'],
@@ -1451,8 +1663,10 @@ function renderMacros(){const m=MACROS[S.time],L=['Ккал','Белки','Жи�
   $('#macros').innerHTML=m?m.map((x,i)=>{const tag=i===1?'button':'div';return `<${tag} class="mac${i===1?' tapm'+(S.protOpen?' on':''):''}"${i===1?' data-a="macsrc"':''}><span class="lbl">${L[i]}${i===1?svg('chev','ic mchev'):''}</span><b>${fmt(x[0])}</b><span class="of">из ${fmt(x[1])} ${x[2]}</span><div class="mb"><i data-w="${Math.min(100,x[0]/x[1]*100)}" style="width:${Math.min(100,x[0]/x[1]*100)}%"></i></div></${tag}>`}).join(''):'<p class="empty">Еда сегодня не записана — БЖУ появятся после первого приёма.</p>';
   const pv=m?m[1][0]:null,src=pv?LEV.protein.src(pv):[],smax=src.length?Math.max(...src.map(x=>x[2])):1;
   $('#protSrc').innerHTML=pv&&S.protOpen?`<div class="psrc"><div class="lbl" style="margin-bottom:4px">Источники белка сегодня</div>${src.map(x=>`<div class="src">${svg(x[0])}<span style="width:68px">${x[1]}</span><span class="sb"><i style="width:${x[2]/smax*100}%"></i></span><span class="g">${fmt(x[2])} г</span></div>`).join('')}<p class="src-note">${pv>=160?'Белок закрыт — держи темп.':LEV.protein.note}</p></div>`:'';
-  $('#micro').innerHTML=MICRO.map(([n,p,a])=>`<div class="mrow2"><div class="mr-h"><span>${n}</span><span>${p}% недельной нормы</span></div><div class="mr-b"><i style="width:${p}%"></i></div><p class="mr-a">${a}</p></div>`).join('')
-    +`<div class="mr-ok">${svg('check')}В норме за неделю: клетчатка, калий, кальций, B12, железо</div>`}
+  const cc=v=>v>=90?'c3':v>=75?'c2':v>=60?'c1':v>=45?'lo':'';
+  $('#micro').innerHTML=`<div class="hm"><div class="hmH"><span></span>${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x=>`<span>${x}</span>`).join('')}<span>среднее</span></div>`
+    +MICRO.map(([n,p,a])=>`<div class="hmW${S.microOpen===n?' open':''}"><button class="hmR" data-a="micro" data-k="${n}"><span>${n}</span>${MICROW[n].map(v=>`<i class="${cc(v)}"></i>`).join('')}<em>${p}%</em></button><div class="hmA"><div><p>${a}</p></div></div></div>`).join('')
+    +`<div class="hmOk">${svg('check')}В норме: клетчатка, калий, кальций, B12, железо</div></div>`}
 function openProt(){S.protOpen=true;if($('#macros'))renderMacros()}
 function renderRhythm(){if($('#macros'))renderMacros();
   if($('#levers')){renderLevers();$('#rFoot').textContent=TD[S.time].lev.fat==null?'Лимиты оживут после первой записи еды.':''}
@@ -1497,12 +1711,12 @@ function renderLevers(){
   const d=TD[S.time];
   $('#levers').innerHTML=Object.entries(LEV).filter(([k])=>k!=='protein').map(([k,l],i)=>{const v=d.lev[k];
     if(v==null){const pw=k==='protein';
-      return `<div class="lever nodata rise" style="--i:${i+3}" data-lever="${k}"><div class="lever-h"><div class="lever-row"><span class="lever-name"><b>${l.name}</b></span><span class="lever-meta">${pw?'ждёт первого приёма':'нет данных сегодня'}</span></div><div class="bar"></div>
+      return `<div class="lever nodata rise" style="--i:${i+3}" data-lever="${k}"><div class="lever-h"><div class="lever-row"><span class="lever-name"><b>${l.name}</b></span><span class="lever-meta">${pw?'ждёт первого приёма':'нет данных сегодня'}</span></div><div class="bb"></div>
       ${pw?`<button class="linkline" style="margin-top:12px" data-a="toast" data-msg="Откроется дневник в Telegram — сфотографируй тарелку">Сфотографировать в дневнике${svg('right')}</button>`:''}</div></div>`}
     const src=l.src(v),smax=Math.max(...src.map(s=>s[2])),dec=l.target<10?1:0;
     return `<div class="lever rise press" style="--i:${i+3}" data-lever="${k}"><button class="lever-h" data-a="lever" data-k="${k}" aria-expanded="false">
       <div class="lever-row"><span class="lever-name"><b>${l.name}</b><span>${fmt(v,dec)}/${l.target} ${l.unit}</span></span><span class="lever-meta">${l.meta(v)}${svg('chev','ic chev')}</span></div>
-      <div class="bar"><span class="zone" style="left:${l.zone[0]/l.max*100}%;width:${(l.zone[1]-l.zone[0])/l.max*100}%"></span><span class="tick" style="left:${l.tick/l.max*100}%"></span><span class="fill" data-w="${Math.min(100,v/l.max*100)}"></span></div></button>
+      <div class="bb"><i class="fill${v>l.target?' over':''}" data-w="${Math.min(100,v/l.target*75)}"></i><u></u></div></button>
       <div class="lever-more"><div><div class="srcs">${src.map(s=>`<div class="src">${svg(s[0])}<span style="width:68px">${s[1]}</span><span class="sb"><i style="width:${s[2]/smax*100}%"></i></span><span class="g">${fmt(s[2],dec)} г</span></div>`).join('')}<p class="src-note">${l.note}</p></div></div></div></div>`}).join('');
 }
 function openLever(k){$$('.lever').forEach(el=>{const on=el.dataset.lever===k&&!el.classList.contains('open')&&!el.classList.contains('nodata');el.classList.toggle('open',on);const b=$('.lever-h',el);b&&b.setAttribute('aria-expanded',on)})}
@@ -1541,30 +1755,34 @@ function renderPlan(){
   $('#dates').innerHTML=`<span>Сдачи:</span>`+pk.map(k=>`<button class="dpill press${k===S.panel?' on':''}" data-a="panel" data-p="${k}">${panels[k].short}</button>`).join('');
   renderPanel(S.panel);renderFer();renderPlanMeta();
 }
-function renderPlanMeta(){const dots=planDots(),pa=pendingActs();
-  $('#m-sostav').textContent=`${tests(cnt(S.panel))} · по поводам`;
-  $('#m-opt').textContent=S.fer==='proposed'?'история решений · 1 вопрос — в карточке сдачи':'история решений';
-  $('#m-conc').textContent=`консилиум 22 сент · ${pa?`ждут тебя: ${pa}`:'всё принято'}`;
-  const cd=$('#d-conc');cd&&cd.classList.toggle('on',dots.conc&&!S.seen.has('conc'));
+function renderPlanMeta(){const dots=planDots(),pa=pendingActs(),c=S.cons,cq=c&&CQ.find(x=>x.id===c.id),N=cq?consSteps(cq).length:1;
+  const cons=c&&!c.ready?row(svg('team'),'teal','Консилиум',`идёт · шаг ${c.stage+1} из ${N}`,`<svg class="rRing" viewBox="0 0 30 30"><circle class="bg" cx="15" cy="15" r="12"/><circle class="fg" cx="15" cy="15" r="12" pathLength="100" stroke-dasharray="${((c.stage+1)/N*100).toFixed(1)} 100" transform="rotate(-90 15 15)"/></svg>`,'consrun')
+    :c&&c.ready?row(svg('team'),'teal','Консилиум готов',REP[c.id].verdict,'<i class="rDot"></i>','consrep',c.id)
+    :row(svg('team'),'teal','Консилиум','собрать по сложному вопросу','','consnew');
+  $('#docRows').innerHTML=cons
+    +row(svg('doc'),'','Заключение врача',`22 сент · ${pa?`ждут тебя: ${pa}`:'всё принято'}`,dots.conc&&!S.seen.has('conc')?'<i class="rDot"></i>':'','conclusion')
+    +row(svg('tube'),'warm','Медпаспорт','вне референса: АСТ 41','<i class="rDot warm"></i>','labs');
   $('#planBadge').classList.toggle('on',(dots.conc&&!S.seen.has('conc'))||!!(S.cons&&S.cons.ready&&!S.seen.has('cons')));
+  if(sheetKey==='draw')refreshDraw();
 }
-function renderPanel(k){const p=panels[k];
+/* расчёт сдачи: лаборатория, пробирки, цена — один источник для карточки и шторки */
+function panelCalc(k){const p=panels[k];
   const fer=k==='oct'&&S.fer==='proposed'?1:k==='dec'&&S.fer==='moved'?1:0,extra=fer?380:0,labs=p.labs.map(([n,c])=>[n,c+extra]).sort((a,b)=>a[1]-b[1]);
-  const pick=labs.find(l=>l[0]===S.lab)||labs[0],tb=p.tubes[0]+(k==='oct'&&fer?1:0),ml=p.tubes[1]+(k==='oct'&&fer?3:0),g=panelTests(k);
-  $('#nextDraw').innerHTML=`<div class="nd-h"><span class="stw teal" style="margin:0">${k===Object.keys(panels)[0]?'Следующая сдача':'Сдача'}</span><span class="tag">${p.in}</span></div>
+  const pick=labs.find(l=>l[0]===S.lab)||labs[0],tb=p.tubes[0]+(k==='oct'&&fer?1:0),ml=p.tubes[1]+(k==='oct'&&fer?3:0);
+  return {p,labs,pick,tb,ml,g:panelTests(k)}}
+const ferQ=k=>k==='oct'&&S.fer==='proposed'?`<div class="nd-q2"><span>Ферритин можно перенести на декабрь — −380 ₽</span><button data-a="fer-yes">Перенести</button><button class="m" style="color:var(--muted);font-weight:500" data-a="fer-no">Нет</button></div>`:'';
+function renderPanel(k){const {p,pick}=panelCalc(k);
+  $('#nextDraw').innerHTML=`<div class="nd-k"><span>${k===Object.keys(panels)[0]?'Следующая сдача':'Сдача'}</span><b>${p.in}</b></div>
     <div class="nd-d">${p.date}</div>
-    <div class="nd-m"><b>${tests(cnt(k))}</b> · <b>${fmt(pick[1])} ₽</b> в ${pick[0]} · ${p.meta.includes('натощак')?'натощак':'не натощак'}</div>
-    <div class="nd-w">${g.filter(x=>!(x.name==='Железо'&&k==='oct'&&S.fer==='proposed')).map(x=>`<div><b>${x.name}</b><span>${x.sh||''}</span><em>${x.t.length}</em></div>`).join('')}</div>
-    ${k==='oct'&&S.fer==='proposed'?`<div class="nd-q"><span>Ферритин можно перенести на декабрь — на пробирку меньше и −380 ₽</span><span class="nacts"><button data-a="fer-yes">Перенести</button><button class="m" data-a="fer-no">Оставить в октябре</button></span></div>`:''}
-    <p class="nd-n">${svg('check')}${p.next}</p>`;
-  $('#labSum').innerHTML=`<div class="ls-top"><div><b>${fmt(pick[1])} ₽</b><span>${pick[0]}${pick===labs[0]?' · дешевле всего':''}</span></div><div class="ls-r"><span>${tb} ${plural(tb,'пробирка','пробирки','пробирок')} · ~${ml} мл</span><span>${p.meta.includes('натощак')?'натощак с 22:00':'можно не натощак'}</span></div></div>
-    <div class="ls-labs">${labs.map(l=>`<button class="lchip${l===pick?' on':''}" data-a="lab" data-k="${l[0]}">${l[0]} <em>${fmt(l[1])} ₽</em></button>`).join('')}</div>`;
-  $('#m-lab').textContent=`${pick[0]} · ${fmt(pick[1])} ₽ · ${tb} ${plural(tb,'пробирка','пробирки','пробирок')} · ~${ml} мл`;
-  $('#pList').innerHTML=g.map(x=>`<div class="grp"><div class="lbl">${x.name}</div>${x.why?`<p class="gwhy">${x.why}</p>`:''}${x.t.map(t=>`<div class="trow"><div><div class="nm">${t[0]}</div><div class="why">${t[1]}</div></div><span class="iv">${t[2]}</span></div>`).join('')}</div>`).join('')}
-function renderFer(){const st=S.fer==='proposed'?['ждёт решения — в карточке сдачи','w']:S.fer==='moved'?['перенесён на 15 дек','y']:['оставлен в октябре','o'];
+    <div class="nd-m"><b>${tests(cnt(k))}</b> · <b>${fmt(pick[1])} ₽</b> · ${pick[0]} · ${p.meta.includes('натощак')?'натощак':'не натощак'}</div>
+    ${ferQ(k)}<button class="btnP press" data-a="draw">Что сдаём</button>`;
+  if(sheetKey==='draw')refreshDraw();
+}
+function refreshDraw(){ovS.innerHTML=B.draw().html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}
+function ferHist(){const st=S.fer==='proposed'?['ждёт решения','w']:S.fer==='moved'?['перенесён на 15 дек','y']:['оставлен в октябре','o'];
   const H=[['26 сент','Перенести ферритин на декабрь',st],['12 сент','B12 и метилмалоновая кислота — в одну пробирку',['принято','y']],['3 сент','Гомоцистеин — из декабря в октябрь, к вопросу невролога',['принято','y']]];
-  $('#ferCallout').innerHTML=`<div class="opth">${H.map(([d,t,[sv,c]])=>`<div class="reason"><span>${t}<small style="display:block;font-size:11.5px;color:var(--muted);margin-top:2px">${d}</small></span><span class="ost ${c}">${sv}</span></div>`).join('')}</div>`}
-
+  return `<div class="opth">${H.map(([d,t,[sv,c]])=>`<div class="reason"><span>${t}<small style="display:block;font-size:12px;color:var(--muted);margin-top:2px">${d}</small></span><span class="ost ${c}">${sv}</span></div>`).join('')}</div>`}
+function renderFer(){}
 /* Заключение врача */
 const CONC=[['Продолжай серию по насыщенным жирам — ApoB снижается, цель ниже 80.',null],['Магний глицинат 300 мг вечером, 7 дней — оценим по ВСР.','mg'],['B12 и метилмалоновую кислоту — сдать 12 окт, вопрос невролога.','b12'],['Исключи грецкий орех на 21 день — доказательства указывают на него.','nut'],['Перенеси ферритин на декабрь.','fer'],['Шаги — в щадящем режиме, пока спина не успокоится. Без бега.',null],['Новые добавки — только после вердикта по магнию.',null]];
 const actDone=k=>k==='mg'||k==='b12'||(k==='nut'&&S.caseSt==='testing')||(k==='fer'&&S.fer==='moved');
@@ -1582,22 +1800,37 @@ const CLOSED=[['Отбой до 23:10','ожидали: ВСР выше за 14 
 /* «Проверки» — единая модель: Вопрос → Проверка → Вердикт → Привычка. progActive() — единственный источник проверок */
 const DONE=[['Отбой до 23:10','ВСР 41 → 47 мс за 14 дней','сработало · привычка','g-exc'],['Кофе до 14:00','утренние головные боли ушли','сработало · привычка','g-exc'],
   ['Омега-3, 2 г в день','ожидали: триглицериды −15%','не сработало','g-normal'],['Растяжка спины, 10 мин','ожидали: боль в боку реже','не выполнял','g-watch'],['Лактоза','исключение без эффекта — молочное вернули','не причина','g-normal']];
-function renderChecksTab(){if(!$('#qChecks'))return;
+function renderChecksTab(){if(!$('#qList'))return;
   const ck=progActive(),done=S.caseSt==='verified'?[['Грецкий орех','0 эпизодов за 21 день — триггер найден','подтверждено','g-exc'],...DONE]:DONE;
-  const qOpen=(S.caseSt==='pending'?1:0)+(S.disc?1:0)+(!S.disc&&!S.checkWin?1:0)+(S.caseSt==='rejected'?1:0);
-  $('#loopBar').innerHTML=[['Вопросы',qOpen],['Проверки',ck.length],['Вердикты',done.length],['Привычки',RX.length+done.filter(d=>/привычка|подтвержд/.test(d[2])).length]].map(([t,n],i)=>`<span class="lp"><b>${n}</b><small>${t}</small></span>${i<3?svg('right','ic lpA'):''}`).join('');
-  let dec='';
-  if(S.caseSt==='pending')dec+=`<div class="bcard warm"><span class="mc-ic"><i class="pdot2" style="margin:0"></i></span><span class="bbody"><span class="stw warm">Вопрос · пищевая аллергия</span><b>Вероятный триггер — грецкий орех</b><small>7 из 8 эпизодов против 20% в обычные дни. Проверить исключением?</small>
-    <span class="nacts"><button data-a="exclude">Проверить 3 недели</button><button class="m" data-a="notit">Не оно</button><button class="m" data-a="qnut">Доказательства</button></span></span></div>`;
-  if(S.disc)dec+=`<div class="bcard amber"><span class="mc-ic">${svg('spark')}</span><span class="bbody"><span class="stw amber">Вопрос · боль в боку<span class="hyp">гипотеза</span></span><b>Совпадает с едой вне привычного окна</b><small>6 из 7 эпизодов против 18% в обычные дни.</small>
-    <span class="nacts"><button data-a="disc-start">Проверить 3 недели</button><button class="m" data-a="discovery">Подробнее</button></span></span></div>`;
-  if((S.ev||[]).includes('verdict'))dec+=evCard('verdict',0);
-  $('#qDecide').innerHTML=dec?`<div class="secH" style="margin-top:24px"><span class="lbl">Нужно решение</span></div><div class="qstack">${dec}</div>`:'';
-  $('#qChecks').innerHTML=`<div class="secH" style="margin-top:24px"><span class="lbl">Идут проверки</span><span>у каждой — ожидание и дата вердикта</span></div>`+ck.map(c=>`<button class="ckrow press" data-a="${c.q||'chk'}" data-k="${c.k}"><span class="stw teal" style="margin:0 0 4px">${c.from}</span><div class="ck-h"><span>${c.name}</span><span>день ${c.n} из ${c.of}</span></div><div class="ckbar"><i style="width:${c.n/c.of*100}%"></i></div><div class="ck-m">ожидание: ${c.exp} · ${c.when}</div></button>`).join('');
-  const col=[];if(!S.disc&&!S.checkWin)col.push(['Боль в боку · 10 лет','4 из 6 эпизодов для вывода — детектив сравнивает с едой, сном и нагрузкой',4/6]);
-  if(S.caseSt==='rejected')col.push(['Пищевая аллергия','орех снят с подозрения — ждём новые эпизоды',.3]);
-  $('#qCollect').innerHTML=col.length?`<div class="secH" style="margin-top:24px"><span class="lbl">Вопросы · собираем данные</span></div>`+col.map(([t,m,p])=>`<div class="qrow"><b>${t}</b><div class="collect"><i style="width:${p*100}%"></i></div><small>${m}</small></div>`).join(''):'';
-  $('#qDone').innerHTML=`<div class="secH" style="margin-top:24px"><span class="lbl">Вердикты · что прижилось</span></div><div class="closedprog">${done.map(c=>`<div class="cp"><div><b>${c[0]}</b><small>${c[1]}</small></div><span class="grade ${c[3]}">${c[2]}</span></div>`).join('')}</div>`;
+  const ring=(n,of,c)=>`<svg class="rRing" viewBox="0 0 30 30"><circle class="bg" cx="15" cy="15" r="12"/><circle class="fg" cx="15" cy="15" r="12" pathLength="100" stroke-dasharray="${Math.max(3,n/of*100).toFixed(1)} 100" transform="rotate(-90 15 15)"${c?` style="stroke:var(--${c})"`:''}/></svg>`;
+  /* вопросы: решить → собираем данные */
+  const dec=[];
+  if(S.caseSt==='pending')dec.push(row(svg('walnut'),'teal','Аллергия: грецкий орех','7 из 8 эпизодов · проверить исключением?','<i class="rDot"></i>','qnut'));
+  if(S.disc)dec.push(row(svg('spark'),'amber','Боль в боку: еда вне окна','гипотеза · 6 из 7 эпизодов против 18%','','discovery'));
+  if((S.ev||[]).includes('verdict'))dec.push(row(svg('check'),'green','Орех подтверждён','0 эпизодов за 21 день · закрыть вопрос','<i class="rDot"></i>','inbox'));
+  const col=[];if(!S.disc&&!S.checkWin)col.push(row(svg('spark'),'','Боль в боку · 10 лет','4 из 6 эпизодов для вывода',ring(4,6,'faint')));
+  if(S.caseSt==='rejected')col.push(row(svg('walnut'),'','Пищевая аллергия','орех снят · ждём новые эпизоды',ring(1,6,'faint')));
+  const nQ=dec.length+col.length,nC=ck.length,nH=RX.length+done.filter(d=>/привычка|подтвержд/.test(d[2])).length;
+  const seg=S.qSeg||(dec.length?'q':'c');
+  $('#qSeg').innerHTML=[['q','Вопросы',nQ,dec.length],['c','Проверки',nC],['h','Привычки',nH]].map(([k,t,n,hot])=>`<button class="press${seg===k?' on':''}${hot?' hot':''}" data-a="qseg" data-k="${k}" role="tab" aria-selected="${seg===k}">${t}<b>${n}</b></button>`).join('');
+  let html='';
+  if(seg==='q'){
+    if(dec.length)html+=`<div class="qsec"><span class="lbl">Нужно решение</span><div class="rows">${dec.join('')}</div></div>`;
+    if(col.length)html+=`<div class="qsec"><span class="lbl">Собираем данные</span><div class="rows">${col.join('')}</div></div>`;
+    if(!nQ)html+=`<p class="quietRow">${svg('check')}Открытых вопросов нет</p>`;
+  }else if(seg==='c'){
+    html+=`<div class="qsec"><span class="lbl">Идут<small>ближайший вердикт 3 окт</small></span><div class="rows">${ck.map(c=>row(ring(c.n,c.of),'',c.name,`день ${c.n} из ${c.of} · ${c.when}`,'',c.q||'chk',c.k).replace('<span class="rIc ">','<span class="rIc" style="background:none">')).join('')}</div></div>`;
+  }else{
+    /* привычки врача — недельная сетка, сегодняшний кружок отмечается вручную */
+    const d=TD[S.time],days=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'],ti=S.sunday?6:5;
+    html+=`<div class="qsec"><span class="lbl">От врача<small>спина · до 15 окт</small></span><div class="mcard rx" id="rx"><div class="rxHead"><span></span>${days.map((x,i)=>`<span class="${i===ti?'today':''}">${x}</span>`).join('')}<span></span></div>`+RX.map(r=>{
+      const man=S.rxm.has(r.k),t=man?'y m':d.rxToday[r.k],cells=S.sunday?[...r.d.map(v=>v?'y':''),r.k==='swim'?'':'y',t]:[...r.d.map(v=>v?'y':''),t,'f'],n=cells.filter(c=>c.startsWith('y')).length;
+      return `<div class="rxRow"><span class="rxT"><b>${r.t}</b><small>${r.g}</small></span>${cells.map((c,i)=>i===ti&&(c!=='y')?`<button class="rxD ${c} tap" style="--k:${i}" data-a="rxmark" data-k="${r.k}" aria-label="Отметить вручную"></button>`:`<i class="rxD ${c}" style="--k:${i}"></i>`).join('')}<span class="rxN${n>=r.need?' ok':''}">${n}/${r.need}</span></div>`}).join('')
+      +`<p class="rxNote">${S.rxm.size?'Пунктир — отмечено вручную, без часов.':'Не видно на часах — нажми на сегодняшний кружок.'}</p></div></div>`;
+    html+=`<div class="qsec"><span class="lbl">Вердикты</span><div class="rows">${done.map(c=>{const ok=c[3]==='g-exc';return row(ok?svg('check'):'',ok?'ok':'off',c[0],c[1],`<span class="rV ${ok?'ok':''}" style="font-size:13px">${c[2].split(' · ')[0]}</span>`).replace('<b>','<b class="wrap">').replace('<small>','<small class="wrap">')}).join('')}</div></div>`;
+  }
+  $('#qList').innerHTML=html;
+  const rx=$('#rx');if(rx)setTimeout(()=>rx.classList.add('go'),120);
   $('#caseBadge').classList.toggle('on',S.caseSt==='pending'||!!S.disc||(S.ev||[]).includes('verdict'));
   $$('.rise',$('#s-cases')).forEach(e=>e.classList.add('in'));
 }
@@ -1688,12 +1921,7 @@ function startCons(id){const c=CQ.find(x=>x.id===id);S.cons={id,stage:0,ready:fa
     if(S.cons.stage>=N){clearInterval(consTimer);S.cons.ready=true;renderToday();renderConsCard();
       if(sheetKey==='consrun'){ovS.innerHTML=B.consrep(id).html;sheetKey='consrep';reveal(ov)}else toast('Консилиум готов — итог семейного врача на главной.')}
     else{renderConsCard();if(sheetKey==='consrun'){ovS.innerHTML=B.consrun().html;$$('.rise',ovS).forEach(e=>e.classList.add('in'))}}},reduce?60:1100)}
-function renderConsCard(){const c=S.cons,cq=c&&CQ.find(x=>x.id===c.id),N=cq?consSteps(cq).length:1;
-  $('#consCard').innerHTML=c&&!c.ready?`<button class="cons run press" data-a="consrun"><span class="stw teal">Идёт консилиум · ${c.stage+1} из ${N}</span><b>${cq.q}</b><div class="ckbar"><i style="width:${(c.stage+1)/N*100}%"></i></div><small>${consSteps(cq)[c.stage]}…</small></button>`
-   :c&&c.ready?`<button class="cons ready press" data-a="consrep" data-k="${c.id}"><span class="stw teal">Консилиум готов · итог семейного врача</span><b>${REP[c.id].verdict}</b><small>${REP[c.id].actions?REP[c.id].actions.length:4} действия · открыть итог ›</small></button>`
-   :`<div class="cons"><span class="stw teal">Консилиум врачей</span><b>Сложный вопрос? Семейный врач соберёт специалистов и даст итог</b>
-     <small>2–4 специалиста под вопрос и методолог-скептик. Итог — короткий список действий.</small>
-     <span class="nacts"><button data-a="consnew">Собрать консилиум</button><button class="m" data-a="consrep" data-k="gen">Последний итог · 22 сент</button></span></div>`}
+function renderConsCard(){renderPlanMeta()}
 function renderCase2(){renderChecksTab()}
 function renderCase(){renderChecksTab();refreshQ()}
 function refreshQ(){if(sheetKey==='qnut'){ovS.innerHTML=B.qnut().html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}}
@@ -1714,6 +1942,29 @@ function setCase(st,msg,undoTo){S.caseSt=st;haptic(12);renderCase(true);renderPr
   $('#trends').innerHTML=tr.map(([n,u,d2,v,a,g])=>{const mn=Math.min(...d2),mx=Math.max(...d2),pts=d2.map((q,i)=>[i*70/(d2.length-1),22-(q-mn)/(mx-mn)*18]);
     return `<div class="tr"><div class="nm">${n}${g?` <span class="grade g-${g}" style="height:19px;font-size:11px;padding:0 7px;margin-left:4px">${GLABEL[g]}</span>`:''}<small>${u}</small></div><svg class="sp" viewBox="0 0 70 26"><path class="draw" pathLength="1" d="${smooth(pts)}" fill="none" stroke="${ACCENT}" stroke-width="1.6" stroke-linecap="round"/><circle class="pdot" cx="70" cy="${pts[pts.length-1][1]}" r="2.3" fill="${ACCENT}"/></svg><div class="val">${v}</div>${svg(a,'ic arr')}${g?`<button class="askBtn press" data-a="ask" data-name="${n}" data-value="${v}" aria-label="Спросить об этом">${svg('ask')}</button>`:''}</div>`}).join('');
 })();
+
+/* «Что дало»: образ жизни — сумма bioage_days за 30 дней по факторам (оценка по исследованиям);
+   кровь — вклад каждого из 9 маркеров в PhenoAge (формула Levine 2018), от паспортного возраста к биологическому */
+const LIFE30=[['steps','Шаги',-12.6],['moon','Сон',-4.2],['shield','Жиры',-3.1],['leaf','Клетчатка',2.4],['drop','Алкоголь',0]];
+const PHENO=[['Альбумин',-2.1],['RDW',-1.9],['Глюкоза',-1.4],['Лимфоциты',-1.2],['вч-СРБ',0.9],['Креатинин',-0.8],['Лейкоциты',-0.8],['ЩФ',-0.7],['MCV',-0.6]];
+const SYS=[['Воспаление','СРБ на контроле','w','spark'],['Метаболизм','в норме','','drop'],['Почки','в норме','','shield'],['Кровь и печень','АСТ вне референса','o','tube']];
+function renderMe(){const seg=S.giveSeg||'life';
+  $('#giveSeg').innerHTML=[['life','Образ жизни · 30 дн'],['blood','Кровь · 9 маркеров']].map(([k,t])=>`<button class="press${seg===k?' on':''}" data-a="giveseg" data-k="${k}">${t}</button>`).join('');
+  const fd=(v,u)=>v===0?'0':(v<0?'−':'+')+fmt(Math.abs(v),1)+(u||'');
+  if(seg==='life'){const mx=Math.max(...LIFE30.map(x=>Math.abs(x[2]))),sum=LIFE30.reduce((a,x)=>a+x[2],0);
+    $('#giveList').innerHTML=`<div class="gvCard">${LIFE30.map(([ic,n,v])=>`<div class="gv">${svg(ic)}<span class="gn">${n}</span><span class="gb"><i class="${v>0?'old':''}" style="left:0;width:${Math.abs(v)/mx*100}%"></i></span><span class="gd ${v>0?'old':v===0?'zero':''}">${fd(v,' дн')}</span></div>`).join('')}
+      <div class="gv end"><span class="gn" style="width:auto;flex:1">Итого за 30 дней</span><span class="gd">${fd(sum,' дн')}</span></div></div>
+      <div class="rows" style="margin-top:10px">${row(svg('sprout'),'teal','Вчера: моложе на 3,1 дня','шаги, клетчатка, жиры — по закрытым суткам','','effect')}</div>
+      <p class="gvNote">Оценка по поведенческим исследованиям — не пересчёт крови. Настоящий биовозраст — только по анализам.</p>`;
+  }else{const lo=31,hi=42,x=v=>(v-lo)/(hi-lo)*100;let cur=41;
+    const rows=PHENO.map(([n,v])=>{const a=cur,b=cur+v;cur=b;return `<div class="gv"><span class="gn">${n}</span><span class="gb" style="background:none"><i class="${v>0?'old':''}" style="left:${x(Math.min(a,b))}%;width:${Math.max(1.5,Math.abs(v)/(hi-lo)*100)}%"></i></span><span class="gd ${v>0?'old':''}">${fd(v)}</span></div>`}).join('');
+    $('#giveList').innerHTML=`<div class="gvCard"><div class="gv end"><span class="gn">Паспорт</span><span class="gb" style="background:none"><i style="left:${x(41)}%"></i></span><span class="gd">41</span></div>${rows}
+      <div class="gv end"><span class="gn">PhenoAge</span><span class="gb" style="background:none"><i style="left:${x(32.4)}%"></i></span><span class="gd">32,4</span></div></div>
+      <p class="gvNote">Вклад маркера — по формуле PhenoAge. Больше всего молодят альбумин и RDW; добавляет возраста только вч-СРБ.</p>`}
+  $('#sysGrid').innerHTML=SYS.map(([n,st,c,ic])=>`<button class="sysC press" data-a="labs"><span class="rIc ${c==='o'?'warm':c==='w'?'amber':'teal'}">${svg(ic)}</span><b>${n}</b><small><i class="${c}"></i>${st}</small></button>`).join('');
+  $('#meRows').innerHTML=row(svg('check'),'','Мои цели','у каждой — кто её задал','','goals')+row(svg('flame'),'','Серии','рекорды, заморозки, режим поездки','','streaks');
+}
+renderMe();
 
 /* ================= LABS (Медпаспорт) ================= */
 const LABS=[
@@ -1863,11 +2114,11 @@ const B={
     <button class="tgbtn tglink rise press" style="--i:4" data-a="gorx">Привычки от врача — в «Сегодня»${svg('right')}</button>`,
     after(){renderRhythm();replay($('#rhythmChart'));const n=$('#rhythmChart').dataset.steps;if(n)countUp($('#stepsN'),+n,{dur:1400})}}},
   nutr(){return {html:`${top('Питание сегодня')}
-    <div class="sectionHead rise" style="--i:1;margin-top:18px"><span class="lbl">БЖУ за день</span><button class="linkline" data-a="food">Вчера${svg('right')}</button></div>
+    <div class="sectionHead rise" style="--i:1;margin-top:18px"><span class="lbl">За день</span><button class="linkline" data-a="food">Вчера${svg('right')}</button></div>
     <div class="macros rise" style="--i:1" id="macros"></div><div id="protSrc"></div>
-    <div class="sectionHead rise" style="--i:2"><span class="lbl">Лимиты дня</span><span>источники — по тапу</span></div>
+    <div class="sectionHead rise" style="--i:2"><span class="lbl">Лимиты</span><span>тап — откуда</span></div>
     <div class="levers rise" style="--i:2" id="levers"></div><p class="foot" id="rFoot"></p>
-    <div class="sectionHead rise" style="--i:3"><span class="lbl">Микронутриенты · неделя</span><span>за день — шум</span></div>
+    <div class="sectionHead rise" style="--i:3"><span class="lbl">Микро · неделя</span><span>тап — чем восполнить</span></div>
     <div class="micro rise" style="--i:3" id="micro"></div>`,
     after(){renderRhythm();$$('.rise',ovS).forEach(e=>e.classList.add('in'));$$('#macros .mb i').forEach(b=>{b.style.width='0';setTimeout(()=>b.style.width=b.dataset.w+'%',200)});$$('.fill').forEach(f=>{f.style.width='0';setTimeout(()=>f.style.width=f.dataset.w+'%',300)})}}},
   goals(){const G=[['Белок','160 г в сутки','врач','2 г на кг — заключение 22 сент'],['Шаги','12 000 в день','врач','снижено на щадящий режим · невролог'],['Окно еды','8:00–19:00','проверка','вопрос «Боль в боку» · до 17 окт'],['Насыщ. жиры','до 28 г','врач','серия под ApoB · кардиолог'],['Натрий','до 5 г','по умолчанию','норма ВОЗ'],['Сон','7–9 часов, отбой до 23:10','я','поставил сам после проверки'],['Норма кругляшей','заряд от 65, остальные от 70','по умолчанию','личные базы появятся через 30 дней']];
@@ -1876,10 +2127,41 @@ const B={
     <div class="ov-hero rise" style="--i:1"><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15">Кто задал каждую цель</p><p class="ov-coach" style="margin-top:10px">Цели врача меняет врач — через заключение. Свои и по умолчанию меняй сам.</p></div>
     <div class="rise" style="--i:2;margin-top:18px">${G.map(([n,v,src,why])=>`<div class="reason"><span>${n} · <b style="font-weight:500">${v}</b><small style="display:block;font-size:11.5px;color:var(--muted);margin-top:2px">${why}</small></span><span style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span class="tag" style="color:var(--${cls[src]||'muted'})">${src}</span>${src==='врач'||src==='проверка'?'':`<button class="textBtn" style="font-size:12px" data-a="toast" data-msg="Изменение цели «${n}» откроется здесь">Изменить</button>`}</span></div>`).join('')}</div>
     <p class="disc rise" style="--i:3">Профили семьи появятся здесь же: у каждого свои цели и свой источник — врач, человек или норма по умолчанию.</p>`}},
+  draw(){const k=S.panel,{p,labs,pick,tb,ml,g}=panelCalc(k),acc=(id,t,m,body)=>`<div class="accS${S.accOpen===id?' open':''}" data-s="${id}"><button class="accH" data-a="acc" data-k="${id}"><span class="accT"><b>${t}</b><small>${m}</small></span><svg class="ic chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><div class="accB"><div>${body}</div></div></div>`;
+    return {html:`${top('Сдача · '+p.short)}
+    <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${tests(cnt(k)).split(' ')[0]}</b><span>${tests(cnt(k)).split(' ')[1]} · ${fmt(pick[1])} ₽</span></div><p class="fsub">${p.date} · ${pick[0]} · ${p.meta.includes('натощак')?'натощак с 22:00':'можно не натощак'}</p></div>
+    <div class="fsec rise" style="--i:2"><span class="lbl">Зачем</span><div class="drawW">${g.filter(x=>!(x.name==='Железо'&&k==='oct'&&S.fer==='proposed')).map(x=>`<div><b>${x.name}</b><span>${x.sh||''}</span><em>${x.t.length}</em></div>`).join('')}</div>${ferQ(k)}</div>
+    <div class="acc rise" style="--i:3">
+      ${acc('sostav','Состав',`${tests(cnt(k))} по поводам`,`<div class="plist">${g.map(x=>`<div class="grp"><div class="lbl">${x.name}</div>${x.why?`<p class="gwhy">${x.why}</p>`:''}${x.t.map(t=>`<div class="trow"><div><div class="nm">${t[0]}</div><div class="why">${t[1]}</div></div><span class="iv">${t[2]}</span></div>`).join('')}</div>`).join('')}</div>`)}
+      ${acc('lab','Лаборатория и цена',`${pick[0]} · ${fmt(pick[1])} ₽ · ${tb} ${plural(tb,'пробирка','пробирки','пробирок')} · ~${ml} мл`,`<div class="labSum"><div class="ls-top"><div><b>${fmt(pick[1])} ₽</b><span>${pick[0]}${pick===labs[0]?' · дешевле всего':''}</span></div><div class="ls-r"><span>${tb} ${plural(tb,'пробирка','пробирки','пробирок')} · ~${ml} мл</span><span>${p.meta.includes('натощак')?'натощак с 22:00':'можно не натощак'}</span></div></div><div class="ls-labs">${labs.map(l=>`<button class="lchip${l===pick?' on':''}" data-a="lab" data-k="${l[0]}">${l[0]} <em>${fmt(l[1])} ₽</em></button>`).join('')}</div></div>`)}
+      ${acc('opt','Оптимизатор','история решений',ferHist())}
+    </div>
+    <p class="nd-n rise" style="--i:4">${svg('check')}${p.next}</p>`}},
+  focus(k){S.fk=k;const F=FOCUS[k],d=curD();
+    const bar=F.bar?`<div class="rise" style="--i:2"><div class="bb"><i class="${F.bar.v>F.bar.lim?'over':''}" style="width:${Math.min(100,F.bar.v/F.bar.lim*75)}%"></i><u></u>${F.bar.proj?`<em style="left:${Math.min(100,F.bar.proj/F.bar.lim*75)}%"></em>`:''}</div>
+      <div class="bbL"><span>0</span><span>лимит ${F.bar.lim} г${F.bar.proj?` · к ночи без изменений — <b>${fmt(F.bar.proj,1)}</b>`:''}</span></div></div>`:'';
+    const src=F.src?`<div class="fsec rise" style="--i:3"><span class="lbl">Откуда</span><div class="srcs" style="opacity:1;transform:none;padding:0">${F.src.map(x=>`<div class="src">${svg(x[0])}<span style="width:72px">${x[1]}</span><span class="sb"><i style="width:${x[2]/Math.max(...F.src.map(y=>y[2]))*100}%"></i></span><span class="g">${fmt(x[2],1)} г</span></div>`).join('')}</div></div>`:'';
+    const plan=F.plan?`<div class="fsec rise" style="--i:3"><span class="lbl">Прогулки</span><div class="rows">${F.plan.map(([ic,t,v])=>row(svg(ic),'teal',t,'',`<span class="rV">${v}</span>`)).join('')}</div></div>`:'';
+    const chk=F.closed?`<div class="fsec rise" style="--i:3"><span class="lbl">Что сделано</span><div class="rows">${B_.eDay.checks.map(([st,t,v])=>{const y=st==='y'||S.done.has(st);
+      return `<div class="row"><span class="rIc ${y?'ok':'off'}">${y?svg('check'):''}</span><span class="rT"><b>${t}</b>${v?`<small>${v}</small>`:''}</span>${y||st==='y'?'':`<button class="rBtn" data-a="bdone" data-k="${st}">Принял</button>`}</div>`}).join('')}</div></div>`:'';
+    const gives=F.gives?`<div class="fsec rise" style="--i:4"><span class="lbl">Что даст</span><div class="rows">${F.gives.map(([t,v])=>row(svg('spark'),'teal',t,v)).join('')}</div></div>`:'';
+    const act=F.act?`<button class="btnP press rise" style="--i:5" data-a="${F.act[1]}" data-k="${F.act[2]}">${F.act[0]}</button>`:'';
+    const more=(d.rows2||[]).length?`<div class="fsec rise" style="--i:6"><span class="lbl">Ещё можно</span><div class="rows">${d.rows2.map(hintRow).join('')}</div></div>`:'';
+    const q=QUIET[S.time]?`<p class="quietRow rise" style="--i:7">${svg('check')}В норме: ${QUIET[S.time]}</p>`:'';
+    return {html:`${top(F.h)}
+    <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${F.big}</b><span>${F.unit}</span></div><p class="fsub ${F.sub[0]}">${F.sub[1]}</p></div>
+    ${bar}${src}${plan}${chk}${gives}${act}${more}${q}
+    <button class="whyRow press rise" style="--i:8" data-a="why" data-k="${k}">${svg('hint')}Почему я так думаю</button>`}},
+  week(){return {html:`${top('Неделя')}
+    <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>5</b><span>из 7 дней в зелёной зоне</span></div><p class="fsub">серия жиров 12 → 19 дней</p></div>
+    <div class="fsec rise" style="--i:2"><div class="rows">${WEEK.lines.map(([st,t])=>`<div class="row"><span class="rIc ${st==='y'?'ok':'off'}">${st==='y'?svg('check'):''}</span><span class="rT"><b>${t}</b></span></div>`).join('')}</div></div>
+    <div class="fsec rise" style="--i:3"><div class="rows">${row(svg('book'),'teal','Наука недели','5 исследований под твои темы','','science')}${row(svg('sprout'),'teal','Вклад недели в биовозраст','в «Я» — по факторам','','gome')}</div></div>`}},
+  inbox(){const ev=inboxList();return {html:`${top('Решить')}
+    <div class="rise" style="--i:1;margin-top:18px;display:flex;flex-direction:column;gap:10px">${ev.map(k=>evCard(k,0)).join('')}</div>`}},
   index(){const key=S.past?'past':S.time,X=IDX[key],d=curD(),mark=s=>s==='y'?svg('check'):s==='w'||s==='n'?'<b style="color:#fff;font-size:12px">!</b>':'';
     return {html:`${top(d.closed?'Итог дня':'Прогноз дня')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">${d.closed?'Как закрылся день':'Чем закончится день'}</div><div class="big">${d.ring?d.ring.v:'—'}<small>${d.ring&&d.ring.ahead?`→ можно ${d.ring.ahead}`:'из 100'}</small></div>
-      <p class="ov-sub" style="color:var(--accent-ink)">${d.closed?'Сутки закрыты — цифра больше не меняется.':'Если ничего не менять — так и закроется. Действие ниже поднимает прогноз.'} Каждый просевший критерий снимает баллы — следующий дороже предыдущего.</p></div>
+      <p class="ov-sub" style="color:var(--accent-ink)">${d.closed?'Сутки закрыты — цифра больше не меняется.':'Если ничего не менять — так и закроется.'} Каждый просевший критерий дороже предыдущего.</p></div>
     <div class="rise" style="--i:2;margin-top:18px">${X.rows.map(([st,t,sub,pen])=>`<div class="idxRow"><i class="${st}">${mark(st)}</i><span>${t}${sub?`<small>${sub}</small>`:''}</span><em class="${st}">${pen?pen:''}</em></div>`).join('')}</div>
     <div class="bcard teal rise" style="--i:3;margin-top:18px"><span class="mc-ic">${svg('spark')}</span><span class="bbody"><span class="stw teal">${S.past?'Вывод':'Что поднимет прогноз сегодня'}</span><b>${X.up}</b></span></div>`}},
   why(k){const b=B_[k];return {html:`${top('Почему я так думаю')}
@@ -1889,8 +2171,8 @@ const B={
     ${tgLink('why_'+k,4)}`}},
   streaks(){return {html:`${top('Серии')}
     <div class="ov-hero rise" style="--i:1"><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15">Честная запись важнее серии</p>
-      <p class="ov-coach" style="margin-top:10px">Нет данных — серия на паузе, а не сгорает. Срыв тратит заморозку вместо обнуления: одна копится за каждые 7 дней, в запасе до двух.</p></div>
-    <div class="rise stlist" style="--i:2;margin-top:18px">${STREAKS.map(k=>{const p=paused(k);return `<div class="reason"><span>${k.full}<small>${p?'на паузе':k.n>=k.rec?'рекорд — держи':'рекорд '+k.rec+' · до него '+(k.rec-k.n)}${k.fz?' · заморозок '+k.fz:''}</small></span><span style="font-size:20px;font-weight:300">${k.n}</span></div>`}).join('')}</div>
+      <p class="ov-coach" style="margin-top:10px">Нет данных — серия на паузе, а не сгорает. Срыв тратит заморозку вместо обнуления. Заморозки общие: +1 за каждые 7 дней любой серии, в запасе до двух — сейчас ${FREEZES}.</p></div>
+    <div class="rise rows" style="--i:2;margin-top:18px">${STREAKS.map(k=>{const p=paused(k),nx=MILES.find(m=>m>k.n)||k.n,r=!p&&(curD().atRisk||[]).includes(k.k);return `<div class="row sr${p?' pause':''}${r?' risk':''}" style="flex-direction:row;gap:12px"><span class="srC" style="width:44px;height:44px"><svg class="rg" viewBox="0 0 50 50" style="width:44px;height:44px"><circle class="bg" cx="25" cy="25" r="22"/><circle class="fg" cx="25" cy="25" r="22" pathLength="100" stroke-dasharray="${Math.min(100,k.n/nx*100).toFixed(1)} 100"/></svg>${svg(k.ic)}</span><span class="rT"><b>${k.full}</b><small>${p?'на паузе':r?'под угрозой сегодня':k.n>=k.rec?'рекорд — держи':'рекорд '+k.rec+' · до него '+(k.rec-k.n)} · веха ${nx}</small></span><span class="rV" style="font-size:22px;font-weight:300">${k.n}</span></div>`}).join('')}</div>
     <div class="rise" style="--i:3;margin-top:22px;display:flex;align-items:center;justify-content:space-between;gap:12px"><span style="font-size:14px">Режим поездки<small style="display:block;font-size:12px;color:var(--muted);margin-top:2px">серии питания на паузе, сон и шаги — как обычно</small></span><button class="lchip${S.travel?' on':''}" data-a="travel">${S.travel?'до 30 сент · выкл':'Включить'}</button></div>`}},
   discovery(){return {html:`${top('Открытие')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">Вопрос «Боль в боку» · 10 лет</div><p style="font-family:var(--serif);font-size:30px;font-weight:300;line-height:1.12;margin-top:12px">Боль совпадает с едой вне привычного окна</p>
@@ -1932,7 +2214,7 @@ const B={
     </div>${tgLink('labs',4)}`,
     after(){openLabGroup(0)}}},
   states(){return {html:`${top('Все состояния')}
-    <div class="ov-hero rise" style="--i:1"><p style="font-size:24px;font-weight:300;line-height:1.25;letter-spacing:-.01em">Палитра «Сегодня»</p><p class="subtitle">Тап — применить к макету. Ритм, План и Кейсы подстроятся.</p></div>
+    <div class="ov-hero rise" style="--i:1"><p style="font-size:24px;font-weight:300;line-height:1.25;letter-spacing:-.01em">Палитра «Сегодня»</p><p class="subtitle">Тап — применить к макету. Проверки, Врач и Я подстроятся.</p></div>
     <div class="stgrid">${Object.entries(PRESETS).map(([k,p],i)=>`<button class="stile rise press${S.preset===k?' cur':''}" style="--i:${2+i}" data-a="preset" data-k="${k}">${miniArc(k)}<b>${p.t}<span>${p.c}</span></b><small>${p.n}</small></button>`).join('')}</div>`}}
 };
 function concBtn(k){if(k==='nut'&&S.caseSt==='rejected')return `<span class="mini">не оно</span>`;
@@ -1983,7 +2265,7 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
   switch(a){
     case'topic':openSheet('topic',k,t);break;
     case'chip':haptic();if(k==='sleep')openSheet('topic','sleep',t);else if(k==='recovery')openSheet('recovery',null,t);else openSheet(k==='move'?'move':'nutr',null,t);break;
-    case'gorx':closeSheet();setTimeout(()=>{goTab('today');const r=$('#rxSec');r&&sToday.scrollTo({top:r.offsetTop-20,behavior:'smooth'})},380);break;
+    case'gorx':closeSheet();setTimeout(()=>{S.qSeg='h';renderChecksTab();goTab('cases')},380);break;
     case'recovery':case'effect':openSheet(a,null,t);break;
     case'bdone':{haptic(12);const was=S.done.has(k);was?S.done.delete(k):S.done.add(k);renderToday();
       if(!was)toast(k==='mg'?'Отмечено — Программа учтёт это в вердикте.':'Принято — вечером проверю, получилось ли.',()=>{S.done.delete(k);renderToday()});break}
@@ -1994,6 +2276,8 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'disc-start':haptic(12);S.disc=false;S.checkWin=true;closeSheet();renderToday();renderCase2();renderProgram();toast('Проверка запущена: 21 день еды в окне 8:00–19:00. Она на главной и в Программе.',()=>{S.disc=true;S.checkWin=false;renderToday();renderCase2();renderProgram()});break;
     case'streaks':openSheet('streaks',null,t);break;
     case'index':openSheet('index',null,t);break;
+    case'verdict':{const v=verdictFor(curD());v.k==='past'?openSheet('index',null,t):v.k==='labsv'?openSheet('labs',null,t):v.k==='week'?openSheet('week',null,t):openSheet('focus',v.k,t);break}
+    case'inbox':openSheet('inbox',null,t);break;
     case'goals':openSheet('goals',null,t);break;
     case'consnew':openSheet('consnew',null,t);break;
     case'consgo':haptic(12);startCons(k);ovS.innerHTML=B.consrun().html;sheetKey='consrun';reveal(ov);renderConsCard();break;
@@ -2006,12 +2290,12 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'dayback':haptic();S.past=true;renderToday();sToday.scrollTo({top:0});enterToday();break;
     case'dayfwd':haptic();if(!S.past){toast('В макете доступен один день назад.');break}S.past=false;renderToday();sToday.scrollTo({top:0});enterToday();break;
     case'evmore':haptic();S.evAll=!S.evAll;renderToday();break;
-    case'rxmark':{haptic(12);const had=S.rxm.has(k);had?S.rxm.delete(k):S.rxm.add(k);renderToday();$('#rx').classList.add('go');
-      if(!had)toast(`${RX.find(r=>r.k===k).t}: отмечено вручную — часы этого не видели.`,()=>{S.rxm.delete(k);renderToday();$('#rx').classList.add('go')});break}
+    case'rxmark':{haptic(12);const had=S.rxm.has(k);had?S.rxm.delete(k):S.rxm.add(k);renderChecksTab();$('#rx')&&$('#rx').classList.add('go');
+      if(!had)toast(`${RX.find(r=>r.k===k).t}: отмечено вручную — часы этого не видели.`,()=>{S.rxm.delete(k);renderChecksTab();$('#rx')&&$('#rx').classList.add('go')});break}
     case'ev-close':haptic(12);S.ev=S.ev.filter(x=>x!=='verdict');renderToday();toast('Вопрос «Аллергия» закрыт: триггер — грецкий орех. Запись — в Медпаспорт.');break;
     case'ev-extend':haptic();S.ev=S.ev.filter(x=>x!=='verdict');renderToday();toast('Проверка продлена ещё на 21 день — для уверенности.');break;
     case'askast':haptic();toast('Откроется диалог с врачом: вопрос про АСТ 41');break;
-    case'goplan':goTab('plan');break;
+    case'goplan':closeSheet();setTimeout(()=>goTab('plan'),sheetKey?380:0);break;
     case'why':openSheet('why',k,t);break;
     case'conclusion':S.seen.add('conc');renderPlanMeta();openSheet(a,null,t);break;
     case'food':case'science':case'states':case'labs':openSheet(a,null,t);break;
@@ -2022,8 +2306,11 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'labgroup':haptic();openLabGroup(+t.dataset.g);break;
     case'lever':haptic();openLever(k);break;
     case'nudge':haptic();if(t.dataset.go==='watch'){toast('Как только часы будут на руке — данные подтянутся сами.')}else{S.protOpen=true;openSheet('nutr',null,t)}break;
-    case'needyou':case'gochecks':goTab('cases');$('#s-cases').scrollTo({top:0,behavior:'smooth'});break;
+    case'needyou':case'gochecks':closeSheet();goTab('cases');$('#s-cases').scrollTo({top:0,behavior:'smooth'});break;
     case'qnut':openSheet('qnut',null,t);break;
+    case'qseg':haptic();S.qSeg=k;renderChecksTab();break;
+    case'micro':haptic();S.microOpen=S.microOpen===k?null:k;$$('.hmW').forEach(w=>w.classList.toggle('open',w.querySelector('[data-k]').dataset.k===S.microOpen));break;
+    case'giveseg':haptic();S.giveSeg=k;renderMe();break;
     case'chk':openSheet('chk',k,t);break;
     case'exclude':setCase('testing','Орех исключён на 21 день — проверка в Программе.','pending');break;
     case'notit':setCase('rejected','Не оно — ищем дальше.','pending');break;
@@ -2031,7 +2318,8 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'toprog':closeSheet();setTimeout(()=>goTab('cases'),sheetKey?380:0);break;
     case'prog':haptic();$$('.pr').forEach(r=>r.classList.toggle('open',r.dataset.pr===k&&!r.classList.contains('open')));break;
     case'panel':{const p=t.dataset.p;if(p===S.panel)break;haptic();S.panel=p;renderPlan();break}
-    case'acc':{haptic();const sec=t.closest('.accS'),on=!sec.classList.contains('open');sec.classList.toggle('open',on);if(on){S.seen.add(k);renderPlanMeta()}break}
+    case'draw':openSheet('draw',null,t);break;
+    case'acc':{haptic();const sec=t.closest('.accS'),on=!sec.classList.contains('open');sec.classList.toggle('open',on);S.accOpen=on?k:null;if(on){S.seen.add(k);renderPlanMeta()}break}
     case'fer-yes':haptic(12);S.fer='moved';renderPlan();toast('Ферритин перенесён на 15 декабря.',()=>{S.fer='proposed';renderPlan()});break;
     case'fer-no':haptic();S.fer='kept';renderPlan();break;
     case'accept':acceptAct(k);break;
