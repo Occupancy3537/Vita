@@ -295,6 +295,21 @@ def test_checks_summary_none_when_no_active_checks():
         assert checks.checks_summary(cur) is None
 
 
+def test_pending_questions_count_zero_when_none():
+    with get_conn() as conn, conn.cursor() as cur:
+        assert checks.pending_questions_count(cur) == 0
+
+
+def test_pending_questions_count_includes_disagreements_not_in_home_inbox():
+    """Живая жалоба Влада (2026-09-28): точка на вкладке «Проверки» должна
+    гореть, даже когда home_inbox() пуст — разногласия консилиума туда не
+    попадают вовсе (см. её докстринг), но это всё ещё нерешённый вопрос."""
+    _write_disagreement()
+    with get_conn() as conn, conn.cursor() as cur:
+        assert checks.pending_questions_count(cur) == 1
+        assert checks.home_inbox(cur) == []  # именно это Влад и поймал
+
+
 def test_checks_summary_counts_and_nearest_date():
     # metric_key разный на каждый вызов — иначе оба попадут в один topic_key
     # (_derive_topic_key -> "metric_<metric_key>") и второй засуперседит первый

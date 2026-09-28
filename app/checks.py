@@ -313,6 +313,17 @@ def checks_summary(cur) -> Optional[dict]:
     return {"count": len(checks), "nearest_verdict_date": min(dates) if dates else None}
 
 
+def pending_questions_count(cur) -> int:
+    """Живая жалоба Влада (2026-09-28): «если на "Проверках" требуется моё
+    действие — там должна стоять точка» — home_inbox() специально показывает
+    в слоте «Решить» только СВЕЖИЕ события (вердикт/детектив за 3 дня), но
+    точка на вкладке должна гореть, пока ЕСТЬ хоть один нерешённый вопрос
+    (включая разногласия консилиума, которые в слот «Решить» никогда не
+    попадают, см. докстринг home_inbox) — отдельный, полный счётчик."""
+    decisions = get_decisions(cur)
+    return len(_detective_questions(cur, decisions)) + len(_disagreement_questions(cur, decisions))
+
+
 def home_inbox(cur) -> list[dict]:
     """Часть 3.2 — слот «Решить» на главной (этап 1 оставил его пустым):
     вердикт готов (последние VERDICT_READY_DAYS дней) + открытие детектива

@@ -328,7 +328,24 @@ def build_move_detail(cur, steps: dict, gate: dict) -> dict:
 
 
 def build_food_topic_detail(cur) -> dict:
-    return {"segment": "food", "publications": _topic_publications(cur, "food")}
+    """Живая поправка Влада (2026-09-28): "тепловая карта уже была реализована
+    в предыдущей версии, она на бэкенде есть" — был неправ, заявив, что
+    недельной тепловой карты микронутриентов нет вообще: get_weekly_nutrition()
+    (app/dashboard.py, порт n8n-кэша "Питание за неделю") уже считает её —
+    "heatmap" = нутриенты, где Влад НЕДОБИРАЕТ (avgPct<85% от RDA или 2+ дня
+    выше верхнего предела), "только отклонения" уже встроено в сам расчёт
+    (переменная deviates), не нужно фильтровать заново. Нутриенты РИСКА
+    ИЗБЫТКА (натрий/сахар/жиры) сюда не попадают — они уже отдельно на
+    главном экране питания через рычаги/бюджет."""
+    from app.dashboard import get_weekly_nutrition
+
+    weekly = get_weekly_nutrition(cur)
+    heatmap = [
+        {"label": h["label"], "avg_pct": h["avgPct"], "level": h["level"],
+         "unit": h["unit"], "days_pct": h["values"]}
+        for h in (weekly.get("heatmap") or [])
+    ]
+    return {"segment": "food", "micro_heatmap": heatmap, "publications": _topic_publications(cur, "food")}
 
 
 # =====================================================================
@@ -966,6 +983,10 @@ def build_today(cur) -> dict:
         # «N проверок идут · ближайший вердикт» (Часть 3 тикета).
         "inbox": checks.home_inbox(cur),
         "checks_summary": checks.checks_summary(cur),
+        # Живая жалоба (2026-09-28): точка на вкладке «Проверки» должна
+        # гореть при ЛЮБОМ нерешённом вопросе, не только свежих из inbox
+        # (разногласия консилиума там никогда не появляются, см. checks.py).
+        "pending_questions": checks.pending_questions_count(cur),
     }
 
 

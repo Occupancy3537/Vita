@@ -195,11 +195,23 @@ def test_build_move_detail_uses_gate_for_coach(monkeypatch):
     assert "щадящего режима" in out["coach"]
 
 
-def test_build_food_topic_detail_returns_publications(monkeypatch):
+def test_build_food_topic_detail_returns_publications_and_heatmap(monkeypatch):
     monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [{"title": "x", "grade": "RCT", "why": "", "url": None}])
+    monkeypatch.setattr("app.dashboard.get_weekly_nutrition", lambda cur: {
+        "heatmap": [{"label": "Магний", "avgPct": 62, "level": 2, "unit": "мг", "values": [60, 55, 70, 58, 65, 61, 63]}],
+    })
     out = vita.build_food_topic_detail(_FC())
     assert out["segment"] == "food"
     assert len(out["publications"]) == 1
+    assert out["micro_heatmap"] == [{"label": "Магний", "avg_pct": 62, "level": 2, "unit": "мг",
+                                      "days_pct": [60, 55, 70, 58, 65, 61, 63]}]
+
+
+def test_build_food_topic_detail_empty_heatmap_when_nothing_deviates(monkeypatch):
+    monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [])
+    monkeypatch.setattr("app.dashboard.get_weekly_nutrition", lambda cur: {"heatmap": []})
+    out = vita.build_food_topic_detail(_FC())
+    assert out["micro_heatmap"] == []
 
 
 # ─────── ring.ahead — виртуальное выполнение главной подсказки ───────
@@ -1039,4 +1051,5 @@ def test_vita_topic_move_200_has_expected_keys():
 def test_vita_topic_food_200_has_publications():
     r = client.get("/vita/topic/food", cookies=_cookie())
     assert r.status_code == 200
-    assert "publications" in r.json()
+    body = r.json()
+    assert "publications" in body and "micro_heatmap" in body
