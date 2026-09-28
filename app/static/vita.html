@@ -1197,6 +1197,7 @@ svg{display:block}
               <button class="verdict press" id="verdict" data-a="verdict"><span class="vk" id="vKick"></span><span class="vt"><span id="emo"></span><svg class="ic" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></button>
             </div>
             <div id="needYou"></div>
+            <div id="checksLine"></div>
           </div>
         </div>
       </div>
@@ -1210,9 +1211,10 @@ svg{display:block}
       </div>
     </section>
     <section class="tab" data-tab="cases" aria-label="Проверки">
-      <div class="screen soon-screen" id="s-cases">
+      <div class="screen" id="s-cases">
         <div class="rise" style="--i:0"><h1 class="title">Проверки</h1></div>
-        <div class="soon rise" style="--i:1"><span class="soon-ic">🔍</span><p>Скоро — вопросы, идущие проверки и привычки.</p></div>
+        <div class="seg rise" style="--i:1" id="qSeg" role="tablist"></div>
+        <div class="rise" style="--i:2" id="qList"></div>
       </div>
     </section>
     <section class="tab" data-tab="me" aria-label="Я">
@@ -1226,7 +1228,7 @@ svg{display:block}
   <nav class="tabbar" id="tabbar" role="tablist">
     <span class="tb-pill" id="tbPill"></span>
     <button class="tb on press" data-go="today"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M3 17.5h18M6.5 20.5h11"/><path d="M7 17.5a5 5 0 0 1 10 0"/><path d="M12 6.5V4M6.3 9.3 4.6 7.6M17.7 9.3l1.7-1.7M3.5 13.5h1.6M18.9 13.5h1.6"/></svg></span>Сегодня</button>
-    <button class="tb press" data-go="cases"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="16.5" r="2.2"/><circle cx="11.5" cy="6" r="2.2"/><circle cx="18.5" cy="14" r="2.2"/><path d="M7 14.5l3.4-6.5M13.3 7.3l3.8 5M8.2 16.2l8.1-1.8"/></svg></span>Проверки</button>
+    <button class="tb press" data-go="cases"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="16.5" r="2.2"/><circle cx="11.5" cy="6" r="2.2"/><circle cx="18.5" cy="14" r="2.2"/><path d="M7 14.5l3.4-6.5M13.3 7.3l3.8 5M8.2 16.2l8.1-1.8"/></svg><i class="badge" id="caseBadge"></i></span>Проверки</button>
     <button class="tb press" data-go="plan"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M6.5 3.5v5a4.5 4.5 0 0 0 9 0v-5"/><path d="M5 3.5h3M14 3.5h3"/><path d="M11 13v2.5a4.5 4.5 0 0 0 9 0v-1.5"/><circle cx="20" cy="12" r="1.8"/></svg></span>Врач</button>
     <button class="tb press" data-go="me"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M8 3c0 4.6 8 5.6 8 9s-8 4.4-8 9"/><path d="M16 3c0 4.6-8 5.6-8 9s8 4.4 8 9"/><path d="M9.3 6.2h5.4M9.3 17.8h5.4"/></svg></span>Я</button>
   </nav>
@@ -1279,8 +1281,40 @@ const top=(name,i=0)=>`<div class="ov-top rise" style="--i:${i}"><button class="
 /* ================= ДАННЫЕ: живые /vita/today + /vita/rhythm + /vita/yesterday ================= */
 let TODAY=null, RHYTHM=null, YEST=null, yestLoaded=false;
 async function fetchJSON(url){const r=await fetch(url,{credentials:'same-origin'});if(r.status===401){location.href='/vita/login';throw new Error('401')}if(!r.ok&&r.status!==404)throw new Error('HTTP '+r.status);return r.status===404?null:r.json()}
+async function postJSON(url,body){const r=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(r.status===401){location.href='/vita/login';throw new Error('401')}if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}
 async function loadToday(){[TODAY,RHYTHM]=await Promise.all([fetchJSON('/vita/today'),fetchJSON('/vita/rhythm')])}
 async function loadYesterday(){if(!yestLoaded){YEST=await fetchJSON('/vita/yesterday');yestLoaded=true}return YEST}
+/* ================= ПРОВЕРКИ (Vita v2, этап 2) — /vita/checks ================= */
+let CHECKS=null,qMode='questions';
+async function loadChecks(force){if(CHECKS&&!force)return;CHECKS=await fetchJSON('/vita/checks')}
+const SRC_ICON={детектив:'spark',консилиум:'shield',врач:'shield',кейс:'shield',я:'sprout'};
+const progRing=(n,of)=>`<svg class="rRing" viewBox="0 0 30 30"><circle class="bg" cx="15" cy="15" r="12"/><circle class="fg" cx="15" cy="15" r="12" pathLength="100" stroke-dasharray="${Math.max(3,(of?n/of*100:100)).toFixed(1)} 100" transform="rotate(-90 15 15)"/></svg>`;
+function renderChecksTab(){
+  if(!$('#qSeg'))return;
+  const c=CHECKS||{items:{questions:[],checks:[],habits:[]},counts:{questions:0,checks:0,habits:0}},cnt=c.counts;
+  $('#qSeg').innerHTML=[['questions','Вопросы',cnt.questions],['checks','Проверки',cnt.checks],['habits','Привычки',cnt.habits]]
+    .map(([k,t,n])=>`<button class="press${qMode===k?' on':''}${k==='questions'&&n?' hot':''}" data-a="qseg" data-k="${k}" role="tab" aria-selected="${qMode===k}">${t}<b>${n}</b></button>`).join('');
+  const items=c.items[qMode]||[];
+  let html;
+  if(qMode==='questions'){
+    html=items.length?`<div class="qsec"><span class="lbl">Нужно решение</span><div class="rows">${items.map(q=>
+      row(svg(SRC_ICON[q.source]||'spark'),'amber',q.title,q.detail,'','question',q.id)).join('')}</div></div>`
+      :`<p class="quietRow">${svg('check')}Открытых вопросов нет</p>`;
+  }else if(qMode==='checks'){
+    html=items.length?`<div class="qsec"><span class="lbl">Идут</span><div class="rows">${items.map(x=>{
+      const r=row(x.window_days?progRing(x.day_n,x.day_of):svg(SRC_ICON[x.source]||'spark'),'',x.title,
+        x.window_days?`день ${x.day_n} из ${x.day_of}${x.verdict_date?' · вердикт '+shortDate(x.verdict_date):''}`:(x.expectation||''),
+        x.verdict_label?`<span class="rV">${x.verdict_label}</span>`:'','check',x.id);
+      return x.window_days?r.replace('<span class="rIc ">','<span class="rIc" style="background:none">'):r}).join('')}</div></div>`
+      :`<p class="quietRow">${svg('check')}Идущих проверок нет</p>`;
+  }else{
+    html=items.length?`<div class="qsec"><span class="lbl">Подтвердилось</span><div class="rows">${items.map(h=>
+      row(svg('check'),'ok',h.title,h.expectation||'',`<span class="rV ok">с ${shortDate(h.verdict_date)}</span>`,'check',h.id)).join('')}</div></div>`
+      :`<p class="quietRow">${svg('check')}Подтверждённых привычек пока нет</p>`;
+  }
+  $('#qList').innerHTML=html;
+  $$('.rise',$('#s-cases')).forEach(e=>e.classList.add('in'));
+}
 
 const ICON_BY_SEGMENT={recovery:'charge',sleep:'moon',move:'steps',food:'bowl'};
 const NAME_BY_SEGMENT={recovery:'Заряд',sleep:'Сон',move:'Движение',food:'Питание'};
@@ -1330,6 +1364,8 @@ function chipsFor(){
   return out;
 }
 const dateFmt=iso=>{if(!iso)return'';const d=new Date(iso+'T00:00:00');return d.toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'}).replace(/^./,c=>c.toUpperCase())};
+const shortDate=iso=>{if(!iso)return'';const d=new Date(iso+'T00:00:00');return d.toLocaleDateString('ru-RU',{day:'numeric',month:'short'})};
+const plural=(n,a,b,c)=>{const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&&(h<12||h>14)?b:c};
 
 function renderToday(){
   const st=TODAY.state,v=verdictWord();
@@ -1343,8 +1379,18 @@ function renderToday(){
   $('#crown').classList.toggle('has',crownOn());
   const C=2*Math.PI*28;
   $('#chips').innerHTML=chipsFor().map(x=>`<button class="chip press ${x.st==='good'?'ok':x.st==='warn'?'low':''}" data-a="chip" data-k="${x.k}"><span class="chipC"><svg class="ring" viewBox="0 0 58 58"><circle cx="29" cy="29" r="28" data-d="${(x.p*C).toFixed(1)}"/></svg>${svg(x.ic,'ic chipI')}<span class="chipV">${x.v}</span></span><span class="chipL">${x.l}</span></button>`).join('');
-  /* «Решить» — пока всегда пусто (Пустое = отсутствует): в этот этап не подключён ни один источник событий */
-  $('#needYou').innerHTML='';
+  /* «Решить» (Vita v2, этап 2) — вердикт готов / открытие детектива, свежие
+     TODAY.inbox с бэкенда (app/checks.py::home_inbox); тап по первой карточке
+     открывает шторку «Решить» со всеми (B.inbox). Пусто = отсутствует. */
+  const inbox=TODAY.inbox||[];
+  $('#needYou').innerHTML=inbox.length?row(svg(inbox[0].kind==='verdict'?'check':'spark'),
+    inbox[0].tone==='green'?'ok':'amber',inbox[0].title,inbox[0].sub,
+    inbox.length>1?`<span class="rN">+${inbox.length-1}</span>`:'','inbox'):'';
+  const cs=TODAY.checks_summary;
+  $('#checksLine').innerHTML=cs?`<button class="quietRow press" data-a="gochecks">${svg('spark')}${cs.count} `
+    +`${plural(cs.count,'проверка','проверки','проверок')} ${cs.count===1?'идёт':'идут'}`
+    +(cs.nearest_verdict_date?` · ближайший вердикт ${shortDate(cs.nearest_verdict_date)}`:'')+'</button>':'';
+  $('#caseBadge').classList.toggle('on',inbox.some(i=>i.kind==='question'));
   /* серии — пилюля в шапке */
   const streaks=TODAY.streaks||[],pill=$('#streaks');
   const st2=streaks.map(s=>s.status==='paused'?'p':s.status==='at_risk'?'r':'');
@@ -1426,6 +1472,33 @@ const B={
     <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${alive}</b><span>из ${streaks.length} серий живы</span></div><p class="fsub">${fz} ${fz===1?'заморозка':fz>=2&&fz<=4?'заморозки':'заморозок'} в запасе — срыв не всегда обнулит серию</p></div>
     <div class="stList rise" style="--i:2">${streaks.map(s=>{const p=s.status==='paused',r=s.status==='at_risk',cap=p?'на паузе — нет данных':r?'под угрозой сегодня':s.count>=s.record?'рекорд — держи':(s.next_milestone?`ещё ${s.next_milestone-s.count} до ${s.next_milestone} · рекорд ${s.record}`:`рекорд ${s.record}`);
       return `<div class="stR2${p?' pause':''}${r?' risk':''}"><div class="stR2h"><span class="rIc ${p?'':r?'amber':'teal'}">${svg('shield')}</span><span class="rT"><b>${s.label}</b><small>${cap}</small></span><span class="stN">${s.count}</span></div></div>`}).join('')||'<p class="empty">Пока нет ни одной серии в истории.</p>'}</div>`}},
+  inbox(){const ev=TODAY.inbox||[];
+    return {html:`${top('Решить')}
+    <div class="rise" style="--i:1;margin-top:18px;display:flex;flex-direction:column;gap:10px">${ev.length?ev.map(e=>
+      `<div class="bcard ${e.tone==='green'?'teal':'amber'}"><span class="mc-ic">${svg(e.kind==='verdict'?'check':'spark')}</span><span class="bbody"><b>${e.title}</b><small>${e.sub}</small><span class="nacts"><button data-a="gochecks" data-k="${e.kind==='verdict'?'checks':'questions'}">Открыть в Проверках</button></span></span></div>`).join(''):'<p class="empty">Пока нечего решать.</p>'}</div>`}},
+  question(qid){const q=((CHECKS&&CHECKS.items.questions)||[]).find(x=>x.id===qid);if(!q)return{html:top('Вопрос')};
+    return {html:`${top('Вопрос')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">${q.source}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${q.title}</p><p class="ov-sub" style="color:var(--accent-ink)">${q.detail||q.what||''}</p></div>
+    ${q.source==='детектив'?`<button class="whyRow press rise" style="--i:2" data-a="evidence" data-k="${q.problem_id}">${svg('hint')}Доказательства</button>`:''}
+    <div class="btns rise" style="--i:3;justify-content:center;margin-top:18px">
+      <button class="btn pri press" data-a="qcheck" data-k="${qid}">Проверить 3 недели</button>
+      <button class="btn sec press" data-a="qdecline" data-k="${qid}">Отклонить</button>
+    </div>
+    <p class="disc rise" style="--i:4">Совпадение — ещё не причина, поэтому вывод помечен как гипотеза и сразу идёт в проверку.</p>`}},
+  check(id){const items=[...((CHECKS&&CHECKS.items.checks)||[]),...((CHECKS&&CHECKS.items.habits)||[])];
+    const c=items.find(x=>x.id===id);if(!c)return{html:top('Проверка')};
+    return {html:`${top(c.status==='привычка'?'Привычка':'Проверка')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">${c.source}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${c.title}</p>${c.expectation?`<p class="ov-sub" style="color:var(--accent-ink)">Ожидание: ${c.expectation}</p>`:''}</div>
+    ${c.window_days?`<div class="rise" style="--i:2;margin-top:18px"><div class="ckbar" style="margin:0 0 6px"><i style="width:${Math.min(100,c.day_n/c.day_of*100)}%"></i></div><div class="ck-m" style="margin-bottom:14px">день ${c.day_n} из ${c.day_of}${c.verdict_date?' · вердикт '+shortDate(c.verdict_date):''}</div></div>`:''}
+    ${c.verdict_label?`<div class="reason rise" style="--i:3"><span>Вердикт</span><span>${c.verdict_label}</span></div>`:''}
+    <p class="disc rise" style="--i:4">Вердикт считается сам: сработало, частично, не сработало или не выполнялось. Сработавшее становится привычкой.</p>`}},
+  evidence(ev){if(!ev)return{html:top('Доказательства')};
+    const f=(ev.findings||[])[0];
+    return {html:`${top('Доказательства')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">${ev.title}</div>${f?`<p class="ov-sub" style="color:var(--accent-ink)">«${f.factor}» (${f.lag_days===0?'тот же день':'лаг '+f.lag_days+'д'}): ${f.n} из ${f.m} случаев (${Math.round(f.rate*100)}%) против ${Math.round(f.base_rate*100)}% в обычные дни${f.evidence_grade?' · '+f.evidence_grade:''}</p>`:''}</div>
+    <div class="rise" style="--i:2;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Эпизоды · еда за ${ev.window_hours} ч до реакции</div>${(ev.episodes||[]).map(e=>
+      `<div class="reason"><span>${e.onset_ts.slice(0,10)}${e.symptom?`<small style="display:block;font-size:12px;color:var(--muted);margin-top:2px">${e.symptom}</small>`:''}</span><span style="text-align:right;max-width:60%;color:var(--ink2)">${(e.meals||[]).map(m=>`${m.description} (−${m.hours_before.toFixed(1)}ч)`).join('; ')||'еды в окне не найдено'}</span></div>`).join('')||'<p class="empty">Эпизодов пока нет.</p>'}</div>
+    <p class="disc rise" style="--i:3">Детектив сравнивает дни эпизодов с обычными днями. Совпадение — ещё не причина.</p>`}},
   segment(k){const names={recovery:'Восстановление',sleep:'Сон',move:'Движение',food:'Питание'},score={recovery:TODAY.ring.recovery_score,sleep:TODAY.ring.sleep_score,move:TODAY.ring.movement_score,food:TODAY.ring.nutrition_score}[k];
     const rows=(TODAY.ring.breakdown||[]);
     return {html:`${top(names[k])}
@@ -1528,7 +1601,7 @@ function goTab(k,force){if(k===curTab&&!force)return;haptic();
   $$('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===k));
   $('#tbPill').style.transform=`translateX(${order.indexOf(k)*100}%)`;
   $$('.tb').forEach(b=>b.classList.toggle('on',b.dataset.go===k));
-  if(k==='today')enterToday();else reveal($(`#s-${k}`));}
+  if(k==='today')enterToday();else if(k==='cases'){loadChecks().then(renderChecksTab);reveal($(`#s-${k}`))}else reveal($(`#s-${k}`));}
 $$('.tb').forEach(b=>b.addEventListener('click',()=>goTab(b.dataset.go)));
 
 /* ================= TOAST / THEME ================= */
@@ -1550,6 +1623,22 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'close':closeSheet();break;
     case'toast':haptic();toast(t.dataset.msg);break;
     case'theme':haptic();setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');break;
+    case'inbox':haptic();openSheet('inbox',null,t);break;
+    case'gochecks':haptic();if(ov.classList.contains('open'))closeSheet();if(k)qMode=k;goTab('cases',true);break;
+    case'qseg':haptic();qMode=k;renderChecksTab();break;
+    case'question':haptic();openSheet('question',k,t);break;
+    case'check':haptic();openSheet('check',k,t);break;
+    case'evidence':haptic();fetchJSON('/vita/cases/'+k+'/evidence').then(ev=>openSheet('evidence',ev,t));break;
+    case'qcheck':{haptic();const q=((CHECKS&&CHECKS.items.questions)||[]).find(x=>x.id===k);if(!q)break;
+      postJSON('/vita/questions/resolve',{question_id:q.id,source:q.source==='детектив'?'detective':'disagreement',
+        action:'check',title:q.title,problem_id:q.problem_id,factor:q.factor,lag_days:q.lag_days})
+        .then(()=>{closeSheet();loadChecks(true).then(()=>{renderChecksTab();loadToday().then(renderToday)});toast('Проверка началась — она в «Проверках».')});
+      break}
+    case'qdecline':{haptic();const q=((CHECKS&&CHECKS.items.questions)||[]).find(x=>x.id===k);if(!q)break;
+      postJSON('/vita/questions/resolve',{question_id:q.id,source:q.source==='детектив'?'detective':'disagreement',
+        action:'decline',title:q.title})
+        .then(()=>{closeSheet();loadChecks(true).then(renderChecksTab);toast('Вопрос отклонён.')});
+      break}
   }
 });
 
