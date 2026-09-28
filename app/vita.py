@@ -191,22 +191,28 @@ _JUDGMENT_MARK = {"good": "y", "neutral": "y", "warn": "w", "bad": "n"}
 
 
 def build_index_breakdown(today: dict, health: dict) -> list[dict]:
+    """Vita v2, этап 2 (2026-09-28, живая жалоба Влада: «нажатие на питание,
+    заряд, сон, движение открывает один экран») — каждая строка теперь несёт
+    "segment", чтобы шторка конкретного кругляша (app/static/vita.html::
+    B.segment) могла показать СВОИ критерии, а не весь список целиком (тот
+    остаётся в B.index() — «Прогноз дня», ему положено быть полным)."""
     decision = today.get("decision") or {}
     metric_by_key = {m["key"]: m for m in (health.get("metrics") or [])}
     budget = today.get("budget") or []
     rows = []
     for r in (decision.get("reasons") or []):
-        rows.append({"mark": _JUDGMENT_MARK.get(r["judgment"], "y"), "label": r["label"], "detail": str(r.get("value", ""))})
-    for key, label in (("sleep_min", "Сон"), ("stress", "Стресс")):
+        rows.append({"mark": _JUDGMENT_MARK.get(r["judgment"], "y"), "label": r["label"],
+                     "detail": str(r.get("value", "")), "segment": r.get("segment")})
+    for key, label, segment in (("sleep_min", "Сон", "sleep"), ("stress", "Стресс", "recovery")):
         m = metric_by_key.get(key)
         if m and m.get("value") is not None:
             rows.append({"mark": _JUDGMENT_MARK.get(m["judgment"], "y"), "label": label,
-                         "detail": f"{m['value']} {m.get('unit') or ''}".strip()})
+                         "detail": f"{m['value']} {m.get('unit') or ''}".strip(), "segment": segment})
     for b in budget:
         if b.get("kind") != "limit":
             continue
         rows.append({"mark": _JUDGMENT_MARK[_budget_judgment(b)], "label": b["label"],
-                     "detail": f"{b['consumed']}/{b['cap']} {b['unit']}"})
+                     "detail": f"{b['consumed']}/{b['cap']} {b['unit']}", "segment": "food"})
     return rows
 
 

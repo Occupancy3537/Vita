@@ -110,7 +110,7 @@ def test_scores_includes_recovery_score():
 def test_build_index_breakdown_includes_reasons_and_labels():
     today = {"decision": {"reasons": _decision_reasons(bb_judgment="bad")}, "budget": []}
     rows = vita.build_index_breakdown(today, {"metrics": []})
-    assert rows == [{"mark": "n", "label": "Body Battery", "detail": "80"}]
+    assert rows == [{"mark": "n", "label": "Body Battery", "detail": "80", "segment": "recovery"}]
 
 
 def test_build_index_breakdown_includes_sleep_and_stress_metrics():
@@ -119,7 +119,9 @@ def test_build_index_breakdown_includes_sleep_and_stress_metrics():
     rows = vita.build_index_breakdown({"decision": {"reasons": []}, "budget": []}, health)
     labels = {r["label"]: r for r in rows}
     assert labels["Сон"]["mark"] == "y" and labels["Сон"]["detail"] == "424 мин"
+    assert labels["Сон"]["segment"] == "sleep"
     assert labels["Стресс"]["mark"] == "w"
+    assert labels["Стресс"]["segment"] == "recovery"
 
 
 def test_build_index_breakdown_includes_budget_limits_only():
@@ -128,7 +130,7 @@ def test_build_index_breakdown_includes_budget_limits_only():
         {"kind": "goal", "status": "over", "label": "Клетчатка", "consumed": 30, "cap": 25, "unit": "г"},
     ]}
     rows = vita.build_index_breakdown(today, {"metrics": []})
-    assert rows == [{"mark": "n", "label": "Натрий", "detail": "6.2/5 г"}]
+    assert rows == [{"mark": "n", "label": "Натрий", "detail": "6.2/5 г", "segment": "food"}]
 
 
 def test_build_index_breakdown_empty_when_no_data():

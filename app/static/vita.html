@@ -1499,11 +1499,34 @@ const B={
     <div class="rise" style="--i:2;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Эпизоды · еда за ${ev.window_hours} ч до реакции</div>${(ev.episodes||[]).map(e=>
       `<div class="reason"><span>${e.onset_ts.slice(0,10)}${e.symptom?`<small style="display:block;font-size:12px;color:var(--muted);margin-top:2px">${e.symptom}</small>`:''}</span><span style="text-align:right;max-width:60%;color:var(--ink2)">${(e.meals||[]).map(m=>`${m.description} (−${m.hours_before.toFixed(1)}ч)`).join('; ')||'еды в окне не найдено'}</span></div>`).join('')||'<p class="empty">Эпизодов пока нет.</p>'}</div>
     <p class="disc rise" style="--i:3">Детектив сравнивает дни эпизодов с обычными днями. Совпадение — ещё не причина.</p>`}},
-  segment(k){const names={recovery:'Восстановление',sleep:'Сон',move:'Движение',food:'Питание'},score={recovery:TODAY.ring.recovery_score,sleep:TODAY.ring.sleep_score,move:TODAY.ring.movement_score,food:TODAY.ring.nutrition_score}[k];
-    const rows=(TODAY.ring.breakdown||[]);
+  segment(k){const names={recovery:'Заряд',sleep:'Сон',move:'Движение',food:'Питание'},
+    score={recovery:TODAY.ring.recovery_score,sleep:TODAY.ring.sleep_score,move:TODAY.ring.movement_score,food:TODAY.ring.nutrition_score}[k];
+    /* Живая жалоба Влада (2026-09-28): тап на любой кругляш открывал ОДИН и
+       тот же список — теперь фильтруем ring.breakdown по своему сегменту
+       (backend помечает каждую строку segment'ом) и добавляем то, чего в
+       общем списке нет вовсе — свою для каждого кругляша живую деталь. */
+    const own=(TODAY.ring.breakdown||[]).filter(r=>r.segment===k);
+    const idxRows=rs=>rs.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${r.label}${r.detail?`<small>${r.detail}</small>`:''}</span></div>`).join('');
+    let extra='';
+    if(k==='food'){
+      const lv=(RHYTHM&&RHYTHM.levers)||{},rows=['protein','fat','sodium'].filter(x=>lv[x]&&lv[x].has_data).map(x=>leverRow(lv[x])).join('');
+      const rest=own.filter(r=>!['Насыщенные жиры','Натрий'].includes(r.label));
+      extra=(rows||'<p class="empty rise" style="--i:2">Рычаги появятся после первого приёма пищи.</p>')
+        +(rest.length?`<div class="rise" style="--i:3;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Ещё в лимите</div>${idxRows(rest)}</div>`:'');
+    }else if(k==='move'){
+      const st=(RHYTHM&&RHYTHM.steps)||{};
+      const stepsRow=st.now_steps!=null?`<div class="reason rise" style="--i:2"><span>Шаги</span><span>${st.now_steps} из ${st.target}${st.status_word?' · '+st.status_word:''}</span></div>`:'';
+      extra=stepsRow+`<div class="rise" style="--i:3;margin-top:14px">${idxRows(own)}</div>`;
+    }else if(k==='sleep'){
+      const s=(TODAY.streaks||[]).find(x=>x.key==='sleep_zone');
+      const streakRow=s?`<div class="reason rise" style="--i:2"><span>Серия сна</span><span>${s.count} ${s.count===1?'ночь':'ночей'} · рекорд ${s.record}</span></div>`:'';
+      extra=streakRow+`<div class="rise" style="--i:3;margin-top:14px">${idxRows(own)}</div>`;
+    }else{
+      extra=`<div class="rise" style="--i:2;margin-top:18px">${idxRows(own)}</div>`;
+    }
     return {html:`${top(names[k])}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">Сегодня</div><div class="big">${score!=null?score:'—'}<small>из 100</small></div></div>
-    <div class="rise" style="--i:2;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Из чего складывается индекс дня</div>${rows.length?rows.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${r.label}${r.detail?`<small>${r.detail}</small>`:''}</span></div>`).join(''):'<p class="empty">Пока нет данных.</p>'}</div>`}},
+    ${own.length||k==='food'?extra:'<p class="empty rise" style="--i:2">Пока нет данных.</p>'}`}},
   yesterday(snap){if(!snap)return {html:`${top('Вчера')}<p class="empty rise" style="--i:1" style="margin-top:20px">Снимок вчерашнего дня ещё не записан.</p>`};
     const r=snap.ring||{};
     return {html:`${top('Вчера')}
