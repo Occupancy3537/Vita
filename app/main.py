@@ -103,6 +103,7 @@ import app.issue_review as issue_review
 import app.research_scan as research_scan
 import app.consilium as consilium
 import app.problem as problem
+import app.checks as checks
 import app.food_diary_bot as food_diary_bot
 import app.card_processor as card_processor
 import app.phenoage_calc as phenoage_calc
@@ -215,6 +216,10 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # единственная часть тикета на расписании (create/close problem — только
     # по команде доктора, автопривязка новых эпизодов — синхронно в write_path.py).
     ("PROBLEM_MAINTENANCE_ENABLED", lambda: problem.run_scheduler(), "problem-maintenance-scheduler"),
+    # Vita v2, этап 2 («Проверки», 2026-09-28): дневной факт episode_count:<id>
+    # для frequency-проверок, созданных из «Проверить N недель» — без него
+    # verdict_engine никогда не насчитал бы реальный вердикт по такой проверке.
+    ("CHECKS_SYNC_ENABLED", lambda: checks.run_scheduler(), "checks-episode-frequency-scheduler"),
 ]
 
 

@@ -19,7 +19,7 @@ from typing import Optional
 
 from psycopg import sql
 
-from app import timeutil
+from app import checks, timeutil
 from app.dashboard import (
     _SLEEP_MAX_OK,
     _SLEEP_MIN_OK,
@@ -840,6 +840,11 @@ def build_today(cur) -> dict:
         "streaks": streak_data["streaks"],
         "freezes_available": streak_data["freezes_available"],
         "assignments": build_assignments(cur, today, state),
+        # «Проверки», этап 2 (2026-09-28): слот «Решить» (этап 1 оставил его
+        # пустым — см. app/static/vita.html до этого коммита) + строка
+        # «N проверок идут · ближайший вердикт» (Часть 3 тикета).
+        "inbox": checks.home_inbox(cur),
+        "checks_summary": checks.checks_summary(cur),
     }
 
 
@@ -966,3 +971,55 @@ def vita_manual_mark_endpoint(req: VitaManualMarkRequest, _: None = Depends(requ
             write_manual_mark(cur, req.date, req.field_key, req.value)
         conn.commit()
     return {"ok": True}
+
+
+# =====================================================================
+# Vita v2, этап 2 (2026-09-28) — «Проверки»: агрегатор app/checks.py
+# =====================================================================
+
+@router.get("/vita/checks")
+def vita_checks_endpoint(mode: Optional[str] = None, _: None = Depends(require_session)) -> dict:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                return checks.list_checks(cur, mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class VitaQuestionResolveRequest(BaseModel):
+    question_id: str
+    source: str  # 'detective' | 'disagreement'
+    action: str  # 'check' | 'decline'
+    title: str
+    reason: Optional[str] = None
+    window_days: Optional[int] = None
+    problem_id: Optional[str] = None
+    factor: Optional[str] = None
+    lag_days: Optional[int] = None
+
+
+@router.post("/vita/questions/resolve")
+def vita_questions_resolve_endpoint(req: VitaQuestionResolveRequest, _: None = Depends(require_session)) -> dict:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                result = checks.resolve_question(
+                    cur, req.question_id, req.source, req.action, req.title,
+                    reason=req.reason, window_days=req.window_days, problem_id=req.problem_id,
+                    factor=req.factor, lag_days=req.lag_days,
+                )
+            conn.commit()
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/vita/cases/{problem_id}/evidence")
+def vita_case_evidence_endpoint(problem_id: str, _: None = Depends(require_session)) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            result = checks.case_evidence_view(cur, problem_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="кейс не найден")
+    return result

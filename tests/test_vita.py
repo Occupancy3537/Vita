@@ -300,7 +300,7 @@ def test_build_streaks_no_history_returns_empty_list():
 # card.lab_request в тикете «оптимизатор сдачи анализов».
 
 from datetime import date
-from app.db import get_conn
+from app.db import get_conn, schema
 
 
 def test_write_day_snapshot_false_when_no_history_for_date():
@@ -674,6 +674,156 @@ def test_build_today_ring_has_no_phenoage_fields():
     r = client.get("/vita/today", cookies=_cookie())
     ring = r.json()["ring"]
     assert "phenoage" not in ring and "chrono_age" not in ring
+
+
+# =====================================================================
+# Vita v2, этап 2 (2026-09-28) — «Проверки»: /vita/checks, /vita/questions/
+# resolve, /vita/cases/{id}/evidence + новые поля /vita/today. Бизнес-логика
+# самого агрегатора — tests/test_checks.py; здесь только маршрутизация/
+# авторизация/интеграция с реальной (пустой) card_test БД.
+# =====================================================================
+
+def test_vita_today_has_checks_fields():
+    r = client.get("/vita/today", cookies=_cookie())
+    assert r.status_code == 200
+    body = r.json()
+    assert "inbox" in body and "checks_summary" in body
+    assert body["inbox"] == []  # card_test пуст между тестами
+    assert body["checks_summary"] is None
+
+
+def test_vita_checks_401_without_cookie():
+    r = client.get("/vita/checks")
+    assert r.status_code == 401
+
+
+def test_vita_checks_200_empty_on_clean_db():
+    r = client.get("/vita/checks", cookies=_cookie())
+    assert r.status_code == 200
+    body = r.json()
+    assert body["counts"] == {"questions": 0, "checks": 0, "habits": 0}
+
+
+def test_vita_checks_mode_filter():
+    r = client.get("/vita/checks", params={"mode": "habits"}, cookies=_cookie())
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "habits"
+    assert body["items"] == []
+
+
+def test_vita_checks_invalid_mode_400():
+    r = client.get("/vita/checks", params={"mode": "bogus"}, cookies=_cookie())
+    assert r.status_code == 400
+
+
+def test_vita_questions_resolve_401_without_cookie():
+    r = client.post("/vita/questions/resolve", json={
+        "question_id": "cq_dg_x", "source": "disagreement", "action": "decline", "title": "тест",
+    })
+    assert r.status_code == 401
+
+
+def test_vita_questions_resolve_disagreement_roundtrip():
+    import json as _json
+    from ulid import ULID as _ULID
+
+    dis_id = f"dg_{_ULID()}"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.disagreement (id, ts_event, provenance, opinion_doctor, opinion_advisor, "
+            "significance, status) VALUES (%s, now(), %s, 'A', 'Б', 'закрывается: тест', 'raised')",
+            (dis_id, _json.dumps({"origin": "test"})),
+        )
+        conn.commit()
+    qid = f"cq_{dis_id}"
+
+    r = client.get("/vita/checks", params={"mode": "questions"}, cookies=_cookie())
+    assert qid in [q["id"] for q in r.json()["items"]]
+
+    r = client.post("/vita/questions/resolve", cookies=_cookie(), json={
+        "question_id": qid, "source": "disagreement", "action": "decline", "title": "тест", "reason": "не сейчас",
+    })
+    assert r.status_code == 200
+    assert r.json()["decision"] == "decline"
+
+    r = client.get("/vita/checks", params={"mode": "questions"}, cookies=_cookie())
+    assert qid not in [q["id"] for q in r.json()["items"]]
+
+
+def test_vita_questions_resolve_detective_check_uses_real_separate_connections():
+    """Регрессия на живой баг (2026-09-28, поймано ручной проверкой на проде):
+    resolve_question() регистрирует metric_coverage через СВОЙ курсор, а
+    propose_recommendation() открывает ОТДЕЛЬНОЕ соединение — если регистрация
+    не закоммичена ДО этого вызова, G2 (gates.py) её не видит и тихо
+    понижает frequency-ожидание до unmeasurable. tests/test_checks.py не
+    ловит это (там ВСЕ get_conn() под _isolate_real_schema_writes схлопнуты
+    в одно физическое соединение — баг невоспроизводим); только здесь, через
+    настоящий TestClient с настоящими закоммиченными записями, два вызова
+    get_conn() внутри одного запроса — действительно два разных соединения,
+    как в проде."""
+    import json as _json
+    from ulid import ULID as _ULID
+
+    problem_id = f"pb_{_ULID()}"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.problem (id, ts_event, provenance, title, status, opened_ts) "
+            "VALUES (%s, now(), %s, 'Кейс регрессии частоты', 'active', now())",
+            (problem_id, _json.dumps({"origin": "test"})),
+        )
+        conn.commit()
+    qid = f"dq_{problem_id}_тест-фактор_0"
+
+    r = client.post("/vita/questions/resolve", cookies=_cookie(), json={
+        "question_id": qid, "source": "detective", "action": "check", "title": "Тестовая частотная проверка",
+        "problem_id": problem_id, "factor": "тест-фактор", "lag_days": 0,
+    })
+    assert r.status_code == 200
+    rec_id = r.json()["created_rec_id"]
+    assert rec_id is not None
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT type, metric_key FROM {schema()}.expectation WHERE rec_id = %s", (rec_id,))
+        ex_type, metric_key = cur.fetchone()
+    assert ex_type == "frequency", "рекомендация не должна тихо падать в unmeasurable — метрика уже зарегистрирована"
+    assert metric_key == f"episode_count:{problem_id}"
+
+
+def test_vita_questions_resolve_unknown_source_400():
+    r = client.post("/vita/questions/resolve", cookies=_cookie(), json={
+        "question_id": "xx_1", "source": "bogus", "action": "check", "title": "тест",
+    })
+    assert r.status_code == 400
+
+
+def test_vita_case_evidence_401_without_cookie():
+    r = client.get("/vita/cases/pb_x/evidence")
+    assert r.status_code == 401
+
+
+def test_vita_case_evidence_404_unknown_problem():
+    r = client.get("/vita/cases/pb_does_not_exist/evidence", cookies=_cookie())
+    assert r.status_code == 404
+
+
+def test_vita_case_evidence_200_for_real_problem():
+    import json as _json
+    from ulid import ULID as _ULID
+
+    problem_id = f"pb_{_ULID()}"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {schema()}.problem (id, ts_event, provenance, title, status, opened_ts) "
+            "VALUES (%s, now(), %s, 'Кейс роута тест', 'active', now())",
+            (problem_id, _json.dumps({"origin": "test"})),
+        )
+        conn.commit()
+    r = client.get(f"/vita/cases/{problem_id}/evidence", cookies=_cookie())
+    assert r.status_code == 200
+    body = r.json()
+    assert body["problem_id"] == problem_id
+    assert body["episodes"] == []
 
 
 # =====================================================================
