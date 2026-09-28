@@ -295,6 +295,21 @@ def finalize_yesterday() -> None:
         conn.commit()
     _sync_nutrition_to_card(d)
 
+    # Vita v2, этап 1 (2026-09-28, Часть «Бэкенд-дельта» п.4): снимок дня для
+    # экрана «вчера» — тот же момент, что и досчёт day_sum выше (вчера уже
+    # точно закрыто). Импорт ленивый — тот же приём, что app/registrar.py
+    # использует для app.main, здесь не строго обязателен (циклического
+    # импорта нет), но держит nutrition_reports.py независимым от Vita на
+    # уровне модуля, не только по смыслу. Сбой снимка не должен рвать день_сум
+    # выше (уже записан) — отдельная транзакция, отдельный try.
+    try:
+        from app import vita
+        with get_conn() as conn, conn.cursor() as cur:
+            vita.write_day_snapshot(cur, yesterday)
+            conn.commit()
+    except Exception:
+        logger.exception("finalize_yesterday: снимок дня Vita не записан — day_sum выше уже сохранён штатно")
+
 
 # =====================================================================
 # Недельный отчёт (порт n8n "Weekly Food Report", без промежуточного week_sum)

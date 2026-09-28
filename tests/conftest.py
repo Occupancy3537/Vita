@@ -171,6 +171,7 @@ TABLES_TO_CLEAN = [
     "publication", "research_topic",  # научный контур (2026-09-25)
     "anomaly_disposition",  # мост «аномалия → действие» (2026-09-25)
     "lab_request", "lab_reminder_sent",  # оптимизатор сдачи анализов (2026-09-26)
+    "vita_day_snapshot", "vita_manual_mark",  # Vita v2, этап 1 (2026-09-28)
 ]
 
 

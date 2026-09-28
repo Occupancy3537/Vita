@@ -155,6 +155,202 @@ def test_compute_ahead_is_higher_than_current_when_food_fixable():
     assert ahead > current
 
 
+# ─────── CHIP_NORM / chip_status (Vita v2, этап 1) ───────
+
+def test_chip_status_good_when_at_or_above_norm():
+    scores = {"recovery_score": 65, "sleep_score": 100, "movement_score": 70, "nutrition_score": 70}
+    status = vita.chip_status(scores, vita.DEFAULT_CHIP_NORM)
+    assert status == {"recovery": "good", "sleep": "good", "move": "good", "food": "good"}
+
+
+def test_chip_status_warn_below_norm():
+    scores = {"recovery_score": 64, "sleep_score": 69, "movement_score": 69, "nutrition_score": 69}
+    status = vita.chip_status(scores, vita.DEFAULT_CHIP_NORM)
+    assert all(v == "warn" for v in status.values())
+
+
+def test_chip_status_none_when_segment_not_scored():
+    scores = {"recovery_score": None, "sleep_score": 80, "movement_score": None, "nutrition_score": 80}
+    status = vita.chip_status(scores, vita.DEFAULT_CHIP_NORM)
+    assert status["recovery"] is None and status["move"] is None
+
+
+def test_chip_status_respects_custom_norm_from_profile():
+    scores = {"recovery_score": 80, "sleep_score": 80, "movement_score": 80, "nutrition_score": 80}
+    custom = {"recovery": 90, "sleep": 70, "move": 70, "food": 70}  # только recovery строже
+    status = vita.chip_status(scores, custom)
+    assert status["recovery"] == "warn" and status["sleep"] == "good"
+
+
+# ─────── build_streaks — вехи/рекорд/atRisk на истории (Vita v2, этап 1) ───────
+
+def _trend_row(day, sleep_min=450):
+    return {"Дата": day, "Чистый_сон_мин": sleep_min}
+
+
+_SODIUM_TARGET = [{"Нутриент": "Натрий", "Колонка_в_Meals": "Натрий", "Категория": "Риск избытка",
+                   "Верхний_предел_UL": "2300", "Единица": "мг"}]
+
+
+def test_build_streaks_counts_consecutive_days_and_record():
+    days = [f"2026-09-{d:02d}" for d in range(1, 11)]  # 10 дней подряд в норме сна
+    rows = [_trend_row(d) for d in days]
+    result = vita.build_streaks(rows, [], [], days[-1])
+    sleep_streak = next(s for s in result["streaks"] if s["key"] == "sleep_zone")
+    assert sleep_streak["count"] == 10
+    assert sleep_streak["record"] == 10
+    assert sleep_streak["next_milestone"] == 14
+
+
+def test_build_streaks_breaks_on_real_gap_without_freeze():
+    """Копилка (STREAK_FREEZE_POOL=2) — общая на все серии: если её уже
+    израсходовали два БОЛЕЕ СВЕЖИХ провала натрия, провал сна 05.09 останется
+    настоящим и порвёт серию, несмотря на существование копилки вообще."""
+    days = [f"2026-09-{d:02d}" for d in range(1, 11)]
+    rows = [_trend_row(d, sleep_min=(300 if d == "2026-09-05" else 450)) for d in days]
+    # два самых свежих провала (по НАТРИЮ, 09 и 10 сентября) съедают копилку
+    # раньше, чем очередь дойдёт до более старого провала сна (05.09)
+    recent_gap_days = {days[-1], days[-2]}
+    meals = [{"Date": f"{d}T08:00", "Натрий": ("3000" if d in recent_gap_days else "500")} for d in days]
+    result = vita.build_streaks(rows, meals, _SODIUM_TARGET, days[-1])
+    sleep_streak = next(s for s in result["streaks"] if s["key"] == "sleep_zone")
+    assert sleep_streak["count"] == 5  # только с 06 по 10 (после провала 05.09, копилка уже занята)
+    assert sleep_streak["record"] == 5  # 06-10 (5 дней) длиннее, чем 01-04 (4 дня) до провала
+    assert result["freezes_available"] == 0
+
+
+def test_build_streaks_freeze_pool_covers_one_recent_gap():
+    """Копилка (STREAK_FREEZE_POOL=2) отдаёт заморозку самому свежему провалу —
+    серия не рвётся, freezes_available уменьшается."""
+    days = [f"2026-09-{d:02d}" for d in range(1, 11)]
+    gap_day = days[-2]  # предпоследний день — провал у самого края (частый сценарий "почти сегодня")
+    rows = [_trend_row(d, sleep_min=(300 if d == gap_day else 450)) for d in days]
+    result = vita.build_streaks(rows, [], [], days[-1])
+    sleep_streak = next(s for s in result["streaks"] if s["key"] == "sleep_zone")
+    assert sleep_streak["count"] == 10  # провал заморожен — серия НЕ прервалась
+    assert result["freezes_available"] == vita.STREAK_FREEZE_POOL - 1
+
+
+def test_build_streaks_missing_data_day_neither_breaks_nor_extends():
+    days = [f"2026-09-{d:02d}" for d in range(1, 6)]
+    rows = [_trend_row(d) for d in days if d != "2026-09-03"]  # 03.09 — строки вообще нет (нет данных)
+    result = vita.build_streaks(rows, [], [], days[-1])
+    sleep_streak = next(s for s in result["streaks"] if s["key"] == "sleep_zone")
+    assert sleep_streak["count"] == 4  # 01,02,04,05 — пропуск дня без данных не считается провалом
+
+
+def test_build_streaks_nutrient_limit_streak_from_meals():
+    days = [f"2026-09-{d:02d}" for d in range(1, 6)]
+    rows = [_trend_row(d) for d in days]
+    meals = [{"Date": f"{d}T08:00", "Натрий": "500"} for d in days]
+    result = vita.build_streaks(rows, meals, _SODIUM_TARGET, days[-1])
+    sodium_streak = next(s for s in result["streaks"] if s["key"] == "Натрий")
+    assert sodium_streak["count"] == 5
+
+
+def test_build_streaks_at_risk_when_close_to_limit():
+    days = [f"2026-09-{d:02d}" for d in range(1, 4)]
+    rows = [_trend_row(d) for d in days]
+    meals = [{"Date": f"{d}T08:00", "Натрий": ("2000" if d == days[-1] else "500")} for d in days]  # 2000/2300 = 87%, "close"
+    result = vita.build_streaks(rows, meals, _SODIUM_TARGET, days[-1])
+    sodium_streak = next(s for s in result["streaks"] if s["key"] == "Натрий")
+    assert sodium_streak["at_risk"] is True
+    assert sodium_streak["status"] == "at_risk"
+
+
+def test_build_streaks_no_history_returns_empty_list():
+    result = vita.build_streaks([], [], [], "2026-09-28")
+    assert result["streaks"] == []
+    assert result["freezes_available"] == vita.STREAK_FREEZE_POOL
+
+
+# ─────── write_day_snapshot / read_day_snapshot (Vita v2, этап 1, п.4) ───────
+# card.vita_day_snapshot — обычная card.* таблица, изолирована схемой
+# card_test (schema()) — отдельная защита не нужна, та же ситуация, что
+# card.lab_request в тикете «оптимизатор сдачи анализов».
+
+from datetime import date
+from app.db import get_conn
+
+
+def test_write_day_snapshot_false_when_no_history_for_date():
+    with get_conn() as conn, conn.cursor() as cur:
+        written = vita.write_day_snapshot(cur, date(1999, 1, 1))
+    assert written is False
+
+
+def test_write_and_read_day_snapshot_roundtrip(monkeypatch):
+    fake_rows_tuple = [(date(2026, 9, 20), {"Восстановление_BodyBattery": 80.0, "ВСР_ночная": 50.0,
+                                             "Чистый_сон_мин": 450.0, "ACWR_Garmin": None, "ACWR_Status": None})]
+    fake_rows_flat = [{"Дата": "2026-09-20", "Восстановление_BodyBattery": "80", "ВСР_ночная": "50",
+                        "Чистый_сон_мин": "450", "ACWR_Garmin": "", "ACWR_Status": ""}]
+    monkeypatch.setattr(vita, "_fetch_history", lambda cur: (fake_rows_tuple, fake_rows_flat, [], []))
+    monkeypatch.setattr(vita, "read_chip_norm", lambda cur: dict(vita.DEFAULT_CHIP_NORM))
+    with get_conn() as conn, conn.cursor() as cur:
+        written = vita.write_day_snapshot(cur, date(2026, 9, 20))
+        conn.commit()
+        snap = vita.read_day_snapshot(cur, date(2026, 9, 20))
+    assert written is True
+    assert snap["date"] == "2026-09-20"
+    assert snap["ring"]["score"] == 100
+    assert snap["chips"]["sleep_min"] == 450.0
+    assert "chip_status" in snap["ring"]
+
+
+def test_read_day_snapshot_none_when_absent():
+    with get_conn() as conn, conn.cursor() as cur:
+        assert vita.read_day_snapshot(cur, date(2000, 1, 1)) is None
+
+
+def test_write_day_snapshot_upserts_on_conflict(monkeypatch):
+    fake_rows_tuple = [(date(2026, 9, 21), {"Восстановление_BodyBattery": 40.0})]
+    fake_rows_flat = [{"Дата": "2026-09-21", "Восстановление_BodyBattery": "40"}]
+    monkeypatch.setattr(vita, "_fetch_history", lambda cur: (fake_rows_tuple, fake_rows_flat, [], []))
+    monkeypatch.setattr(vita, "read_chip_norm", lambda cur: dict(vita.DEFAULT_CHIP_NORM))
+    with get_conn() as conn, conn.cursor() as cur:
+        vita.write_day_snapshot(cur, date(2026, 9, 21))
+        vita.write_day_snapshot(cur, date(2026, 9, 21))  # повторная запись — не дублирует строку
+        conn.commit()
+        cur.execute(f"SELECT count(*) FROM {vita.schema()}.vita_day_snapshot WHERE date = '2026-09-21'")
+        assert cur.fetchone()[0] == 1
+
+
+# ─────── manual marks (Vita v2, этап 1, п.6) ───────
+
+def test_write_manual_mark_rejects_unknown_field():
+    with get_conn() as conn, conn.cursor() as cur:
+        with pytest.raises(ValueError):
+            vita.write_manual_mark(cur, date(2026, 9, 20), "not_a_real_field", True)
+
+
+def test_write_and_read_manual_mark_roundtrip():
+    with get_conn() as conn, conn.cursor() as cur:
+        vita.write_manual_mark(cur, date(2026, 9, 22), "swim_happened", True)
+        conn.commit()
+        marks = vita._read_manual_marks(cur, "2026-09-22")
+    assert marks == {"swim_happened": True}
+
+
+def test_build_assignments_garmin_source_when_watch_saw_the_day():
+    result = vita.build_assignments(cur=None, today={}, state={"no_watch": False})
+    assert result["source"] == "garmin"
+
+
+def test_build_assignments_manual_source_when_marks_exist():
+    with get_conn() as conn, conn.cursor() as cur:
+        vita.write_manual_mark(cur, date(2026, 9, 23), "movement_ok", True)
+        conn.commit()
+        result = vita.build_assignments(cur, {"date": "2026-09-23"}, {"no_watch": True})
+    assert result["source"] == "manual"
+    assert result["movement_ok"] is True
+
+
+def test_build_assignments_none_source_when_no_watch_and_no_marks():
+    with get_conn() as conn, conn.cursor() as cur:
+        result = vita.build_assignments(cur, {"date": "2026-09-24"}, {"no_watch": True})
+    assert result["source"] is None
+
+
 # ─────── _time_of_day ───────
 
 def test_time_of_day_morning():
@@ -382,6 +578,54 @@ def test_vita_login_correct_password_sets_cookie():
     assert va.COOKIE_NAME in r.cookies
 
 
+# ─────── Vita v2, этап 1 — новые поля /vita/today + новые эндпоинты ───────
+
+def test_vita_today_has_v2_fields():
+    r = client.get("/vita/today", cookies=_cookie())
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("chip_status", "streaks", "freezes_available", "assignments"):
+        assert key in body
+    assert "ahead_confidence" in body["ring"]
+
+
+def test_vita_yesterday_401_without_cookie():
+    r = client.get("/vita/yesterday")
+    assert r.status_code == 401
+
+
+def test_vita_yesterday_404_when_no_snapshot(monkeypatch):
+    monkeypatch.setattr(vita, "read_day_snapshot", lambda cur, day: None)
+    r = client.get("/vita/yesterday", cookies=_cookie())
+    assert r.status_code == 404
+
+
+def test_vita_yesterday_200_when_snapshot_exists(monkeypatch):
+    monkeypatch.setattr(vita, "read_day_snapshot", lambda cur, day: {"date": str(day), "ring": {}, "chips": {}, "gate": {}})
+    r = client.get("/vita/yesterday", cookies=_cookie())
+    assert r.status_code == 200
+
+
+def test_vita_manual_mark_401_without_cookie():
+    r = client.post("/vita/manual-mark", json={"date": "2026-09-20", "field_key": "swim_happened", "value": True})
+    assert r.status_code == 401
+
+
+def test_vita_manual_mark_rejects_unknown_field():
+    r = client.post("/vita/manual-mark", cookies=_cookie(),
+                     json={"date": "2026-09-20", "field_key": "bogus", "value": True})
+    assert r.status_code == 400
+
+
+def test_vita_manual_mark_200_and_persists():
+    r = client.post("/vita/manual-mark", cookies=_cookie(),
+                     json={"date": "2026-09-20", "field_key": "swim_happened", "value": True})
+    assert r.status_code == 200
+    with get_conn() as conn, conn.cursor() as cur:
+        marks = vita._read_manual_marks(cur, "2026-09-20")
+    assert marks == {"swim_happened": True}
+
+
 def test_vita_logout_clears_cookie():
     r = client.post("/vita/logout", cookies=_cookie())
     assert r.status_code == 200
@@ -439,6 +683,12 @@ def _patch_dashboards(monkeypatch, *, no_garmin=False, meals_today=2, gate_block
     monkeypatch.setattr(vita, "get_today_dashboard", lambda cur: today)
     monkeypatch.setattr(vita, "get_health_dashboard", lambda cur: health)
     monkeypatch.setattr(vita, "get_today_nutrition", lambda cur: tn)
+    # Vita v2, этап 1: build_today также зовёт _fetch_streak_inputs/read_chip_norm
+    # (нужны cur.description/настоящую БД) — эти 4 теста собирают build_today()
+    # целиком на _FC() (без description), не через реальный курсор, поэтому
+    # мокаем и их тем же способом, что остальные источники выше.
+    monkeypatch.setattr(vita, "_fetch_streak_inputs", lambda cur: ([], [], []))
+    monkeypatch.setattr(vita, "read_chip_norm", lambda cur: dict(vita.DEFAULT_CHIP_NORM))
 
 
 def test_state_morning_no_data_looks_calm_not_failing(monkeypatch):

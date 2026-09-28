@@ -13,105 +13,23 @@
 Это не идеальный контролируемый эксперимент (остальные критерии D+1 тоже
 меняются день ото дня — сон, ВСР и т.п. не подчиняются действию по еде/шагам)
 — это и есть "показать расхождение", а не "доказать точность до балла".
-Переиспользует ТЕ ЖЕ функции, что и живой путь (app/dashboard._build_reasons,
-_baseline_metrics_for_index, _budget_for_day; app/vita._collect_judgments,
-_score_from_judgments, _score_with_segment_fixed) — не second-guess той же
-логики другими порогами.
 
-Две формы истории нужны параллельно (наследие двух разных функций
-dashboard.py, которые исторически читали health.daily_trends по-разному —
-не унифицировано в этом тикете, не тот объём): `_baseline`/`_load_mean`
-(app/dashboard.py, для decision.reasons) ждут list[dict] с "Дата" СТРОКОЙ
-внутри каждого словаря; `_baseline_for`/`_baseline_metrics_for_index` (для
-health.metrics) ждут list[tuple[date, dict]] с датой ОБЪЕКТОМ на первом
-месте. Обе строятся здесь из одного SQL-запроса, каждая — под свою функцию."""
+_fetch_history()/_historical_day_dicts() — общая реконструкция "{today,health}
+для произвольного дня истории" — живёт в app/vita.py (не здесь): её же
+использует app.vita.write_day_snapshot() (снимок дня, Часть «Бэкенд-дельта»
+п.4) — один источник правды для "что мы вообще можем честно узнать про
+прошлый день", не два похожих, но разных."""
 from datetime import timedelta
 
-from psycopg.rows import dict_row
-
-from app.dashboard import (
-    _baseline,
-    _baseline_metrics_for_index,
-    _budget_for_day,
-    _build_reasons,
-    _load_mean,
-    _num,
-)
 from app.vita import (
     _collect_judgments,
+    _fetch_history,
+    _historical_day_dicts,
     _score_from_judgments,
     _score_with_segment_fixed,
 )
 
 CALIBRATION_THRESHOLD_POINTS = 5  # Часть 2 тикета — гейт на выпуск, не косметика
-
-_DAILY_TRENDS_COLS = [
-    "Дата", "Восстановление_BodyBattery", "ВСР_ночная", "ACWR_Garmin", "ACWR_Status",
-    "Тренировка_Ккал", "Чистый_сон_мин", "Оценка_сна_балл", "Эффективность_сна_",
-    "Стресс_дневной_средний", "Шаги_за_вчера", "Пульс_ночной_средний", "VO2_Max",
-]
-
-
-def _fetch_history(cur):
-    cols = ", ".join(f'"{c}"' for c in _DAILY_TRENDS_COLS)
-    cur.execute(f'SELECT {cols} FROM health.daily_trends ORDER BY "Дата" ASC')
-    raw = [dict(zip(_DAILY_TRENDS_COLS, r)) for r in cur.fetchall()]
-    raw = [r for r in raw if r["Дата"]]
-
-    # _baseline_for/_baseline_metrics_for_index (портировано из get_health_dashboard)
-    # НЕ конвертирует значения сами — ждут уже готовые числа в rows[i][1][col],
-    # ровно как get_health_dashboard строит их через _num() при чтении. health.*
-    # колонки — TEXT (наследие Sheets), сырые значения из курсора — строки.
-    rows_tuple = [(r["Дата"], {k: _num(v) for k, v in r.items() if k != "Дата"}) for r in raw]
-    # _baseline/_load_mean (портировано из get_today_dashboard), наоборот,
-    # сами вызывают _num() на каждое значение — им годится и сырая строка.
-    rows_flat = [{**r, "Дата": r["Дата"].isoformat()} for r in raw]
-
-    cur.execute(
-        'SELECT "Date", "Насыщенные жиры", "Натрий", "Добавленный сахар" '
-        'FROM health.meals WHERE "Date" IS NOT NULL'
-    )
-    meals = [{"Date": d.isoformat() if hasattr(d, "isoformat") else str(d),
-              "Насыщенные жиры": fat, "Натрий": na, "Добавленный сахар": sugar}
-             for d, fat, na, sugar in cur.fetchall()]
-
-    targets_cur = cur.connection.cursor(row_factory=dict_row)
-    targets_cur.execute('SELECT * FROM health.nutrient_targets')
-    targets = targets_cur.fetchall()
-
-    return rows_tuple, rows_flat, meals, targets
-
-
-def _reconstruct_day(rows_tuple: list, rows_flat: list[dict], idx: int,
-                      meals: list[dict], targets: list[dict]) -> tuple[dict, dict]:
-    """{today, health}-совместимые словари для дня rows_tuple[idx], теми же
-    формулами, что get_today_dashboard/get_health_dashboard, для
-    произвольного индекса истории, не только последнего дня."""
-    day, row = rows_tuple[idx]
-    day_iso = day.isoformat() if hasattr(day, "isoformat") else str(day)[:10]
-
-    bb = _num(row.get("Восстановление_BodyBattery"))
-    hrv = _num(row.get("ВСР_ночная"))
-    hrv_base = _baseline(rows_flat, "ВСР_ночная", day_iso, 30)
-    hrv_delta = (hrv - hrv_base) if (hrv is not None and hrv_base is not None) else None
-
-    acwr_garmin = _num(row.get("ACWR_Garmin"))
-    acwr_status_g = (str(row.get("ACWR_Status") or "").strip().upper()) or None
-    if acwr_garmin is not None:
-        acwr, acwr_source = acwr_garmin, "garmin"
-    else:
-        acute, chronic = _load_mean(rows_flat, day_iso, 7), _load_mean(rows_flat, day_iso, 28)
-        acwr = round((acute / chronic) * 100) / 100 if (acute is not None and chronic) else None
-        acwr_source = "self" if acwr is not None else None
-    load_high = (acwr_status_g == "HIGH") if acwr_status_g else (acwr is not None and acwr > 1.5)
-
-    reasons = _build_reasons(bb, hrv_delta, acwr, acwr_status_g, acwr_source, load_high)
-    metric_by_key = _baseline_metrics_for_index(rows_tuple, idx)
-    budget = _budget_for_day(meals, targets, day_iso)
-
-    today = {"decision": {"reasons": reasons}, "budget": budget}
-    health = {"metrics": list(metric_by_key.values())}
-    return today, health
 
 
 def historical_ahead_samples(cur, days_back: int = 180) -> list[dict]:
@@ -132,8 +50,8 @@ def historical_ahead_samples(cur, days_back: int = 180) -> list[dict]:
         if cutoff and day < cutoff:
             continue
         try:
-            today_d, health_d = _reconstruct_day(rows_tuple, rows_flat, idx, meals, targets)
-            today_next, health_next = _reconstruct_day(rows_tuple, rows_flat, idx + 1, meals, targets)
+            today_d, health_d = _historical_day_dicts(rows_tuple, rows_flat, idx, meals, targets)
+            today_next, health_next = _historical_day_dicts(rows_tuple, rows_flat, idx + 1, meals, targets)
         except Exception:
             continue
 
