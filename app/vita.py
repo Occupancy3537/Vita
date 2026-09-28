@@ -72,10 +72,14 @@ def _budget_judgment(b: dict) -> str:
 
 
 def _collect_judgments(today: dict, health: dict) -> dict:
-    """Критерии по трём сегментам + общий скор. Прямое наследование состава
-    mapToday() старого дашборда — БЕЗ 4 "пока (сегодня)"-критериев (шаги/
-    стресс/калории/белок "живые"), убранных тикетом «Пересборка вычитанием»
-    как смешивающих закрытое с незакрытым (§5.5 обзора каналов)."""
+    """Критерии по ЧЕТЫРЁМ сегментам (recovery/sleep/move/food) + общий скор.
+    Vita v2, этап 1 (2026-09-28): раньше Body Battery/ВСР (по сути —
+    восстановление) не имели своего сегмента и просто падали в "overall" —
+    v2 заводит отдельный кругляш "Восстановление" (CHIP_NORM.recovery в
+    макете), поэтому им нужна отдельная категория. Группировка теперь по
+    decision.reasons[].segment (app/dashboard.py проставляет его сам) —
+    не строковый поиск "ACWR" in label, как было раньше (тот хак ломался
+    бы на любую будущую правку подписи)."""
     decision = today.get("decision") or {}
     metric_by_key = {m["key"]: m for m in (health.get("metrics") or [])}
     budget = today.get("budget") or []
@@ -85,16 +89,18 @@ def _collect_judgments(today: dict, health: dict) -> dict:
         m = metric_by_key.get(key)
         return m.get("judgment") if m else None
 
-    reason_judgments = [r["judgment"] for r in (decision.get("reasons") or [])]
-    load_judgments = [r["judgment"] for r in (decision.get("reasons") or [])
-                       if "ACWR" in r.get("label", "") or "Нагрузка" in r.get("label", "")]
+    reasons = decision.get("reasons") or []
+    reason_judgments = [r["judgment"] for r in reasons]
+    recovery_judgments = [r["judgment"] for r in reasons if r.get("segment") == "recovery"]
+    move_judgments = [r["judgment"] for r in reasons if r.get("segment") == "move"]
 
     overall = reason_judgments + [x for x in (j("sleep_min"), j("stress")) if x] + limit_judgments
     sleep = [x for x in (j("sleep_min"), j("sleep_score"), j("sleep_eff")) if x]
-    movement = ([j("steps")] if j("steps") else []) + load_judgments
-    nutrition = limit_judgments
+    recovery = recovery_judgments
+    move = ([j("steps")] if j("steps") else []) + move_judgments
+    food = limit_judgments
 
-    return {"overall": overall, "sleep": sleep, "movement": movement, "nutrition": nutrition}
+    return {"overall": overall, "sleep": sleep, "recovery": recovery, "move": move, "food": food}
 
 
 def _scores(today: dict, health: dict) -> dict:
@@ -102,9 +108,64 @@ def _scores(today: dict, health: dict) -> dict:
     return {
         "score": _score_from_judgments(crit["overall"]),
         "sleep_score": _score_from_judgments(crit["sleep"]),
-        "movement_score": _score_from_judgments(crit["movement"]),
-        "nutrition_score": _score_from_judgments(crit["nutrition"]),
+        "recovery_score": _score_from_judgments(crit["recovery"]),
+        "movement_score": _score_from_judgments(crit["move"]),
+        "nutrition_score": _score_from_judgments(crit["food"]),
     }
+
+
+# =====================================================================
+# ring.ahead — прогноз закрытия суток, ЕСЛИ главную подсказку выполнить
+# (Vita v2, этап 1, Часть «Бэкенд-дельта» п.2). Честность обязательна —
+# калибровочный тест на истории (app/vita_calibration.py) — гейт на выпуск,
+# не формальность: систематическое расхождение >5 очков значит "не показывать
+# ahead", а не "починим на лету косметикой".
+# =====================================================================
+
+def _main_action_segment(state: dict, steps: dict, protein: dict) -> Optional[str]:
+    """Тот же приоритет, что build_nudge() ниже (не переизобретён отдельно —
+    возвращает СЕГМЕНТ вместо готового текста). Пробелы в данных (нет часов/
+    нет еды) не дают предсказания — "как будто появились данные" не то же
+    самое, что "выполнил подсказку"."""
+    if state["no_watch"] or state["no_food"] or state["time_of_day"] == "evening":
+        return None
+    left = None
+    if protein.get("target") is not None and protein.get("consumed") is not None:
+        left = protein["target"] - protein["consumed"]
+    behind_pace = steps.get("behind_pace")
+    if left and left > 20:
+        return "food"
+    if behind_pace:
+        return "move"
+    return None
+
+
+def _score_with_segment_fixed(crit: dict, segment: str) -> Optional[int]:
+    """Виртуально выполняет главную подсказку: ХУДШЕЕ суждение указанного
+    сегмента заменяется на "good" (одно вхождение в overall — то же суждение,
+    что реально входит в общий скор, не отдельный пересчёт весов)."""
+    overall = list(crit["overall"])
+    seg_judgments = crit.get(segment) or []
+    worst = "bad" if "bad" in seg_judgments else ("warn" if "warn" in seg_judgments else None)
+    if worst is None:
+        return _score_from_judgments(overall)
+    try:
+        idx = overall.index(worst)
+    except ValueError:
+        return _score_from_judgments(overall)
+    overall[idx] = "good"
+    return _score_from_judgments(overall)
+
+
+def compute_ahead(today: dict, health: dict, state: dict, steps: dict, protein: dict) -> Optional[int]:
+    crit = _collect_judgments(today, health)
+    current = _score_from_judgments(crit["overall"])
+    if current is None:
+        return None
+    segment = _main_action_segment(state, steps, protein)
+    if segment is None:
+        return current
+    return _score_with_segment_fixed(crit, segment)
 
 
 # =====================================================================
@@ -362,6 +423,7 @@ def build_today(cur) -> dict:
     protein = levers.get("protein") or {}
     nudge = build_nudge(state, steps, protein, timeutil.now_local())
     scores = _scores(today, health)
+    ahead = compute_ahead(today, health, state, steps, protein)
     longevity = today.get("longevity") or {}
     bioage_days = round((longevity.get("affects_today_total") or 0) * 365, 1) if longevity else None
 
@@ -369,7 +431,7 @@ def build_today(cur) -> dict:
         "date": today.get("date"),
         "state": state,
         "gate": gate,
-        "ring": {**scores, "bioage_days": bioage_days},
+        "ring": {**scores, "ahead": ahead, "bioage_days": bioage_days},
         "chips": build_chips(today, health, tn),
         "nudge": nudge,
     }

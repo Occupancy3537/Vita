@@ -160,6 +160,36 @@ def _baseline_for(rows, col_idx, upto_idx, window_days, min_points):
 BASE_WINDOWS = [(30, 10), (7, 4)]
 
 
+def _baseline_metrics_for_index(rows: list, idx: int) -> dict:
+    """METRICS (sleep_min/sleep_score/sleep_eff/steps/hrv/stress/...) для
+    ПРОИЗВОЛЬНОГО дня истории (rows[idx]), не только "сегодня" (rows[-1]) —
+    извлечено из get_health_dashboard (Vita v2, этап 1, 2026-09-28) специально
+    для калибровочного теста ring.ahead (app/vita_calibration.py): ему нужны
+    те же baseline/judgment за ПРОШЛЫЕ дни, тем же способом, что "сегодня" —
+    не отдельная упрощённая копия порогов на второй лад."""
+    _, row = rows[idx]
+    out = {}
+    for m in METRICS:
+        value = row.get(m["col"])
+        base = None
+        for window_days, min_points in BASE_WINDOWS:
+            base = _baseline_for(rows, m["col"], idx, window_days, min_points)
+            if base:
+                break
+        delta_abs = (value - base["mean"]) if (value is not None and base) else None
+        delta_pct = (delta_abs / base["mean"] * 100) if (delta_abs is not None and base["mean"]) else None
+        out[m["key"]] = {
+            "key": m["key"], "label": m["label"], "unit": m["unit"],
+            "value": _r_smart(value), "baseline": _r_smart(base["mean"]) if base else None,
+            "baseline_days": base["days"] if base else None, "baseline_n": base["n"] if base else None,
+            "delta_abs": _r_smart(delta_abs), "delta_pct": round(delta_pct) if delta_pct is not None else None,
+            "z": round((value - base["mean"]) / base["std"], 2) if (value is not None and base and base["std"]) else None,
+            "direction": m["direction"], "judgment": _judge(m["direction"], delta_abs, m["min_abs_delta"]),
+            "kind": "baseline",
+        }
+    return out
+
+
 def get_health_dashboard(cur) -> dict:
     cols_needed = sorted(set(COL.values()))
     col_select = ", ".join(f'"{c}"' for c in cols_needed)
@@ -177,28 +207,8 @@ def get_health_dashboard(cur) -> dict:
     last_date, last_row = rows[-1]
     today_parsed = {k: last_row.get(col) for k, col in COL.items()}
 
-    metrics = []
-    metric_by_key = {}
-    for m in METRICS:
-        value = last_row.get(m["col"])
-        base = None
-        for window_days, min_points in BASE_WINDOWS:
-            base = _baseline_for(rows, m["col"], len(rows) - 1, window_days, min_points)
-            if base:
-                break
-        delta_abs = (value - base["mean"]) if (value is not None and base) else None
-        delta_pct = (delta_abs / base["mean"] * 100) if (delta_abs is not None and base["mean"]) else None
-        entry = {
-            "key": m["key"], "label": m["label"], "unit": m["unit"],
-            "value": _r_smart(value), "baseline": _r_smart(base["mean"]) if base else None,
-            "baseline_days": base["days"] if base else None, "baseline_n": base["n"] if base else None,
-            "delta_abs": _r_smart(delta_abs), "delta_pct": round(delta_pct) if delta_pct is not None else None,
-            "z": round((value - base["mean"]) / base["std"], 2) if (value is not None and base and base["std"]) else None,
-            "direction": m["direction"], "judgment": _judge(m["direction"], delta_abs, m["min_abs_delta"]),
-            "kind": "baseline",
-        }
-        metrics.append(entry)
-        metric_by_key[m["key"]] = entry
+    metrics = list(_baseline_metrics_for_index(rows, len(rows) - 1).values())
+    metric_by_key = {m["key"]: m for m in metrics}
 
     for m in REFERENCE_METRICS:
         value = last_row.get(m["col"])
@@ -900,6 +910,78 @@ def _fmt_human(v) -> str:
     return str(int(v)) if float(v).is_integer() else str(v)
 
 
+def _budget_for_day(meals: list[dict], targets: list[dict], day_iso: str) -> list[dict]:
+    """Бюджет нутриентов (лимиты/цели) за ОДИН календарный день — извлечено
+    из get_today_dashboard (Vita v2, этап 1, 2026-09-28) в чистую функцию:
+    та же логика нужна калибровочному тесту ring.ahead (app/vita_calibration.py)
+    за ПРОШЛЫЕ дни, не только за "сегодня". `meals` здесь — любой список с
+    нужным днём внутри (get_today_dashboard передаёт узкое 3-дневное окно
+    для "сегодня", калибровка — свой более широкий запрос за месяцы)."""
+    day_meals = [m for m in meals if m.get("Date") and (m["Date"] or "")[:10] == day_iso]
+
+    def _sum_col(col):
+        return sum((_num(m.get(col)) or 0) for m in day_meals)
+
+    budget = []
+    for t in targets:
+        name = t.get("Нутриент")
+        if name not in _BUDGET_KEYS:
+            continue
+        col = t.get("Колонка_в_Meals")
+        if not col:
+            continue
+        is_limit = "Риск избытка" in (t.get("Категория") or "")
+        rda, ul = _parse_target_num(t.get("Норма_RDA_AI")), _parse_target_num(t.get("Верхний_предел_UL"))
+        cap = ul if is_limit else rda
+        if not cap:
+            continue
+        consumed = round(_sum_col(col) * 100) / 100
+        pct = round((consumed / cap) * 100)
+        budget.append({
+            "label": name, "unit": t.get("Единица") or "", "kind": "limit" if is_limit else "goal",
+            "consumed": consumed, "cap": cap, "pct": pct,
+            "remaining": round((cap - consumed) * 100) / 100,
+            "status": (("over" if pct > 100 else "close" if pct >= 80 else "ok") if is_limit
+                       else ("done" if pct >= 100 else "partial" if pct >= 60 else "low")),
+        })
+    budget.sort(key=lambda b: (0 if b["kind"] == "limit" else 1, -b["pct"]))
+    return budget
+
+
+def _build_reasons(bb, hrv_delta, acwr, acwr_status_g, acwr_source, load_high) -> list[dict]:
+    """Причины вердикта дня — извлечено из get_today_dashboard (Vita v2, этап 1,
+    2026-09-28) в чистую функцию: калибровочный тест ring.ahead
+    (app/vita_calibration.py) прогоняет ЭТУ ЖЕ функцию на исторических bb/hrv/
+    acwr за прошлые дни — не дублирует пороги judgment на второй лад, единый
+    источник правды что для "сегодня", что для истории.
+
+    "segment" — привязка причины к сегменту экрана (sleep/recovery/move/food),
+    чтобы потребители (app/vita.py) группировали по нему напрямую, а не
+    строковым поиском "ACWR" in label (был именно такой хак в
+    _collect_judgments — хрупкий на любой будущий рефакторинг подписи).
+    Body Battery/ВСР — восстановление, ACWR/Нагрузка — движение (тренировочная
+    нагрузка). Сна и еды здесь нет — их причины приходят из health.metrics/
+    budget, не из decision.reasons."""
+    reasons = []
+    if bb is not None:
+        reasons.append({"label": "Body Battery", "value": bb, "judgment": "good" if bb >= 70 else "neutral" if bb >= 40 else "bad",
+                         "segment": "recovery"})
+    if hrv_delta is not None:
+        reasons.append({
+            "label": "ВСР к базе", "value": f"{'+' if hrv_delta > 0 else ''}{round(hrv_delta * 10) / 10} мс",
+            "judgment": "neutral" if abs(hrv_delta) < 6 else ("good" if hrv_delta > 0 else "bad"),
+            "segment": "recovery",
+        })
+    if acwr is not None:
+        reasons.append({
+            "label": "ACWR (Garmin)" if acwr_source == "garmin" else "Нагрузка 7д/28д",
+            "value": f"{acwr} · {acwr_status_g}" if acwr_status_g else acwr,
+            "judgment": "bad" if load_high else ("neutral" if (acwr_status_g == "LOW" or acwr < 0.8) else "good"),
+            "segment": "move",
+        })
+    return reasons
+
+
 def get_today_dashboard(cur) -> dict:
     cur.execute('SELECT d.*, to_char(d."Дата", \'YYYY-MM-DD\') AS "Дата" FROM health.daily_trends d ORDER BY d."Дата"')
     daily = _rows_as_dicts(cur)
@@ -962,21 +1044,7 @@ def get_today_dashboard(cur) -> dict:
     load_high = (acwr_status_g == "HIGH") if acwr_status_g else (acwr is not None and acwr > 1.5)
 
     gate = _load_gate(pstate, profile)
-
-    reasons = []
-    if bb is not None:
-        reasons.append({"label": "Body Battery", "value": bb, "judgment": "good" if bb >= 70 else "neutral" if bb >= 40 else "bad"})
-    if hrv_delta is not None:
-        reasons.append({
-            "label": "ВСР к базе", "value": f"{'+' if hrv_delta > 0 else ''}{round(hrv_delta * 10) / 10} мс",
-            "judgment": "neutral" if abs(hrv_delta) < 6 else ("good" if hrv_delta > 0 else "bad"),
-        })
-    if acwr is not None:
-        reasons.append({
-            "label": "ACWR (Garmin)" if acwr_source == "garmin" else "Нагрузка 7д/28д",
-            "value": f"{acwr} · {acwr_status_g}" if acwr_status_g else acwr,
-            "judgment": "bad" if load_high else ("neutral" if (acwr_status_g == "LOW" or acwr < 0.8) else "good"),
-        })
+    reasons = _build_reasons(bb, hrv_delta, acwr, acwr_status_g, acwr_source, load_high)
 
     readiness = 0
     if bb is not None:
@@ -1153,37 +1221,11 @@ def get_today_dashboard(cur) -> dict:
     # =====================================================================
     # 3. БЮДЖЕТ ДНЯ
     # =====================================================================
+    budget = _budget_for_day(meals, targets, today_iso)
+
     today_meals = [m for m in meals if m.get("Date") and (m["Date"] or "")[:10] == today_iso]
-
-    def _sum_col(col):
-        return sum((_num(m.get(col)) or 0) for m in today_meals)
-
-    budget = []
-    for t in targets:
-        name = t.get("Нутриент")
-        if name not in _BUDGET_KEYS:
-            continue
-        col = t.get("Колонка_в_Meals")
-        if not col:
-            continue
-        is_limit = "Риск избытка" in (t.get("Категория") or "")
-        rda, ul = _parse_target_num(t.get("Норма_RDA_AI")), _parse_target_num(t.get("Верхний_предел_UL"))
-        cap = ul if is_limit else rda
-        if not cap:
-            continue
-        consumed = round(_sum_col(col) * 100) / 100
-        pct = round((consumed / cap) * 100)
-        budget.append({
-            "label": name, "unit": t.get("Единица") or "", "kind": "limit" if is_limit else "goal",
-            "consumed": consumed, "cap": cap, "pct": pct,
-            "remaining": round((cap - consumed) * 100) / 100,
-            "status": (("over" if pct > 100 else "close" if pct >= 80 else "ok") if is_limit
-                       else ("done" if pct >= 100 else "partial" if pct >= 60 else "low")),
-        })
-    budget.sort(key=lambda b: (0 if b["kind"] == "limit" else 1, -b["pct"]))
-
-    kcal_today = round(_sum_col("Calories"))
-    protein_today = round(_sum_col("Proteins"))
+    kcal_today = round(sum((_num(m.get("Calories")) or 0) for m in today_meals))
+    protein_today = round(sum((_num(m.get("Proteins")) or 0) for m in today_meals))
 
     # =====================================================================
     # 4. ПЛАН НЕДЕЛИ

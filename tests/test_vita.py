@@ -64,6 +64,97 @@ def test_budget_judgment_goal_kind_is_always_good():
     assert vita._budget_judgment({"kind": "goal", "status": "over", "label": "Клетчатка"}) == "good"
 
 
+# ─────── _collect_judgments — 4 сегмента (Vita v2, этап 1) ───────
+
+def _decision_reasons(bb_judgment=None, hrv_judgment=None, move_judgment=None):
+    reasons = []
+    if bb_judgment:
+        reasons.append({"label": "Body Battery", "value": 80, "judgment": bb_judgment, "segment": "recovery"})
+    if hrv_judgment:
+        reasons.append({"label": "ВСР к базе", "value": "+2 мс", "judgment": hrv_judgment, "segment": "recovery"})
+    if move_judgment:
+        reasons.append({"label": "ACWR (Garmin)", "value": "1.2", "judgment": move_judgment, "segment": "move"})
+    return reasons
+
+
+def test_collect_judgments_recovery_segment_from_reasons():
+    today = {"decision": {"reasons": _decision_reasons(bb_judgment="bad", hrv_judgment="good")}, "budget": []}
+    crit = vita._collect_judgments(today, {"metrics": []})
+    assert crit["recovery"] == ["bad", "good"]
+
+
+def test_collect_judgments_move_segment_combines_steps_and_acwr_reason():
+    today = {"decision": {"reasons": _decision_reasons(move_judgment="bad")}, "budget": []}
+    health = {"metrics": [{"key": "steps", "judgment": "warn"}]}
+    crit = vita._collect_judgments(today, health)
+    assert sorted(crit["move"]) == ["bad", "warn"]
+
+
+def test_collect_judgments_food_segment_is_budget_limits_only():
+    today = {"decision": {"reasons": []}, "budget": [
+        {"kind": "limit", "status": "over", "label": "Натрий"},
+        {"kind": "goal", "status": "over", "label": "Клетчатка"},
+    ]}
+    crit = vita._collect_judgments(today, {"metrics": []})
+    assert crit["food"] == ["bad"]  # Натрий клинический -> bad; Клетчатка -- goal, не считается
+
+
+def test_scores_includes_recovery_score():
+    today = {"decision": {"reasons": _decision_reasons(bb_judgment="good", hrv_judgment="good")}, "budget": []}
+    scores = vita._scores(today, {"metrics": []})
+    assert scores["recovery_score"] == 100
+
+
+# ─────── ring.ahead — виртуальное выполнение главной подсказки ───────
+
+def test_main_action_segment_food_when_protein_gap_large():
+    state = {"no_watch": False, "no_food": False, "time_of_day": "day"}
+    steps = {"behind_pace": False}
+    protein = {"target": 160, "consumed": 100}
+    assert vita._main_action_segment(state, steps, protein) == "food"
+
+
+def test_main_action_segment_move_when_behind_pace_and_protein_ok():
+    state = {"no_watch": False, "no_food": False, "time_of_day": "day"}
+    steps = {"behind_pace": True}
+    protein = {"target": 160, "consumed": 155}
+    assert vita._main_action_segment(state, steps, protein) == "move"
+
+
+def test_main_action_segment_none_when_no_watch_or_no_food():
+    steps, protein = {"behind_pace": True}, {"target": 160, "consumed": 50}
+    assert vita._main_action_segment({"no_watch": True, "no_food": False, "time_of_day": "day"}, steps, protein) is None
+    assert vita._main_action_segment({"no_watch": False, "no_food": True, "time_of_day": "day"}, steps, protein) is None
+
+
+def test_main_action_segment_none_when_evening():
+    state = {"no_watch": False, "no_food": False, "time_of_day": "evening"}
+    assert vita._main_action_segment(state, {"behind_pace": True}, {"target": None, "consumed": None}) is None
+
+
+def test_score_with_segment_fixed_flips_worst_judgment_to_good():
+    crit = {"overall": ["bad", "good", "warn"], "food": ["bad"], "move": ["warn"]}
+    fixed = vita._score_with_segment_fixed(crit, "food")
+    # overall становится ["good","good","warn"] -> только warn-штраф
+    assert fixed == vita._score_from_judgments(["good", "good", "warn"])
+
+
+def test_compute_ahead_equals_current_when_no_actionable_segment():
+    today = {"decision": {"reasons": _decision_reasons(bb_judgment="good")}, "budget": []}
+    state = {"no_watch": False, "no_food": False, "time_of_day": "evening"}
+    ahead = vita.compute_ahead(today, {"metrics": []}, state, {"behind_pace": False}, {"target": None, "consumed": None})
+    assert ahead == 100
+
+
+def test_compute_ahead_is_higher_than_current_when_food_fixable():
+    today = {"decision": {"reasons": []}, "budget": [{"kind": "limit", "status": "over", "label": "Натрий"}]}
+    state = {"no_watch": False, "no_food": False, "time_of_day": "day"}
+    protein = {"target": 160, "consumed": 100}
+    current = vita._score_from_judgments(vita._collect_judgments(today, {"metrics": []})["overall"])
+    ahead = vita.compute_ahead(today, {"metrics": []}, state, {"behind_pace": False}, protein)
+    assert ahead > current
+
+
 # ─────── _time_of_day ───────
 
 def test_time_of_day_morning():

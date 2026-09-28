@@ -156,6 +156,61 @@ def test_baseline_for_insufficient_points_returns_none():
     assert _baseline_for(rows, "x", 1, 30, 10) is None
 
 
+# ─────── _build_reasons / _budget_for_day / _baseline_metrics_for_index ───────
+# Vita v2, этап 1 (2026-09-28) — извлечены из get_today_dashboard/
+# get_health_dashboard в чистые функции: и живой путь, и калибровка ring.ahead
+# на истории (app/vita_calibration.py) вызывают ИХ ЖЕ, не второй набор порогов.
+
+from app.dashboard import _budget_for_day, _baseline_metrics_for_index, _build_reasons
+
+
+def test_build_reasons_body_battery_and_hrv_are_recovery_segment():
+    reasons = _build_reasons(bb=80, hrv_delta=2.0, acwr=None, acwr_status_g=None,
+                              acwr_source=None, load_high=False)
+    labels = {r["label"]: r["segment"] for r in reasons}
+    assert labels["Body Battery"] == "recovery"
+    assert labels["ВСР к базе"] == "recovery"
+
+
+def test_build_reasons_acwr_is_move_segment():
+    reasons = _build_reasons(bb=None, hrv_delta=None, acwr=1.6, acwr_status_g="HIGH",
+                              acwr_source="garmin", load_high=True)
+    assert reasons[0]["segment"] == "move"
+    assert reasons[0]["judgment"] == "bad"
+
+
+def test_build_reasons_empty_when_no_inputs():
+    assert _build_reasons(None, None, None, None, None, False) == []
+
+
+def test_budget_for_day_over_clinical_limit_marks_status_over():
+    meals = [{"Date": "2026-09-20T08:00", "Натрий": "3000"}]
+    targets = [{"Нутриент": "Натрий", "Колонка_в_Meals": "Натрий", "Категория": "Риск избытка",
+                "Верхний_предел_UL": "2300", "Единица": "мг"}]
+    budget = _budget_for_day(meals, targets, "2026-09-20")
+    assert len(budget) == 1
+    assert budget[0]["status"] == "over" and budget[0]["kind"] == "limit"
+
+
+def test_budget_for_day_only_counts_matching_calendar_day():
+    meals = [{"Date": "2026-09-19T08:00", "Натрий": "3000"}, {"Date": "2026-09-20T08:00", "Натрий": "500"}]
+    targets = [{"Нутриент": "Натрий", "Колонка_в_Meals": "Натрий", "Категория": "Риск избытка",
+                "Верхний_предел_UL": "2300", "Единица": "мг"}]
+    budget = _budget_for_day(meals, targets, "2026-09-20")
+    assert budget[0]["consumed"] == 500.0  # не 3500 — 19.09 не в этом дне
+
+
+def test_baseline_metrics_for_index_works_for_a_past_day_not_only_last():
+    today = date(2026, 9, 20)
+    rows = [(today - timedelta(days=i), {"ВСР_ночная": 50.0}) for i in range(20, 0, -1)]
+    rows.append((today, {"ВСР_ночная": 65.0}))  # последний день — выброс, не должен попасть в базу
+    metrics_at_last = _baseline_metrics_for_index(rows, len(rows) - 1)
+    metrics_mid = _baseline_metrics_for_index(rows, 10)
+    assert metrics_at_last["hrv"]["value"] == 65.0
+    assert metrics_at_last["hrv"]["baseline"] == 50.0
+    assert metrics_mid["hrv"]["value"] == 50.0  # день из середины истории тоже считается, не только последний
+
+
 def test_dashboard_health_endpoint_shape():
     """Бьёт по реальной health.daily_trends — проверяет форму, не цифры (эти
     меняются каждый день, а health.anomaly_log вообще пока пуст — заполнится
