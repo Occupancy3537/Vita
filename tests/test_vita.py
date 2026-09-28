@@ -148,7 +148,7 @@ def test_build_recovery_detail_computes_hrv_averages(monkeypatch):
                          _fake_hrv_history([40, 41, 42, 43, 44, 45, 46]) if cols == ["ВСР_ночная"]
                          else [{"date": "2026-09-28", "Пульс_ночной_средний": 54}])
     monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [])
-    today = {"acwr": 0.9, "acwr_status": "LOW", "load_high": False}
+    today = {"decision": {"acwr": 0.9, "acwr_status": "LOW", "load_high": False}}
     out = vita.build_recovery_detail(_FC(), today, {"blocked": False})
     assert out["hrv_last"] == 46
     assert out["hrv_avg7"] == 43.0
@@ -160,7 +160,7 @@ def test_build_recovery_detail_computes_hrv_averages(monkeypatch):
 def test_build_recovery_detail_load_high_overrides_coach(monkeypatch):
     monkeypatch.setattr(vita, "_recent_daily_values", lambda cur, cols, days: [])
     monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [])
-    out = vita.build_recovery_detail(_FC(), {"acwr": 2.0, "acwr_status": "HIGH", "load_high": True},
+    out = vita.build_recovery_detail(_FC(), {"decision": {"acwr": 2.0, "acwr_status": "HIGH", "load_high": True}},
                                       {"blocked": True, "label": "щадящий режим · L5/S1"})
     assert "Нагрузка выше обычного" in out["coach"]
     assert "щадящий режим" in out["coach"]
@@ -168,31 +168,45 @@ def test_build_recovery_detail_load_high_overrides_coach(monkeypatch):
 
 
 def test_build_sleep_detail_flags_shorter_than_average(monkeypatch):
-    history = [{"date": f"2026-09-{i+1:02d}", "Чистый_сон_мин": 420, "Глубокий_сон_мин": 70,
-                "REM_сон_мин": 90, "Эффективность_сна_": 88} for i in range(14)]
+    # Проверено на реальных данных (2026-09-28): Легкий+Глубокий+REM = Чистый_сон_мин.
+    history = [{"date": f"2026-09-{i+1:02d}", "Чистый_сон_мин": 420, "Легкий_сон_мин": 220,
+                "Глубокий_сон_мин": 110, "REM_сон_мин": 90, "Бодрствование_мин": 8} for i in range(14)]
     monkeypatch.setattr(vita, "_recent_daily_values", lambda cur, cols, days: history)
     monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [])
-    out = vita.build_sleep_detail(_FC(), sleep_min_today=380)
+    out = vita.build_sleep_detail(_FC(), sleep_min_today=380, sleep_quality_today=79.0)
     assert out["avg14_min"] == 420
     assert out["delta_min"] == -40
     assert "Короче среднего" in out["coach"]
-    assert out["deep_min"] == 70 and out["rem_min"] == 90 and out["efficiency_pct"] == 88
+    assert out["sleep_score"] == 79.0
+    assert out["light_min"] == 220 and out["deep_min"] == 110 and out["rem_min"] == 90 and out["awake_min"] == 8
     assert len(out["history"]) == 14 and out["history"][0]["hours"] == 7.0
 
 
 def test_build_sleep_detail_no_history_is_honest_not_fake():
-    out = vita.build_sleep_detail(_FC(), sleep_min_today=400)
+    out = vita.build_sleep_detail(_FC(), sleep_min_today=400, sleep_quality_today=None)
     assert out["avg14_min"] is None and out["delta_min"] is None
     assert "не хватает" in out["coach"]
+    assert out["sleep_score"] is None
 
 
 def test_build_move_detail_uses_gate_for_coach(monkeypatch):
     monkeypatch.setattr(vita, "_recent_daily_values", lambda cur, cols, days: [])
     monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [])
     steps = {"now_steps": 4200, "target": 12000, "status_word": "в темпе", "behind_pace": False}
-    out = vita.build_move_detail(_FC(), steps, {"blocked": True, "label": "щадящий режим"})
+    today = {"decision": {"acwr": 0.9, "acwr_status": "LOW"}}
+    out = vita.build_move_detail(_FC(), today, steps, {"blocked": True, "label": "щадящий режим"})
     assert out["steps_now"] == 4200 and out["steps_target"] == 12000
+    assert out["acwr"] == 0.9 and out["acwr_status"] == "LOW"
+    assert out["workouts"] == []  # живая жалоба: раньше тренировки вообще не показывались нигде
     assert "щадящего режима" in out["coach"]
+
+
+def test_todays_workouts_skips_empty_slots(monkeypatch):
+    class _WorkoutCur(_FC):
+        def fetchone(self):
+            return ("Бег", "32", "Нет", "", None, "0")
+    out = vita._todays_workouts(_WorkoutCur())
+    assert out == [{"type": "Бег", "minutes": 32}]
 
 
 def test_build_food_topic_detail_returns_publications_and_heatmap(monkeypatch):
@@ -289,6 +303,29 @@ def test_chip_status_respects_custom_norm_from_profile():
     custom = {"recovery": 90, "sleep": 70, "move": 70, "food": 70}  # только recovery строже
     status = vita.chip_status(scores, custom)
     assert status["recovery"] == "warn" and status["sleep"] == "good"
+
+
+def test_chip_status_uses_real_garmin_numbers_for_sleep_and_recovery():
+    """Живая жалоба Влада (2026-09-28): «сон 7:16 — это 100, а 8:00 будет
+    120?» — кругляши «Сон»/«Заряд» красятся судейским скором (100 при любом
+    "не плохо"), а не настоящим числом Гармина. sleep_score/recovery_score
+    в судействе тут вообще 100 (никакого bad/warn), но реальный Body
+    Battery=60 и Оценка сна=65 — НИЖЕ порога, статус должен быть warn."""
+    scores = {"recovery_score": 100, "sleep_score": 100, "movement_score": 100, "nutrition_score": 100}
+    chips = {"energy": 60, "sleep_quality": 65}  # оба ниже DEFAULT_CHIP_NORM (65/70)
+    status = vita.chip_status(scores, vita.DEFAULT_CHIP_NORM, chips)
+    assert status["recovery"] == "warn"  # 60 < 65
+    assert status["sleep"] == "warn"     # 65 < 70
+    assert status["move"] == "good" and status["food"] == "good"  # для них судейский скор остаётся
+
+
+def test_chip_status_falls_back_to_judgment_score_when_no_garmin_number():
+    """Часы не дали Body Battery/Оценку сна сегодня — не падаем на None,
+    используем прежний судейский скор (честная деградация, не «нет данных»
+    там, где judgment-формула вообще-то что-то знает)."""
+    scores = {"recovery_score": 80, "sleep_score": 80, "movement_score": 80, "nutrition_score": 80}
+    status = vita.chip_status(scores, vita.DEFAULT_CHIP_NORM, {"energy": None, "sleep_quality": None})
+    assert status["recovery"] == "good" and status["sleep"] == "good"
 
 
 # ─────── build_streaks — вехи/рекорд/atRisk на истории (Vita v2, этап 1) ───────
@@ -474,6 +511,17 @@ def test_time_of_day_evening():
     assert vita._time_of_day(datetime(2026, 9, 26, 21, 30)) == "evening"
 
 
+def test_time_of_day_1936_is_still_day_not_evening():
+    """Живой баг (2026-09-28): день закрывался уже в 19:36 — «день закрыт на
+    96, а если я ещё что-то съем?» Порог сдвинут на 21 (из примера в
+    докстринге), 19:36 должно остаться днём."""
+    assert vita._time_of_day(datetime(2026, 9, 28, 19, 36)) == "day"
+
+
+def test_time_of_day_boundary_21_is_evening():
+    assert vita._time_of_day(datetime(2026, 9, 26, 21, 0)) == "evening"
+
+
 def test_time_of_day_boundary_11_is_day_not_morning():
     assert vita._time_of_day(datetime(2026, 9, 26, 11, 0)) == "day"
 
@@ -582,6 +630,14 @@ def test_chips_hrv_trend_from_judgment():
     ch = vita.build_chips(_today(), health, {"summary": {"macros": {"proteins": {"consumed": "62"}}}})
     assert ch["hrv"]["trend"] == "растёт"
     assert ch["protein_consumed"] == 62.0
+
+
+def test_chips_sleep_quality_is_garmin_sleep_score_not_duration():
+    health = _health(metrics=[{"key": "sleep_min", "value": 436, "judgment": "good"},
+                               {"key": "sleep_score", "value": 86.0, "judgment": "neutral"}])
+    ch = vita.build_chips(_today(), health, {"summary": {"macros": {"proteins": {}}}})
+    assert ch["sleep_min"] == 436
+    assert ch["sleep_quality"] == 86.0
 
 
 # ─────── _short_meal_label / _dish_sources ───────
@@ -1035,8 +1091,8 @@ def test_vita_topic_sleep_200_has_expected_keys():
     r = client.get("/vita/topic/sleep", cookies=_cookie())
     assert r.status_code == 200
     body = r.json()
-    for key in ("last_night_min", "avg14_min", "delta_min", "history", "deep_min", "rem_min",
-                "efficiency_pct", "coach", "publications"):
+    for key in ("last_night_min", "avg14_min", "delta_min", "sleep_score", "history",
+                "light_min", "deep_min", "rem_min", "awake_min", "coach", "publications"):
         assert key in body
 
 
@@ -1044,7 +1100,8 @@ def test_vita_topic_move_200_has_expected_keys():
     r = client.get("/vita/topic/move", cookies=_cookie())
     assert r.status_code == 200
     body = r.json()
-    for key in ("steps_now", "steps_target", "history_daily", "coach", "publications"):
+    for key in ("steps_now", "steps_target", "acwr", "acwr_status", "workouts", "history_daily",
+                "coach", "publications"):
         assert key in body
 
 

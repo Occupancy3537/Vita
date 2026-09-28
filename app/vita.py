@@ -261,7 +261,13 @@ def build_recovery_detail(cur, today: dict, gate: dict) -> dict:
     history = _recent_daily_values(cur, ["ВСР_ночная"], 30)
     vals = [r["ВСР_ночная"] for r in history if r["ВСР_ночная"] is not None]
     rhr_row = _recent_daily_values(cur, ["Пульс_ночной_средний"], 1)
-    acwr, acwr_status, load_high = today.get("acwr"), today.get("acwr_status"), today.get("load_high")
+    # Живой баг, пойманный на самом себе (2026-09-28): acwr/acwr_status/
+    # load_high лежат ВНУТРИ today["decision"] (dashboard.py::get_today_dashboard,
+    # там же, где gate/reasons — build_gate() уже читал decision правильно,
+    # эта функция — нет), не на верхнем уровне today. Читал плоско, всегда
+    # получал None, хотя ACWR реально есть (0 · LOW сегодня).
+    decision = today.get("decision") or {}
+    acwr, acwr_status, load_high = decision.get("acwr"), decision.get("acwr_status"), decision.get("load_high")
     if load_high:
         coach = "Нагрузка выше обычного — восстановление сейчас в приоритете."
     elif acwr_status == "LOW":
@@ -283,8 +289,19 @@ def build_recovery_detail(cur, today: dict, gate: dict) -> dict:
     }
 
 
-def build_sleep_detail(cur, sleep_min_today: Optional[int]) -> dict:
-    history_min = _recent_daily_values(cur, ["Чистый_сон_мин", "Глубокий_сон_мин", "REM_сон_мин", "Эффективность_сна_"], 14)
+def build_sleep_detail(cur, sleep_min_today: Optional[int], sleep_quality_today: Optional[float]) -> dict:
+    """Живая поправка Влада (2026-09-28): «должен быть быстрый глубокий и
+    РЕМ в сумме с пробуждениями это весь сон» — проверено на реальных
+    данных: Легкий_сон_мин + Глубокий_сон_мин + REM_сон_мин = Чистый_сон_мин
+    ТОЧНО (28.09: 184+117+135=436), и Время_в_кровати_мин − Бодрствование_
+    мин = тот же Чистый_сон_мин. Значит "быстрый" — это Лёгкий сон (третья,
+    ранее не показанная стадия), не синоним REM — показываю оба явно, а не
+    гадаю дальше. "Качество" (Эффективность_сна_) часто пусто (см. скриншот
+    Влада — "—"); Оценка_сна_балл (реальный Гарминовский Sleep Score, теперь
+    же красит кругляш «Сон», см. build_chips) есть почти всегда — показываю
+    её вместо "Качества", не рядом."""
+    history_min = _recent_daily_values(
+        cur, ["Чистый_сон_мин", "Легкий_сон_мин", "Глубокий_сон_мин", "REM_сон_мин", "Бодрствование_мин"], 14)
     hours_history = [{"date": r["date"], "hours": round(r["Чистый_сон_мин"] / 60, 2)}
                       for r in history_min if r["Чистый_сон_мин"] is not None]
     minutes = [r["Чистый_сон_мин"] for r in history_min if r["Чистый_сон_мин"] is not None]
@@ -302,15 +319,41 @@ def build_sleep_detail(cur, sleep_min_today: Optional[int]) -> dict:
     return {
         "segment": "sleep",
         "last_night_min": sleep_min_today, "avg14_min": avg14, "delta_min": delta,
+        "sleep_score": sleep_quality_today,
         "history": hours_history,
-        "deep_min": last.get("Глубокий_сон_мин"), "rem_min": last.get("REM_сон_мин"),
-        "efficiency_pct": last.get("Эффективность_сна_"),
+        "light_min": last.get("Легкий_сон_мин"), "deep_min": last.get("Глубокий_сон_мин"),
+        "rem_min": last.get("REM_сон_мин"), "awake_min": last.get("Бодрствование_мин"),
         "coach": coach,
         "publications": _topic_publications(cur, "sleep"),
     }
 
 
-def build_move_detail(cur, steps: dict, gate: dict) -> dict:
+def _todays_workouts(cur) -> list[dict]:
+    """Тренировки (Тренировка_N_Тип/Мин, N=1-3) — тип текстовый ("Нет" когда
+    не было), _recent_daily_values() сюда не годится (она числами через
+    _num(), тип потерялся бы). "Нет"/пусто/0 минут — не тренировка, не
+    показываем пустые слоты."""
+    cur.execute(
+        'SELECT "Тренировка_1_Тип","Тренировка_1_Мин","Тренировка_2_Тип","Тренировка_2_Мин",'
+        '"Тренировка_3_Тип","Тренировка_3_Мин" FROM health.daily_trends ORDER BY "Дата" DESC LIMIT 1'
+    )
+    row = cur.fetchone()
+    if not row:
+        return []
+    out = []
+    for i in range(0, 6, 2):
+        kind, minutes = row[i], _num(row[i + 1])
+        if kind and kind.strip() and kind.strip().lower() != "нет" and minutes:
+            out.append({"type": kind.strip(), "minutes": minutes})
+    return out
+
+
+def build_move_detail(cur, today: dict, steps: dict, gate: dict) -> dict:
+    """Живая жалоба Влада (2026-09-28): «вкладка движение открывает только
+    шаги, в макете по-другому было» — добавлены нагрузка (ACWR, была видна
+    только в «Заряде», хотя backend с самого начала относит её к сегменту
+    move, см. _collect_judgments) и тренировки дня (были не показаны нигде
+    в Vita вообще)."""
     # "Шаги_за_вчера" — единственная посуточная история шагов в системе
     # (см. докстринг секции выше: часовой разбивки нет вообще).
     history = [{"date": r["date"], "steps": int(r["Шаги_за_вчера"])}
@@ -321,6 +364,11 @@ def build_move_detail(cur, steps: dict, gate: dict) -> dict:
         "segment": "move",
         "steps_now": steps.get("now_steps"), "steps_target": steps.get("target"),
         "status_word": steps.get("status_word"), "behind_pace": steps.get("behind_pace"),
+        # acwr/acwr_status — внутри today["decision"], см. докстринг живого
+        # бага в build_recovery_detail выше.
+        "acwr": (today.get("decision") or {}).get("acwr"),
+        "acwr_status": (today.get("decision") or {}).get("acwr_status"),
+        "workouts": _todays_workouts(cur),
         "history_daily": history,
         "coach": coach,
         "publications": _topic_publications(cur, "move"),
@@ -370,12 +418,20 @@ def read_chip_norm(cur) -> dict:
     return dict(DEFAULT_CHIP_NORM)
 
 
-def chip_status(scores: dict, chip_norm: dict) -> dict:
+def chip_status(scores: dict, chip_norm: dict, chips: Optional[dict] = None) -> dict:
     """good/warn по сегменту — null, если сегмент вообще не оценивается
-    (день без критериев, не "оценка 0", тот же принцип, что _score_from_judgments)."""
+    (день без критериев, не "оценка 0", тот же принцип, что _score_from_judgments).
+    sleep/recovery красятся по РЕАЛЬНЫМ числам Гармина (chips.sleep_quality/
+    energy), если они есть — судейский скор (100 при любом «не плохо») туда
+    больше не годится, см. build_chips. move/food остаются на судейском —
+    для них нет одного готового композитного числа от часов."""
+    chips = chips or {}
+    real_by_segment = {"sleep": chips.get("sleep_quality"), "recovery": chips.get("energy")}
     out = {}
     for segment, score_key in _SCORE_KEY_BY_SEGMENT.items():
-        v = scores.get(score_key)
+        v = real_by_segment.get(segment)
+        if v is None:
+            v = scores.get(score_key)
         norm = chip_norm.get(segment, DEFAULT_CHIP_NORM[segment])
         out[segment] = None if v is None else ("good" if v >= norm else "warn")
     return out
@@ -388,11 +444,17 @@ def chip_status(scores: dict, chip_norm: dict) -> dict:
 
 def _time_of_day(now_local) -> str:
     """Пороги — по примерам макета (8:00 утро · 16:02 день · 21:30 вечер),
-    не измеренная величина, календарное соглашение."""
+    не измеренная величина, календарное соглашение.
+
+    Живой баг (2026-09-28, поймал Влад): порог был h<19 — «день закрыт»
+    (state.closed) загорался уже в 19:00-19:36, хотя докстринг тут же цитирует
+    собственный пример макета "21:30 вечер". Час честно передвинут на границу
+    из примера — 21, а не 19 (был опечаткой/недосмотром при первом переносе,
+    не намеренным решением)."""
     h = now_local.hour
     if h < 11:
         return "morning"
-    if h < 19:
+    if h < 21:
         return "day"
     return "evening"
 
@@ -435,6 +497,7 @@ def build_chips(today: dict, health: dict, tn: dict) -> dict:
     hrv = metric_by_key.get("hrv") or {}
     bb = metric_by_key.get("body_battery") or {}
     sleep_m = metric_by_key.get("sleep_min") or {}
+    sleep_score_m = metric_by_key.get("sleep_score") or {}
     trend_word = None
     if hrv.get("judgment") == "good":
         trend_word = "растёт"
@@ -444,6 +507,14 @@ def build_chips(today: dict, health: dict, tn: dict) -> dict:
     food_logged = (today.get("meals_today") or 0) > 0
     return {
         "sleep_min": sleep_m.get("value"),
+        # Живая жалоба Влада (2026-09-28): кругляш «Сон» показывал 100 для
+        # ЛЮБОЙ ночи без bad/warn (внутренняя формула штрафов, не реальное
+        # число) — "7:16 это 100, а 8:00 будет 120?" тот же вопрос и про
+        # «Заряд». sleep_quality — РЕАЛЬНАЯ оценка сна Гармина (Оценка_сна_
+        # балл, уже была в metric_coverage/METRIC_CONFIG, просто не пробрасывалась
+        # сюда) — кругляш «Сон» теперь красится и считается по ней, energy
+        # (Body Battery, уже была) — по ней же для «Заряд».
+        "sleep_quality": sleep_score_m.get("value"),
         "hrv": {"value": hrv.get("value"), "trend": trend_word},
         "energy": bb.get("value"),
         "food_logged": food_logged,
@@ -724,6 +795,7 @@ def write_day_snapshot(cur, day) -> bool:
 
     chips = {
         "sleep_min": (metric_by_key.get("sleep_min") or {}).get("value"),
+        "sleep_quality": (metric_by_key.get("sleep_score") or {}).get("value"),
         "hrv": {"value": (metric_by_key.get("hrv") or {}).get("value")},
         "energy": (metric_by_key.get("body_battery") or {}).get("value"),
     }
@@ -734,7 +806,7 @@ def write_day_snapshot(cur, day) -> bool:
             "ON CONFLICT (date) DO UPDATE SET ring = EXCLUDED.ring, chips = EXCLUDED.chips, "
             "gate = EXCLUDED.gate, streaks = EXCLUDED.streaks, ts_recorded = now()"
         ).format(t=sql.Identifier(schema(), "vita_day_snapshot")),
-        (day_iso, json.dumps({**scores, "chip_status": chip_status(scores, chip_norm)}, ensure_ascii=False),
+        (day_iso, json.dumps({**scores, "chip_status": chip_status(scores, chip_norm, chips)}, ensure_ascii=False),
          json.dumps(chips, ensure_ascii=False), json.dumps(gate, ensure_ascii=False), None),
     )
     return True
@@ -953,6 +1025,7 @@ def build_today(cur) -> dict:
     protein = levers.get("protein") or {}
     nudge = build_nudge(state, steps, protein, timeutil.now_local())
     scores = _scores(today, health)
+    chips = build_chips(today, health, tn)
     ahead = compute_ahead(today, health, state, steps, protein)
     longevity = today.get("longevity") or {}
     bioage_days = round((longevity.get("affects_today_total") or 0) * 365, 1) if longevity else None
@@ -972,8 +1045,8 @@ def build_today(cur) -> dict:
         # не выдавать за точный прогноз.
         "ring": {**scores, "ahead": ahead, "ahead_confidence": "estimated", "bioage_days": bioage_days,
                  "breakdown": build_index_breakdown(today, health)},
-        "chips": build_chips(today, health, tn),
-        "chip_status": chip_status(scores, chip_norm),
+        "chips": chips,
+        "chip_status": chip_status(scores, chip_norm, chips),
         "nudge": nudge,
         "streaks": streak_data["streaks"],
         "freezes_available": streak_data["freezes_available"],
@@ -1189,8 +1262,9 @@ def vita_topic_endpoint(segment: str, _: None = Depends(require_session)) -> dic
                 health = get_health_dashboard(cur)
                 metric_by_key = {m["key"]: m for m in (health.get("metrics") or [])}
                 sleep_min = metric_by_key.get("sleep_min", {}).get("value")
-                return build_sleep_detail(cur, sleep_min)
+                sleep_quality = metric_by_key.get("sleep_score", {}).get("value")
+                return build_sleep_detail(cur, sleep_min, sleep_quality)
             if segment == "move":
                 steps = build_steps(cur, gate)
-                return build_move_detail(cur, steps, gate)
+                return build_move_detail(cur, today, steps, gate)
             return build_food_topic_detail(cur)
