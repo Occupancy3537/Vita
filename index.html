@@ -127,6 +127,15 @@
       ДС v2: один регистр (без КАПСа и разрядки), плоские карточки без свечений, тон — только в круге иконки,
       коралл — только клиника (вне референса, клинический лимит), янтарь — «можно улучшить», одна строка списка
       (иконка в круге · название · значение · ›), одна основная кнопка — тёмная пилюля. Засечки и фото пока остаются.
+  18. Шторки = container transform: фон-слой растёт из реальной формы кнопки (круг кругляша, скругление карточки,
+      строка — внутри своей карточки) и возвращается в неё; содержимое режется той же формой и проявляется во второй
+      половине пути; у текста (заголовок, дата) формы нет — сначала фон, потом содержимое снизу. Закрытие быстрее
+      открытия (0,42 / 0,48 с). Кнопку ищем заново при закрытии (экран мог перерисоваться), нет на экране — уходим вниз.
+      Жест: тянешь вниз от верха — шторка едет карточкой, короткий рывок возвращает, длинный или быстрый — закрывает.
+      На время перехода — пауза фото, пульсаций и размытия. prefers-reduced-motion — растворение 150 мс.
+      Серии на главной — стеклянная пилюля в шапке: пламя + точка на серию (жива · под угрозой · пауза), вечером
+      «+1 день». Режим дня («Ходьба и плавание») — под датой. Шторка «Серии»: число, «ещё N до вехи», рекорд и полоса
+      14 дней (выполнено · заморозка · пауза · сегодня). НОВОЕ на бэкенде: история серии по дням (сейчас только счётчик).
 -->
 <style>
 :root{
@@ -1229,6 +1238,57 @@ svg{display:block}
 .hmW.open .hmA{grid-template-rows:1fr}
 .hmOk{display:flex;align-items:center;gap:8px;padding:10px 0 2px;border-top:1px solid var(--line-soft);font-size:13px;color:var(--muted)}
 .hmOk svg{width:14px;height:14px;color:var(--green)}
+/* шторки: контейнер растёт из формы кнопки и возвращается в неё; фон — отдельный слой, содержимое растворяется */
+.morph{position:absolute;inset:0;z-index:29;display:none;background:var(--bg);pointer-events:none;will-change:clip-path,opacity,transform}
+.ov{background:transparent;will-change:opacity,transform}
+.stage{transition:transform .44s cubic-bezier(.2,0,0,1)}
+.stage.behind{transform:scale(.96)}
+#app.morphing .tbPhoto i,#app.morphing .tbGlow,#app.morphing .arcHalo,#app.morphing .arcSvg.live .arcTick,#app.morphing .stPill i,#app.morphing .pdot2::after{animation-play-state:paused}
+#app.morphing .chipC,#app.morphing .stPill{-webkit-backdrop-filter:none;backdrop-filter:none}
+.ov.drag .screen{overflow:hidden}
+.ov.drag{-webkit-user-select:none;user-select:none}
+/* шапка: дата и режим слева, серии — стеклянная пилюля справа (пламя + точка на серию) */
+.hdr{height:48px}
+.dcol{display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-width:0}
+#tDate{font-size:13.5px;font-weight:500;color:var(--ink)}
+.tSub{display:flex;align-items:center;gap:6px;min-height:20px;font-size:12px;color:var(--ink2);white-space:nowrap}
+.tSub .dot-live{width:6px;height:6px}
+.stPill{position:relative;flex:none;display:flex;align-items:center;gap:8px;height:36px;padding:0 13px 0 11px;border-radius:18px;background:var(--chip-bg);box-shadow:inset 0 0 0 1px var(--line);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.stPill[hidden]{display:none}
+.stPill>svg{width:16px;height:16px;color:var(--gold);stroke-width:1.7}
+.stPill.risk>svg{color:var(--amber)}
+#todayTab.photo .stPill.risk>svg{color:#F0D27A}
+.sd{display:flex;gap:5px}
+.sd i{width:7px;height:7px;border-radius:50%;background:var(--green);transition:transform .5s var(--spring)}
+#todayTab.photo .sd i{background:#9EE6A0;box-shadow:0 0 6px rgba(158,230,160,.55)}
+.sd i.r,#todayTab.photo .sd i.r{background:#F0D27A;box-shadow:0 0 6px rgba(240,210,122,.7);animation:sdr 2.2s ease-in-out infinite}
+@keyframes sdr{50%{transform:scale(1.35)}}
+.sd i.p,#todayTab.photo .sd i.p{background:none;box-shadow:inset 0 0 0 1.3px var(--faint)}
+/* вечер: день закрыт — точки вспыхивают по очереди, «+1» всплывает */
+.stPill.plus .sd i:not(.p){animation:sdplus .9s var(--spring) both;animation-delay:calc(var(--k)*90ms)}
+@keyframes sdplus{0%{transform:scale(1)}40%{transform:scale(1.8)}100%{transform:scale(1)}}
+.stPill.plus::after{content:"+1 день";position:absolute;right:6px;top:100%;margin-top:6px;font-size:12px;font-weight:600;color:#F0CF86;white-space:nowrap;text-shadow:0 1px 8px rgba(4,12,24,.6);animation:plusup 2.4s var(--ease) .5s both}
+@keyframes plusup{0%{opacity:0;transform:translateY(-6px)}20%{opacity:1;transform:none}75%{opacity:1}100%{opacity:0;transform:translateY(4px)}}
+/* шторка «Серии»: строка = иконка · название · число; под ней — 14 дней */
+.stList{margin-top:18px;border-radius:24px;background:var(--card);box-shadow:var(--card-sh);padding:4px 14px}
+.stR2{padding:12px 0 14px;border-top:1px solid var(--line-soft)}
+.stR2:first-child{border-top:0}
+.stR2h{display:flex;align-items:center;gap:12px}
+.stN{flex:none;font-size:26px;font-weight:300;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
+.stN small{font-size:12px;color:var(--muted);margin-left:3px;letter-spacing:0}
+.strip{display:grid;grid-template-columns:repeat(14,1fr);gap:3px;margin:10px 0 0 52px}
+.strip i{height:14px;border-radius:4px;background:var(--line-soft);display:grid;place-items:center}
+.strip i.y{background:var(--accent)}
+.strip i.f{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+.strip i.f svg{width:9px;height:9px;color:var(--accent-ink)}
+.strip i.p{background:none;box-shadow:inset 0 0 0 1.2px var(--faint)}
+.strip i.t{background:none;box-shadow:inset 0 0 0 1.5px var(--accent)}
+.stR2.risk .strip i.t{box-shadow:inset 0 0 0 1.5px var(--amber)}
+.stR2.risk .rT small{color:var(--amber);font-weight:600}
+.stR2.pause .stN{color:var(--muted)}
+.stLeg{display:flex;flex-wrap:wrap;gap:6px 14px;margin:12px 4px 0;font-size:12px;color:var(--muted)}
+.stLeg span{display:flex;align-items:center;gap:6px}
+.stLeg i{width:12px;height:12px;border-radius:3px}
 </style>
 </head>
 <body>
@@ -1246,7 +1306,7 @@ svg{display:block}
       <div class="pager" id="pager">
         <div class="track" id="track">
           <div class="screen" id="s-today">
-            <div class="hdr onPhoto rise" style="--i:0"><span class="dnav"><button class="dArr press" id="dBack" data-a="dayback" aria-label="Вчера"><svg class="ic" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><span id="tDate"></span><button class="dArr press" id="dFwd" data-a="dayfwd" aria-label="Сегодня" hidden><svg class="ic" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button></span><button class="status press" id="tStatus" data-a="recovery"></button></div>
+            <div class="hdr onPhoto rise" style="--i:0"><span class="dnav"><button class="dArr press" id="dBack" data-a="dayback" aria-label="Вчера"><svg class="ic" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><span class="dcol"><span id="tDate"></span><button class="tSub press" id="tStatus" data-a="recovery"></button></span><button class="dArr press" id="dFwd" data-a="dayfwd" aria-label="Сегодня" hidden><svg class="ic" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button></span><button class="stPill press" id="streaks" data-a="streaks" aria-label="Серии"></button></div>
             <div class="chips onPhoto rise" style="--i:1" id="chips"></div>
             <div class="hero onPhoto rise" id="heroBox" style="--i:2">
               <button class="idxBtn" data-a="index" aria-label="Прогноз дня: из чего он"><div class="arcBox" id="arcBox"></div>
@@ -1255,7 +1315,6 @@ svg{display:block}
               <button class="verdict press" id="verdict" data-a="verdict"><span class="vk" id="vKick"></span><span class="vt"><span id="emo"></span><svg class="ic" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></button>
             </div>
             <div id="needYou"></div>
-            <section class="sec rise" style="--i:4" id="stSec"><button class="strow press" id="streaks" data-a="streaks"></button></section>
           </div>
         </div>
       </div>
@@ -1591,13 +1650,11 @@ function renderToday(){
   const ev=inboxList();
   $('#needYou').innerHTML=ev.length?`<div class="sec rise" style="--i:3;margin-top:0">${(()=>{const e=evData(ev[0]);
     return `<div class="rows"><button class="row press" data-a="inbox"><span class="rIc ${e.tone}">${e.dot?svg('walnut'):svg(e.ic)}</span><span class="rT"><b class="wrap">${e.row||e.title}</b><small>${e.kick}</small></span>${ev.length>1?`<span class="rN">+${ev.length-1}</span>`:''}${svg('right','ic rGo')}</button></div>`})()}</div>`:'';
-  $('#stSec').hidden=past;
-
-  /* серии — кольца-медали: заполнение до следующей вехи */
-  const risk=d.atRisk||[];
-  $('#streaks').innerHTML=`<div class="strow-h"><b>Серии${S.travel?' · поездка':''}</b><span><span class="fzc">${svg('snow')}</span>${FREEZES} ${plural(FREEZES,'заморозка','заморозки','заморозок')}${svg('right')}</span></div>
-    <div class="stRing">${STREAKS.map(k=>{const p=paused(k),best=!p&&k.n>=k.rec,r=!p&&risk.includes(k.k),nx=MILES.find(m=>m>k.n)||k.n,f=Math.min(100,k.n/nx*100);
-    return `<div class="sr${p?' pause':''}${best?' best':''}${r?' risk':''}"><span class="srC"><svg class="rg" viewBox="0 0 50 50"><circle class="bg" cx="25" cy="25" r="22"/><circle class="fg" cx="25" cy="25" r="22" pathLength="100" stroke-dasharray="${f.toFixed(1)} 100"/></svg>${svg(k.ic)}</span><b>${k.n}</b><small>${p?'пауза':r?'под угрозой':k.label}</small></div>`}).join('')}</div>`;
+  /* серии — пилюля в шапке: пламя + точка на серию (жива · под угрозой · пауза); цифры — в шторке */
+  const risk=d.atRisk||[],st=STREAKS.map(k=>paused(k)?'p':risk.includes(k.k)?'r':'');
+  const pill=$('#streaks');pill.hidden=past;pill.classList.toggle('risk',st.includes('r'));
+  pill.setAttribute('aria-label',`Серии: ${st.filter(x=>x!=='p').length} из ${STREAKS.length} живы${st.includes('r')?', одна под угрозой':''}`);
+  pill.innerHTML=`${svg('flame')}<span class="sd">${st.map((c,i)=>`<i class="${c}" style="--k:${i}"></i>`).join('')}</span>`;
   $('#caseBadge').classList.toggle('on',S.caseSt==='pending'||!!S.disc||(S.ev||[]).includes('verdict')||!!(S.cons&&S.cons.ready));
   $$('.rise',sToday).forEach(e=>e.classList.add('in'));
   requestAnimationFrame(sizeBg);
@@ -1635,13 +1692,14 @@ function enterToday(){
   crown.classList.remove('show');dotG.classList.remove('on');
   const C=2*Math.PI*28;
   $$('#chips .ring circle').forEach(c=>{c.style.transition='none';c.style.strokeDasharray=`0 ${C}`;void c.getBoundingClientRect();c.style.transition='';setTimeout(()=>c.style.strokeDasharray=`${c.dataset.d} ${C}`,260)});
-  $$('.srC .fg',sToday).forEach(c=>{const a=c.getAttribute('stroke-dasharray');c.style.transition='none';c.style.strokeDasharray='0 100';void c.getBoundingClientRect();c.style.transition='';setTimeout(()=>c.style.strokeDasharray=a,500)});
+  const pill=$('#streaks');pill.classList.remove('plus');
   sizeBg();updBg();
   if(!d.ring){num.textContent='—';return}
   const V=d.ring.v;dotG.classList.add('on');
   tween(1600,p=>{if(g!==arcGen)return;const v=V*p,pt=at(v);val.style.strokeDashoffset=100-v;glow.style.strokeDashoffset=100-v;dotG.setAttribute('transform',`translate(${pt.x.toFixed(1)} ${pt.y.toFixed(1)})`);num.textContent=Math.round(v)},t=>1-Math.pow(1-t,3.2)).then(()=>{if(g!==arcGen)return;
     $$('.arcTick',svgEl).forEach(t=>t.classList.toggle('in',+t.dataset.f<=V/100));svgEl.classList.add('live');
     if(crownOn(d))crown.classList.add('show');
+    if(d.closed&&!S.past){void pill.offsetWidth;pill.classList.add('plus')}
     if(d.ring.ahead){const A=Math.max(0,d.ring.ahead-V);ahead.setAttribute('stroke-dashoffset',-V);tween(1000,p=>ahead.setAttribute('stroke-dasharray',`${A*p} 100`))}
   });
 }
@@ -2169,11 +2227,19 @@ const B={
     <div class="rise" style="--i:2;margin-top:20px">${b.src.map(([a,v])=>`<div class="reason"><span>${a}</span><span style="text-align:right;max-width:62%;color:var(--ink2)">${v}</span></div>`).join('')}</div>
     ${b.hyp?`<div class="btns rise" style="--i:3;justify-content:center"><button class="btn pri press" data-a="toast" data-msg="Проверка «звонки на ходу» — 14 дней, ожидание: пики стресса реже. Появится в Программе">Проверить 2 недели</button></div>`:''}
     ${tgLink('why_'+k,4)}`}},
-  streaks(){return {html:`${top('Серии')}
-    <div class="ov-hero rise" style="--i:1"><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15">Честная запись важнее серии</p>
-      <p class="ov-coach" style="margin-top:10px">Нет данных — серия на паузе, а не сгорает. Срыв тратит заморозку вместо обнуления. Заморозки общие: +1 за каждые 7 дней любой серии, в запасе до двух — сейчас ${FREEZES}.</p></div>
-    <div class="rise rows" style="--i:2;margin-top:18px">${STREAKS.map(k=>{const p=paused(k),nx=MILES.find(m=>m>k.n)||k.n,r=!p&&(curD().atRisk||[]).includes(k.k);return `<div class="row sr${p?' pause':''}${r?' risk':''}" style="flex-direction:row;gap:12px"><span class="srC" style="width:44px;height:44px"><svg class="rg" viewBox="0 0 50 50" style="width:44px;height:44px"><circle class="bg" cx="25" cy="25" r="22"/><circle class="fg" cx="25" cy="25" r="22" pathLength="100" stroke-dasharray="${Math.min(100,k.n/nx*100).toFixed(1)} 100"/></svg>${svg(k.ic)}</span><span class="rT"><b>${k.full}</b><small>${p?'на паузе':r?'под угрозой сегодня':k.n>=k.rec?'рекорд — держи':'рекорд '+k.rec+' · до него '+(k.rec-k.n)} · веха ${nx}</small></span><span class="rV" style="font-size:22px;font-weight:300">${k.n}</span></div>`}).join('')}</div>
-    <div class="rise" style="--i:3;margin-top:22px;display:flex;align-items:center;justify-content:space-between;gap:12px"><span style="font-size:14px">Режим поездки<small style="display:block;font-size:12px;color:var(--muted);margin-top:2px">серии питания на паузе, сон и шаги — как обычно</small></span><button class="lchip${S.travel?' on':''}" data-a="travel">${S.travel?'до 30 сент · выкл':'Включить'}</button></div>`}},
+  streaks(){const d=curD(),risk=d.atRisk||[],alive=STREAKS.filter(k=>!paused(k)).length;
+    /* 14 дней: выполнено · заморозка · пауза · пусто (срыв до начала серии) · сегодня */
+    const strip=k=>{const p=paused(k),out=[];for(let dd=13;dd>=0;dd--){let c;
+      if(dd===0)c=p?'p':d.closed?'y':'t';else if(dd<=k.n)c=k.fz&&dd===Math.min(k.n,4)?'f':'y';else if(dd===k.n+1)c='';else c=(dd%5===0)?'':'y';
+      out.push(`<i class="${c}">${c==='f'?svg('snow'):''}</i>`)}return out.join('')};
+    return {html:`${top('Серии')}
+    <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${alive}</b><span>из ${STREAKS.length} серий живы</span></div><p class="fsub">${FREEZES} ${plural(FREEZES,'заморозка','заморозки','заморозок')} в запасе — срыв не обнулит серию</p></div>
+    <div class="stList rise" style="--i:2">${STREAKS.map(k=>{const p=paused(k),r=!p&&risk.includes(k.k),nx=MILES.find(m=>m>k.n)||k.n,best=k.n>=k.rec;
+      const cap=p?'на паузе — нет данных':r?'под угрозой сегодня':best?'рекорд — держи':`ещё ${nx-k.n} до ${nx} · рекорд ${k.rec}`;
+      return `<div class="stR2${p?' pause':''}${r?' risk':''}"><div class="stR2h"><span class="rIc ${p?'':r?'amber':'teal'}">${svg(k.ic)}</span><span class="rT"><b>${k.full}</b><small>${cap}</small></span><span class="stN">${k.n}<small>${k.u}</small></span></div><div class="strip">${strip(k)}</div></div>`}).join('')}</div>
+    <div class="stLeg rise" style="--i:3"><span><i style="background:var(--accent)"></i>выполнено</span><span><i style="background:var(--accent-soft)"></i>заморозка</span><span><i style="box-shadow:inset 0 0 0 1.2px var(--faint)"></i>пауза</span><span><i style="box-shadow:inset 0 0 0 1.5px var(--accent)"></i>сегодня</span></div>
+    <p class="ov-coach rise" style="--i:4">Нет данных — серия на паузе, а не сгорает. Срыв тратит заморозку: +1 за каждые 7 дней любой серии, в запасе до двух.</p>
+    <div class="rows rise" style="--i:5;margin-top:18px"><div class="row"><span class="rIc">${svg('drop')}</span><span class="rT"><b>Режим поездки</b><small>питание на паузе, сон и шаги — как обычно</small></span><button class="rBtn${S.travel?' on':''}" data-a="travel">${S.travel?'до 30 сент':'Включить'}</button></div></div>`}},
   discovery(){return {html:`${top('Открытие')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">Вопрос «Боль в боку» · 10 лет</div><p style="font-family:var(--serif);font-size:30px;font-weight:300;line-height:1.12;margin-top:12px">Боль совпадает с едой вне привычного окна</p>
       <p class="ov-sub" style="color:var(--accent-ink)">6 из 7 эпизодов за 2 месяца — против 18% в обычные дни · лаг 0–6 часов</p></div>
@@ -2228,22 +2294,88 @@ function miniArc(k){const p=PRESETS[k],d=TD[p.time];
   if(p.caseSt==='pending'||p.sunday)s+=`<circle cx="52" cy="6" r="3" fill="${ACCENT}"/>`;
   return s+'</svg>'}
 
-const ov=$('#ov'),ovS=$('#ovScreen'),stage=$('#stage');let fromEl=null,sheetKey=null;
-function rectInset(el){const a=$('#app').getBoundingClientRect();if(!el||!el.isConnected)return `inset(45% 35% 45% 35% round 24px)`;
-  const r=el.getBoundingClientRect();return `inset(${r.top-a.top}px ${a.right-r.right}px ${a.bottom-r.bottom}px ${a.left-r.left}px round 18px)`}
-function openSheet(key,arg,el){const b=B[key](arg);fromEl=el;sheetKey=key;haptic(10);
+const ov=$('#ov'),ovS=$('#ovScreen'),stage=$('#stage'),appEl=$('#app');let fromEl=null,fromKey=null,sheetKey=null,ovAnims=[];
+/* шторки = container transform: фон-слой растёт из реальной формы кнопки (круг кругляша, карточка, строка списка)
+   и возвращается в неё; содержимое растворяется, а не обрезается. У текста формы нет — там сдвиг и растворение.
+   Только transform / opacity / clip-path пустого слоя — без обрезки тяжёлой страницы. */
+const morph=document.createElement('div');morph.className='morph';morph.setAttribute('aria-hidden','true');appEl.appendChild(morph);
+const EZ='cubic-bezier(.2,0,0,1)',EZ_BACK='cubic-bezier(.3,0,.1,1)',FULL='inset(0px 0px 0px 0px round 0px)';
+const keyOf=el=>el?{a:el.dataset.a,k:el.dataset.k,id:el.id}:null;
+function findFrom(){if(fromEl&&fromEl.isConnected&&!ov.contains(fromEl))return fromEl;if(!fromKey)return null;
+  if(fromKey.id){const e=document.getElementById(fromKey.id);if(e&&!ov.contains(e))return e}
+  if(!fromKey.a)return null;const q=`[data-a="${fromKey.a}"]`+(fromKey.k?`[data-k="${fromKey.k}"]`:'');
+  return $$(q).find(e=>!ov.contains(e))||null}
+/* форма цели: круг для кругляша, скругление карточки, строка — внутри своей карточки; текст и невидимое — null */
+function shapeOf(el){if(!el||!el.isConnected)return null;
+  const tab=el.closest('.tab');if(tab&&!tab.classList.contains('on'))return null;
+  const t=el.classList.contains('chip')?$('.chipC',el):el,a=appEl.getBoundingClientRect(),b=t.getBoundingClientRect();
+  if(b.width<8||b.bottom<a.top+30||b.top>a.bottom-90)return null;
+  const cs=getComputedStyle(t),isRow=t.classList.contains('row'),isChip=t.classList.contains('chipC');
+  const clear=/rgba\(0, 0, 0, 0\)|transparent/.test(cs.backgroundColor)&&cs.boxShadow==='none';
+  if(!isRow&&!isChip&&clear)return null;
+  const r=isChip?b.width/2:isRow?16:Math.min(b.height/2,parseFloat(cs.borderTopLeftRadius)||14);
+  let bg=isRow?getComputedStyle(t.closest('.rows')||t).backgroundColor:cs.backgroundColor;
+  const al=bg.match(/rgba\([^)]*,\s*([\d.]+)\)/)||bg.match(/\/\s*([\d.]+)\s*\)/);if(bg==='transparent'||(al&&+al[1]<.9))bg=getComputedStyle(appEl).backgroundColor;
+  return {clip:`inset(${(b.top-a.top).toFixed(1)}px ${(a.right-b.right).toFixed(1)}px ${(a.bottom-b.bottom).toFixed(1)}px ${(b.left-a.left).toFixed(1)}px round ${r.toFixed(1)}px)`,bg}}
+function settle(fn){Promise.all(ovAnims.map(x=>x.finished)).then(fn).catch(()=>{})}
+function openSheet(key,arg,el){const b=B[key](arg);sheetKey=key;haptic(10);
   ovS.innerHTML=b.html;ovS.scrollTop=0;
   if(ov.classList.contains('open')){reveal(ov);b.after&&setTimeout(b.after,120);return}
-  ov.style.transition='none';ov.style.clipPath=rectInset(el);ov.classList.add('show');void ov.offsetWidth;
-  ov.style.transition='clip-path .6s cubic-bezier(.22,1,.36,1)';ov.style.clipPath='inset(0px 0px 0px 0px round 0px)';
-  ov.classList.add('open');stage.classList.add('behind');
-  b.after&&setTimeout(b.after,120);
-  setTimeout(()=>{if(ov.classList.contains('open'))ov.style.clipPath='none'},650)}
-function closeSheet(){if(!ov.classList.contains('open'))return;haptic();
-  ov.style.transition='none';ov.style.clipPath='inset(0px 0px 0px 0px round 0px)';void ov.offsetWidth;
-  ov.classList.remove('open');ov.style.transition='clip-path .5s cubic-bezier(.65,0,.35,1)';ov.style.clipPath=rectInset(fromEl);
-  stage.classList.remove('behind');sheetKey=null;
-  setTimeout(()=>{if(!ov.classList.contains('open'))ov.classList.remove('show')},520)}
+  fromEl=el;fromKey=keyOf(el);ovAnims.forEach(x=>x.cancel());ovAnims=[];
+  const sh=reduce?null:shapeOf(el),bgc=getComputedStyle(appEl).backgroundColor;
+  appEl.classList.add('morphing');morph.style.cssText='display:block';ov.style.cssText='';
+  ov.classList.add('show','open');stage.classList.add('behind');
+  if(sh){
+    /* контейнер и содержимое режутся одной формой; содержимое проявляется во второй половине пути */
+    ovAnims.push(morph.animate([{clipPath:sh.clip,backgroundColor:sh.bg,opacity:.6},{opacity:1,offset:.2},{clipPath:FULL,backgroundColor:bgc,opacity:1}],{duration:480,easing:EZ}));
+    ovAnims.push(ov.animate([{clipPath:sh.clip},{clipPath:FULL}],{duration:480,easing:EZ}));
+    ovAnims.push(ov.animate([{opacity:0},{opacity:1}],{duration:260,delay:200,easing:'ease-out',fill:'backwards'}));
+  }else{
+    /* у текста формы нет: сначала фон, потом содержимое снизу — без двойного изображения */
+    ovAnims.push(morph.animate([{opacity:0},{opacity:1}],{duration:reduce?150:220,easing:'ease-out'}));
+    ovAnims.push(ov.animate([{opacity:0,transform:reduce?'none':'translateY(28px)'},{opacity:1,transform:'none'}],{duration:reduce?150:340,delay:reduce?0:190,easing:EZ,fill:'backwards'}));
+  }
+  settle(()=>appEl.classList.remove('morphing'));
+  b.after&&setTimeout(b.after,120)}
+/* закрытие: быстрее открытия; кнопку ищем заново — экран мог перерисоваться; нет на экране — уходим вниз */
+function closeSheet(opt={}){if(!ov.classList.contains('open'))return;haptic();
+  const dy=opt.dy||0,sh=reduce||dy?null:shapeOf(findFrom()),bgc=getComputedStyle(appEl).backgroundColor;
+  ovAnims.forEach(x=>x.cancel());ovAnims=[];
+  ov.classList.remove('open','drag');stage.classList.remove('behind');sheetKey=null;appEl.classList.add('morphing');
+  const t0=`translateY(${dy}px)`;
+  if(sh){
+    ovAnims.push(ov.animate([{opacity:1},{opacity:0}],{duration:150,easing:'linear',fill:'forwards'}));
+    ovAnims.push(morph.animate([{clipPath:FULL,backgroundColor:bgc,opacity:1},{opacity:1,offset:.6},{clipPath:sh.clip,backgroundColor:sh.bg,opacity:0}],{duration:420,easing:EZ_BACK,fill:'forwards'}));
+  }else{
+    if(dy){/* смахнул вниз: шторка уезжает целиком, как карточка */
+      const end=`translateY(${dy+Math.max(80,Math.min(260,appEl.clientHeight*.35))}px)`;
+      ovAnims.push(ov.animate([{opacity:1,transform:t0},{opacity:0,transform:end}],{duration:260,easing:'cubic-bezier(.3,0,.8,.15)',fill:'forwards'}));
+      ovAnims.push(morph.animate([{opacity:1,transform:t0,borderRadius:morph.style.borderRadius||'28px'},{opacity:0,transform:end,borderRadius:'28px'}],{duration:280,easing:'cubic-bezier(.3,0,.8,.15)',fill:'forwards'}));
+    }else{/* кнопки нет или это текст: сначала уходит содержимое, потом фон — без двойного изображения */
+      ovAnims.push(ov.animate([{opacity:1,transform:'none'},{opacity:0,transform:reduce?'none':'translateY(16px)'}],{duration:reduce?120:170,easing:'cubic-bezier(.3,0,.8,.15)',fill:'forwards'}));
+      ovAnims.push(morph.animate([{opacity:1},{opacity:0}],{duration:reduce?150:260,delay:reduce?0:110,easing:'ease-in-out',fill:'forwards'}));
+    }
+  }
+  settle(()=>{if(ov.classList.contains('open'))return;ov.classList.remove('show');morph.style.cssText='';ov.style.cssText='';ovAnims.forEach(x=>x.cancel());ovAnims=[];appEl.classList.remove('morphing')})}
+/* жест: тянешь шторку вниз от верха — она едет за пальцем; отпустил — закрылась или вернулась */
+let drag=null,dragged=false;
+const dStart=(y)=>{if(!ov.classList.contains('open')||ovS.scrollTop>0||ovAnims.some(a=>a.playState==='running'))return;drag={y,t:performance.now(),dy:0,on:false}};
+const dMove=(y,e)=>{if(!drag)return;const dy=y-drag.y;
+  if(!drag.on){if(dy>10&&ovS.scrollTop<=0){drag.on=true;ov.classList.add('drag');getSelection&&getSelection().removeAllRanges()}else if(dy<-6||ovS.scrollTop>0){drag=null;return}else return}
+  e&&e.cancelable&&e.preventDefault();drag.dy=Math.max(0,dy)*(dy>0?1:0);const r=Math.min(28,drag.dy/4);
+  ov.style.transform=`translateY(${drag.dy}px)`;morph.style.transform=`translateY(${drag.dy}px)`;morph.style.borderRadius=r+'px'};
+const dEnd=()=>{if(!drag)return;const d=drag;drag=null;if(!d.on)return;dragged=true;setTimeout(()=>dragged=false,60);
+  const v=d.dy/Math.max(1,performance.now()-d.t);
+  if(d.dy>110||v>.55){closeSheet({dy:d.dy});return}
+  ov.classList.remove('drag');const t0=`translateY(${d.dy}px)`;
+  ov.animate([{transform:t0},{transform:'none'}],{duration:300,easing:EZ});morph.animate([{transform:t0,borderRadius:morph.style.borderRadius},{transform:'none',borderRadius:'0px'}],{duration:300,easing:EZ});
+  ov.style.transform='';morph.style.transform='';morph.style.borderRadius=''};
+ov.addEventListener('touchstart',e=>dStart(e.touches[0].clientY),{passive:true});
+ov.addEventListener('touchmove',e=>dMove(e.touches[0].clientY,e),{passive:false});
+ov.addEventListener('touchend',dEnd);ov.addEventListener('touchcancel',dEnd);
+ov.addEventListener('mousedown',e=>{if(e.button===0)dStart(e.clientY)});
+addEventListener('mousemove',e=>{if(drag)dMove(e.clientY,e)});addEventListener('mouseup',dEnd);
+ov.addEventListener('click',e=>{if(dragged){e.stopPropagation();e.preventDefault()}},true);
 const refreshConc=()=>{if(sheetKey==='conclusion'||sheetKey==='consrep'){ovS.innerHTML=B.consrep(S.repId||'gen').html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}};
 
 /* ================= TOAST ================= */
