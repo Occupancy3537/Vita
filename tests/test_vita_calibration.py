@@ -42,10 +42,13 @@ def test_historical_ahead_samples_finds_pair_when_segment_recovers(monkeypatch):
     samples = vc.historical_ahead_samples(cur=None, days_back=30)
     assert len(samples) == 1
     assert samples[0]["segment"] == "food"
-    # день восстановился полностью (только натрий был bad, всё остальное good) -> actual_next=100
-    assert samples[0]["actual_next"] == 100
-    # ahead — тот же скор, но с food виртуально исправленным ДО факта -> тоже 100 в этом синтетическом случае
-    assert samples[0]["ahead"] == 100
+    # Живая правка (2026-09-28, «индекс дня зависит от кругляшей»): Заряд/Сон
+    # в этой синтетической истории — РЕАЛЬНЫЕ 80/80 (Восстановление_BodyBattery/
+    # Оценка_сна_балл), не судейские 100 — среднее по 4 сегментам на полностью
+    # восстановленном дне (food тоже good): (80+80+100+100)/4 = 90.
+    assert samples[0]["actual_next"] == 90
+    # ahead — тот же индекс, но с food виртуально исправленным ДО факта -> тоже 90
+    assert samples[0]["ahead"] == 90
     assert samples[0]["error"] == 0
 
 

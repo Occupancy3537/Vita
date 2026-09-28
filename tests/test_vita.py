@@ -85,9 +85,20 @@ def test_collect_judgments_recovery_segment_from_reasons():
 
 def test_collect_judgments_move_segment_combines_steps_and_acwr_reason():
     today = {"decision": {"reasons": _decision_reasons(move_judgment="bad")}, "budget": []}
-    health = {"metrics": [{"key": "steps", "judgment": "warn"}]}
+    health = {"metrics": [{"key": "steps", "value": 4200, "judgment": "warn"}]}
     crit = vita._collect_judgments(today, health)
     assert sorted(crit["move"]) == ["bad", "warn"]
+
+
+def test_collect_judgments_ignores_judgment_without_a_value():
+    """Живой баг (2026-09-28): _baseline_metrics_for_index кладёт judgment=
+    'neutral' по умолчанию ДАЖЕ когда метрики за день реально нет (value=None) —
+    раньше это было незаметно (neutral не штрафует в любом случае), но с
+    _day_index (среднее сегментов) превращалось в фантомную "сотню" для
+    сегмента без единого реального числа."""
+    health = {"metrics": [{"key": "steps", "value": None, "judgment": "neutral"}]}
+    crit = vita._collect_judgments({"decision": {"reasons": []}, "budget": []}, health)
+    assert crit["move"] == []
 
 
 def test_collect_judgments_food_segment_is_budget_limits_only():
@@ -262,19 +273,64 @@ def test_score_with_segment_fixed_flips_worst_judgment_to_good():
     assert fixed == vita._score_from_judgments(["good", "good", "warn"])
 
 
+# ─────── _day_index / _segment_score_with_fixed (живая правка 2026-09-28: ───────
+# ─────── «кругляши поменяли, итоговый индекс дня нет, он от них зависит») ───────
+
+def test_day_index_uses_real_garmin_numbers_when_available():
+    scores = {"recovery_score": 100, "sleep_score": 100, "movement_score": 100, "nutrition_score": 100}
+    chips = {"energy": 68, "sleep_quality": 86}
+    # (68 + 86 + 100 + 100) / 4 = 88.5 -> round -> 88 (банковское округление .5 к чётному)
+    assert vita._day_index(scores, chips) == 88
+
+
+def test_day_index_falls_back_to_judgment_score_without_garmin_numbers():
+    scores = {"recovery_score": 80, "sleep_score": 90, "movement_score": 70, "nutrition_score": 60}
+    assert vita._day_index(scores, {}) == 75  # (80+90+70+60)/4
+
+
+def test_day_index_none_when_all_segments_missing():
+    assert vita._day_index({"recovery_score": None, "sleep_score": None,
+                             "movement_score": None, "nutrition_score": None}, {}) is None
+
+
+def test_day_index_averages_only_available_segments():
+    scores = {"recovery_score": None, "sleep_score": None, "movement_score": 60, "nutrition_score": 80}
+    assert vita._day_index(scores, {}) == 70
+
+
+def test_segment_score_with_fixed_flips_only_that_segments_worst_judgment():
+    crit = {"food": ["bad", "good"], "move": ["warn"]}
+    assert vita._segment_score_with_fixed(crit, "food") == vita._score_from_judgments(["good", "good"])
+    assert vita._segment_score_with_fixed(crit, "move") == vita._score_from_judgments(["good"])
+
+
+def test_segment_score_with_fixed_none_when_segment_has_no_judgments():
+    assert vita._segment_score_with_fixed({"food": []}, "food") is None
+
+
 def test_compute_ahead_equals_current_when_no_actionable_segment():
     today = {"decision": {"reasons": _decision_reasons(bb_judgment="good")}, "budget": []}
     state = {"no_watch": False, "no_food": False, "time_of_day": "evening"}
-    ahead = vita.compute_ahead(today, {"metrics": []}, state, {"behind_pace": False}, {"target": None, "consumed": None})
+    ahead = vita.compute_ahead(today, {"metrics": []}, state, {"behind_pace": False},
+                                {"target": None, "consumed": None}, chips={})
     assert ahead == 100
 
 
 def test_compute_ahead_is_higher_than_current_when_food_fixable():
+    """Живая правка (2026-09-28, «индекс дня зависит от кругляшей») —
+    compute_ahead теперь считает через _day_index (среднее сегментов), не
+    через escalation по объединённому overall-списку; current здесь
+    посчитан тем же способом, каким его считает сам compute_ahead."""
     today = {"decision": {"reasons": []}, "budget": [{"kind": "limit", "status": "over", "label": "Натрий"}]}
     state = {"no_watch": False, "no_food": False, "time_of_day": "day"}
     protein = {"target": 160, "consumed": 100}
-    current = vita._score_from_judgments(vita._collect_judgments(today, {"metrics": []})["overall"])
-    ahead = vita.compute_ahead(today, {"metrics": []}, state, {"behind_pace": False}, protein)
+    crit = vita._collect_judgments(today, {"metrics": []})
+    scores = {"recovery_score": vita._score_from_judgments(crit["recovery"]),
+              "sleep_score": vita._score_from_judgments(crit["sleep"]),
+              "movement_score": vita._score_from_judgments(crit["move"]),
+              "nutrition_score": vita._score_from_judgments(crit["food"])}
+    current = vita._day_index(scores, {})
+    ahead = vita.compute_ahead(today, {"metrics": []}, state, {"behind_pace": False}, protein, chips={})
     assert ahead > current
 
 
@@ -438,8 +494,12 @@ def test_write_and_read_day_snapshot_roundtrip(monkeypatch):
         snap = vita.read_day_snapshot(cur, date(2026, 9, 20))
     assert written is True
     assert snap["date"] == "2026-09-20"
-    assert snap["ring"]["score"] == 100
+    # Живая правка (2026-09-28): индекс — среднее сегментов, «Заряд» берёт
+    # реальный Body Battery=80 (не 100), Движение/Питание без данных не
+    # считаются вовсе -> (80 + 100[сон, судейский]) / 2 = 90.
+    assert snap["ring"]["score"] == 90
     assert snap["chips"]["sleep_min"] == 450.0
+    assert snap["chips"]["energy"] == 80.0
     assert "chip_status" in snap["ring"]
 
 
@@ -1059,9 +1119,15 @@ def test_state_normal_day_has_real_numbers(monkeypatch):
         "time_of_day": "day", "no_watch": False, "no_food": False,
         "sunday": False, "closed": False, "has_decision": False,
     }
-    assert out["ring"]["score"] == 100  # ни одного bad/warn критерия в этом сценарии
+    # Живая правка (2026-09-28, «индекс дня зависит от кругляшей»): «Заряд»
+    # берёт РЕАЛЬНЫЙ Body Battery=77 (не судейские 100, хотя ни одного bad/
+    # warn в сценарии), «Сон» без своей Оценки сна откатывается на судейский
+    # 100, Движение/Питание без данных не считаются вовсе — среднее (77+100)/2=88.5,
+    # round() к чётному -> 88.
+    assert out["ring"]["score"] == 88
     assert out["chips"]["sleep_min"] == 424
     assert out["chips"]["hrv"]["value"] == 52
+    assert out["chips"]["energy"] == 77
     assert out["chips"]["protein_consumed"] == 90.0
 
 

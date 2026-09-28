@@ -1372,7 +1372,11 @@ function verdictWord(){
   if(score>=85)return {k:'ok',w:'Всё хорошо',t:nudge?nudge.text:'Всё в коридоре'};
   return {k:'up',w:'Можно улучшить',t:nudge?nudge.text:'Есть что подтянуть'};
 }
-const crownOn=()=>!!(TODAY.state.closed&&TODAY.ring.score>80);
+/* Живая правка Влада (2026-09-28): «корона должна быть если больше 80» —
+   без условия "день закрыт" (title у #crown и так всегда говорил "День
+   выше 80", без оговорки про закрытые сутки — лишнее условие было моей
+   же более ранней сверхинтерпретацией). */
+const crownOn=()=>!!(TODAY.ring.score>80);
 
 /* ================= ARC ================= */
 const ARC={cx:150,cy:207.76,R:183.76,half:43.29,d:'M24 74 A183.76 183.76 0 0 1 276 74'};
@@ -1389,7 +1393,7 @@ function buildArc(){
     <g class="arcDotG" id="arcDotG"><circle class="arcHalo" r="3.4"/><circle class="arcDot" r="3.8"/></g>
     <text class="arcEnd" x="33.6" y="86" text-anchor="middle" transform="rotate(-43.3 33.6 86)">0</text>
     <text class="arcEnd" x="266.4" y="86" text-anchor="middle" transform="rotate(43.3 266.4 86)">100</text></svg>
-    <div class="arcIcons">${svg('sprout')}<span class="crown" id="crown" title="День выше 80">${svg('crown')}</span></div>`;
+    <div class="arcIcons"><span class="crown" id="crown" title="День выше 80">${svg('crown')}</span></div>`;
 }
 buildArc();
 

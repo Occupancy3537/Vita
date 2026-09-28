@@ -8,7 +8,16 @@
 порядок, что app.vita._main_action_segment/build_nudge) — считаем ahead_D
 (тот же сегмент виртуально "исправлен"). Если этот же сегмент ДЕЙСТВИТЕЛЬНО
 стал хорошим на следующий день D+1 (человек так и сделал/само наладилось) —
-сравниваем ahead_D с РЕАЛЬНЫМ overall-скором D+1.
+сравниваем ahead_D с РЕАЛЬНЫМ индексом дня D+1.
+
+Живая правка (2026-09-28, Влад: «индекс дня зависит от кругляшей»): и
+current_d/ahead, и actual_next теперь считаются через app.vita._day_index —
+среднее 4 сегментов, где Заряд/Сон берут настоящие числа Гармина
+(chips.energy/sleep_quality, реконструированные через build_chips на
+исторических {today,health}), а не через старую escalation-формулу по
+объединённому списку суждений. Старый метод (n=2, mean_abs_error=18.5)
+относился к прежней формуле индекса — после этой правки калибровка
+пересчитана заново на новой формуле, см. живой прогон в AGENT_SYNC.md.
 
 Это не идеальный контролируемый эксперимент (остальные критерии D+1 тоже
 меняются день ото дня — сон, ВСР и т.п. не подчиняются действию по еде/шагам)
@@ -23,10 +32,12 @@ from datetime import timedelta
 
 from app.vita import (
     _collect_judgments,
+    _day_index,
     _fetch_history,
     _historical_day_dicts,
     _score_from_judgments,
-    _score_with_segment_fixed,
+    _segment_score_with_fixed,
+    build_chips,
 )
 
 CALIBRATION_THRESHOLD_POINTS = 5  # Часть 2 тикета — гейт на выпуск, не косметика
@@ -56,7 +67,14 @@ def historical_ahead_samples(cur, days_back: int = 180) -> list[dict]:
             continue
 
         crit_d = _collect_judgments(today_d, health_d)
-        current_d = _score_from_judgments(crit_d["overall"])
+        chips_d = build_chips(today_d, health_d, {})
+        scores_d = {
+            "recovery_score": _score_from_judgments(crit_d["recovery"]),
+            "sleep_score": _score_from_judgments(crit_d["sleep"]),
+            "movement_score": _score_from_judgments(crit_d["move"]),
+            "nutrition_score": _score_from_judgments(crit_d["food"]),
+        }
+        current_d = _day_index(scores_d, chips_d)
         if current_d is None:
             continue
 
@@ -73,14 +91,23 @@ def historical_ahead_samples(cur, days_back: int = 180) -> list[dict]:
         if segment is None:
             continue
 
-        ahead = _score_with_segment_fixed(crit_d, segment)
+        score_key = "nutrition_score" if segment == "food" else "movement_score"
+        improved_d = {**scores_d, score_key: _segment_score_with_fixed(crit_d, segment)}
+        ahead = _day_index(improved_d, chips_d)
 
         crit_next = _collect_judgments(today_next, health_next)
         seg_next = crit_next.get(segment) or []
         became_good = seg_next and all(j == "good" for j in seg_next)
         if not became_good:
             continue
-        actual_next = _score_from_judgments(crit_next["overall"])
+        chips_next = build_chips(today_next, health_next, {})
+        scores_next = {
+            "recovery_score": _score_from_judgments(crit_next["recovery"]),
+            "sleep_score": _score_from_judgments(crit_next["sleep"]),
+            "movement_score": _score_from_judgments(crit_next["move"]),
+            "nutrition_score": _score_from_judgments(crit_next["food"]),
+        }
+        actual_next = _day_index(scores_next, chips_next)
         if actual_next is None or ahead is None:
             continue
 

@@ -97,8 +97,19 @@ def _collect_judgments(today: dict, health: dict) -> dict:
     limit_judgments = [_budget_judgment(b) for b in budget if b.get("kind") == "limit"]
 
     def j(key: str) -> Optional[str]:
+        """Живой баг, найденный при разборе «индекс дня зависит от
+        кругляшей» (2026-09-28): _baseline_metrics_for_index кладёт запись
+        с judgment='neutral' по умолчанию ДАЖЕ когда value=None (метрики
+        реально нет за день) — раньше это было незаметно (neutral не даёт
+        штрафа в escalation-формуле в любом случае, "нет данных" и "нейтрально"
+        выглядели одинаково), но с новым _day_index (среднее по сегментам)
+        фантомный "нейтральный" судимый критерий превращался в фантомную
+        "сотню" для сегмента без единого реального числа. Судимость
+        учитываем только если у метрики есть значение."""
         m = metric_by_key.get(key)
-        return m.get("judgment") if m else None
+        if not m or m.get("value") is None:
+            return None
+        return m.get("judgment")
 
     reasons = decision.get("reasons") or []
     reason_judgments = [r["judgment"] for r in reasons]
@@ -123,6 +134,41 @@ def _scores(today: dict, health: dict) -> dict:
         "movement_score": _score_from_judgments(crit["move"]),
         "nutrition_score": _score_from_judgments(crit["food"]),
     }
+
+
+def _day_index(scores: dict, chips: dict) -> Optional[int]:
+    """Живая правка Влада (2026-09-28): «кругляши поменяли, итоговый индекс
+    дня нет, он от них зависит» — «Заряд»/«Сон» теперь показывают настоящие
+    числа Гармина (chips.energy/sleep_quality), не судейский скор (см.
+    build_chips/chip_status) — индекс дня обязан считаться из ТОГО ЖЕ, что
+    видно в кругляшах, а не из параллельной системы штрафов. Среднее по 4
+    сегментам: Заряд/Сон — реальное число (откат на судейский скор сегмента,
+    если часы сегодня ничего не дали), Движение/Питание — по-прежнему
+    судейский скор (для них нет готового композитного числа от часов).
+    None только если ВСЕ 4 сегмента без данных — не "оценка 0"."""
+    vals = [
+        chips.get("energy") if chips.get("energy") is not None else scores.get("recovery_score"),
+        chips.get("sleep_quality") if chips.get("sleep_quality") is not None else scores.get("sleep_score"),
+        scores.get("movement_score"),
+        scores.get("nutrition_score"),
+    ]
+    vals = [v for v in vals if v is not None]
+    return round(statistics.mean(vals)) if vals else None
+
+
+def _segment_score_with_fixed(crit: dict, segment: str) -> Optional[int]:
+    """Версия _score_with_segment_fixed для новой формулы индекса (среднее
+    сегментов, не escalation по объединённому overall-списку) — считает
+    СКОР ЭТОГО ЖЕ сегмента с виртуально исправленным худшим суждением, не
+    общий overall. Нужно только для move/food — _main_action_segment
+    никогда не целится в recovery/sleep (Body Battery/сон не чинятся
+    сегодняшней подсказкой, см. её докстринг)."""
+    seg_judgments = list(crit.get(segment) or [])
+    if "bad" in seg_judgments:
+        seg_judgments[seg_judgments.index("bad")] = "good"
+    elif "warn" in seg_judgments:
+        seg_judgments[seg_judgments.index("warn")] = "good"
+    return _score_from_judgments(seg_judgments)
 
 
 # =====================================================================
@@ -168,15 +214,27 @@ def _score_with_segment_fixed(crit: dict, segment: str) -> Optional[int]:
     return _score_from_judgments(overall)
 
 
-def compute_ahead(today: dict, health: dict, state: dict, steps: dict, protein: dict) -> Optional[int]:
+def compute_ahead(today: dict, health: dict, state: dict, steps: dict, protein: dict, chips: dict) -> Optional[int]:
+    """Пересчитано под новую формулу индекса (_day_index — среднее сегментов
+    с реальными числами Гармина для Заряда/Сна, см. её докстринг). chips
+    здесь не меняются виртуально (Body Battery/сон не чинятся сегодняшней
+    подсказкой) — фиксируется только скор actionable-сегмента (move/food)."""
     crit = _collect_judgments(today, health)
-    current = _score_from_judgments(crit["overall"])
+    scores = {
+        "recovery_score": _score_from_judgments(crit["recovery"]),
+        "sleep_score": _score_from_judgments(crit["sleep"]),
+        "movement_score": _score_from_judgments(crit["move"]),
+        "nutrition_score": _score_from_judgments(crit["food"]),
+    }
+    current = _day_index(scores, chips)
     if current is None:
         return None
     segment = _main_action_segment(state, steps, protein)
     if segment is None:
         return current
-    return _score_with_segment_fixed(crit, segment)
+    score_key = _SCORE_KEY_BY_SEGMENT[segment]
+    improved = {**scores, score_key: _segment_score_with_fixed(crit, segment)}
+    return _day_index(improved, chips)
 
 
 # =====================================================================
@@ -800,13 +858,15 @@ def write_day_snapshot(cur, day) -> bool:
         "energy": (metric_by_key.get("body_battery") or {}).get("value"),
     }
 
+    day_index = _day_index(scores, chips)
     cur.execute(
         sql.SQL(
             "INSERT INTO {t} (date, ring, chips, gate, streaks) VALUES (%s, %s, %s, %s, %s) "
             "ON CONFLICT (date) DO UPDATE SET ring = EXCLUDED.ring, chips = EXCLUDED.chips, "
             "gate = EXCLUDED.gate, streaks = EXCLUDED.streaks, ts_recorded = now()"
         ).format(t=sql.Identifier(schema(), "vita_day_snapshot")),
-        (day_iso, json.dumps({**scores, "chip_status": chip_status(scores, chip_norm, chips)}, ensure_ascii=False),
+        (day_iso, json.dumps({**scores, "score": day_index, "chip_status": chip_status(scores, chip_norm, chips)},
+                              ensure_ascii=False),
          json.dumps(chips, ensure_ascii=False), json.dumps(gate, ensure_ascii=False), None),
     )
     return True
@@ -1026,7 +1086,8 @@ def build_today(cur) -> dict:
     nudge = build_nudge(state, steps, protein, timeutil.now_local())
     scores = _scores(today, health)
     chips = build_chips(today, health, tn)
-    ahead = compute_ahead(today, health, state, steps, protein)
+    day_index = _day_index(scores, chips)
+    ahead = compute_ahead(today, health, state, steps, protein, chips)
     longevity = today.get("longevity") or {}
     bioage_days = round((longevity.get("affects_today_total") or 0) * 365, 1) if longevity else None
     chip_norm = read_chip_norm(cur)
@@ -1038,13 +1099,18 @@ def build_today(cur) -> dict:
         "date": today.get("date"),
         "state": state,
         "gate": gate,
+        # ring.score: живая правка Влада (2026-09-28) — индекс дня обязан
+        # зависеть от кругляшей (см. _day_index), не от параллельной
+        # судейской системы. **scores несёт остальные *_score поля как были
+        # (нужны chip_status/streaks/calibration), "score" явно переопределён
+        # после спреда.
         # ring.ahead: калибровка на истории (app/vita_calibration.py, 2026-09-28)
         # дала mean_abs_error=18.5 на n=2 — выше порога в 5. По решению Влада
         # показываем ahead всё равно, но с честной пометкой "оценочно"
         # (ahead_confidence) — фронтенд обязан её показать рядом с числом,
         # не выдавать за точный прогноз.
-        "ring": {**scores, "ahead": ahead, "ahead_confidence": "estimated", "bioage_days": bioage_days,
-                 "breakdown": build_index_breakdown(today, health)},
+        "ring": {**scores, "score": day_index, "ahead": ahead, "ahead_confidence": "estimated",
+                 "bioage_days": bioage_days, "breakdown": build_index_breakdown(today, health)},
         "chips": chips,
         "chip_status": chip_status(scores, chip_norm, chips),
         "nudge": nudge,
