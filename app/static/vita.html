@@ -1255,6 +1255,36 @@ function countUp(el,to,{dur=1400,dec=0,from=0}={}){tween(dur,p=>{el.textContent=
 const replay=el=>{if(!el)return;el.classList.remove('go');void el.getBoundingClientRect();el.classList.add('go')};
 const ACCENT='var(--accent)';
 
+/* ================= ГРАФИК (перенесено из макета дословно, без изменений — ================= */
+/* чистые функции от готовых чисел, ничего мокового) */
+let gid=0;
+function smooth(p){let d=`M${p[0][0].toFixed(1)},${p[0][1].toFixed(1)}`;for(let i=0;i<p.length-1;i++){const a=p[i-1]||p[i],b=p[i],c=p[i+1],e=p[i+2]||c,t=1/6;d+=` C${(b[0]+(c[0]-a[0])*t).toFixed(1)},${(b[1]+(c[1]-a[1])*t).toFixed(1)} ${(c[0]-(e[0]-b[0])*t).toFixed(1)},${(c[1]-(e[1]-b[1])*t).toFixed(1)} ${c[0].toFixed(1)},${c[1].toFixed(1)}`}return d}
+const pulseDot=(x,y,c)=>`<g class="pdot"><circle cx="${x}" cy="${y}" r="4" fill="${c}" opacity=".4"><animate attributeName="r" values="4;13" dur="2.6s" repeatCount="indefinite"/><animate attributeName="opacity" values=".45;0" dur="2.6s" repeatCount="indefinite"/></circle></g>`;
+function lineChart({data,w=320,h=140,color=ACCENT,min,max,base=null,labels=null,marks=[],padT=14,padB=labels?20:6}){
+  if(!data||data.length<2)return '<p class="empty">Пока мало данных для графика.</p>';
+  const id='g'+(gid++);min=min??Math.min(...data)-.5;max=max??Math.max(...data)+.5;
+  const ih=h-padT-padB,x=i=>6+i*(w-12)/(data.length-1),y=v=>padT+ih-(v-min)/(max-min)*ih;
+  const pts=data.map((v,i)=>[x(i),y(v)]),d=smooth(pts),L=pts[pts.length-1];
+  const bl=base!=null?`<line class="fadein" x1="0" x2="${w}" y1="${y(base)}" y2="${y(base)}" stroke="${color}" stroke-width="1" stroke-dasharray="2 5" stroke-linecap="round" opacity=".5"/>`:'';
+  const mk=marks.map(i=>`<line class="fadein" x1="${x(i)}" x2="${x(i)}" y1="${padT}" y2="${h-padB}" stroke="${color}" stroke-width="1" stroke-dasharray="1.5 4" opacity=".55"/><circle class="pdot" cx="${x(i)}" cy="${y(data[i])}" r="3.4" fill="${color}" stroke="var(--bg)" stroke-width="1.5"/>`).join('');
+  const lab=labels?labels.map(([t,a,xx])=>`<text class="xl" x="${xx}" y="${h-4}" text-anchor="${a}">${t}</text>`).join(''):'';
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".26"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+  ${bl}<path class="area" d="${d} L${L[0]},${h-padB} L${pts[0][0]},${h-padB} Z" fill="url(#${id})"/>
+  <path class="draw" pathLength="1" d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>${mk}
+  ${pulseDot(L[0],L[1],color)}<circle class="pdot" cx="${L[0]}" cy="${L[1]}" r="3.2" fill="var(--bg)" stroke="${color}" stroke-width="2"/>${lab}</svg>`;
+}
+/* Реальные публикации (card.publication, /vita/topic/*) — тот же вид, что в
+   макете (pubList), но без выдуманного PUB{} и без фейковой ссылки: открывает
+   настоящий url публикации, если он есть, иначе просто показывает карточку. */
+function pubList(pubs,title='Свежее по теме',i=6){
+  if(!pubs||!pubs.length)return '';
+  return `<div class="pubs rise" style="--i:${i}"><div class="lbl">${title}</div>${pubs.map(p=>{
+    const tag=p.url?`<a class="pub press" href="${p.url}" target="_blank" rel="noopener">`:`<div class="pub">`;
+    const close=p.url?'</a>':'</div>';
+    return `${tag}<div class="pt">${p.title}</div><div class="pr2"><span class="tag">${p.grade}</span>${p.why?`<span class="pw2">${p.why}</span>`:''}${p.url?`<span class="pl">открыть${svg('right')}</span>`:''}</div>${close}`;
+  }).join('')}</div>`;
+}
+
 const I={
   check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>', right:'<path d="M9 6l6 6-6 6"/>', back:'<path d="M15 5l-7 7 7 7"/>',
   charge:'<path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5" opacity=".35"/><path d="M12.8 7.5l-3.3 5h3l-.8 4 3.3-5h-3z"/>',
@@ -1499,34 +1529,49 @@ const B={
     <div class="rise" style="--i:2;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Эпизоды · еда за ${ev.window_hours} ч до реакции</div>${(ev.episodes||[]).map(e=>
       `<div class="reason"><span>${e.onset_ts.slice(0,10)}${e.symptom?`<small style="display:block;font-size:12px;color:var(--muted);margin-top:2px">${e.symptom}</small>`:''}</span><span style="text-align:right;max-width:60%;color:var(--ink2)">${(e.meals||[]).map(m=>`${m.description} (−${m.hours_before.toFixed(1)}ч)`).join('; ')||'еды в окне не найдено'}</span></div>`).join('')||'<p class="empty">Эпизодов пока нет.</p>'}</div>
     <p class="disc rise" style="--i:3">Детектив сравнивает дни эпизодов с обычными днями. Совпадение — ещё не причина.</p>`}},
-  segment(k){const names={recovery:'Заряд',sleep:'Сон',move:'Движение',food:'Питание'},
-    score={recovery:TODAY.ring.recovery_score,sleep:TODAY.ring.sleep_score,move:TODAY.ring.movement_score,food:TODAY.ring.nutrition_score}[k];
-    /* Живая жалоба Влада (2026-09-28): тап на любой кругляш открывал ОДИН и
-       тот же список — теперь фильтруем ring.breakdown по своему сегменту
-       (backend помечает каждую строку segment'ом) и добавляем то, чего в
-       общем списке нет вовсе — свою для каждого кругляша живую деталь. */
+  segment(arg){const k=arg.k,T=arg.detail;
+    /* Живая просьба Влада (2026-09-28, второй заход): «список тот же, только
+       отфильтрованный — в макете не так, возьми код макета, подключи мои
+       данные». Ниже — реальные шторки макета (recovery()/topic('sleep')/
+       move()/nutr()) на живых данных /vita/topic/{segment}, не общий список. */
     const own=(TODAY.ring.breakdown||[]).filter(r=>r.segment===k);
     const idxRows=rs=>rs.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${r.label}${r.detail?`<small>${r.detail}</small>`:''}</span></div>`).join('');
-    let extra='';
-    if(k==='food'){
-      const lv=(RHYTHM&&RHYTHM.levers)||{},rows=['protein','fat','sodium'].filter(x=>lv[x]&&lv[x].has_data).map(x=>leverRow(lv[x])).join('');
-      const rest=own.filter(r=>!['Насыщенные жиры','Натрий'].includes(r.label));
-      extra=(rows||'<p class="empty rise" style="--i:2">Рычаги появятся после первого приёма пищи.</p>')
-        +(rest.length?`<div class="rise" style="--i:3;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Ещё в лимите</div>${idxRows(rest)}</div>`:'');
-    }else if(k==='move'){
-      const st=(RHYTHM&&RHYTHM.steps)||{};
-      const stepsRow=st.now_steps!=null?`<div class="reason rise" style="--i:2"><span>Шаги</span><span>${st.now_steps} из ${st.target}${st.status_word?' · '+st.status_word:''}</span></div>`:'';
-      extra=stepsRow+`<div class="rise" style="--i:3;margin-top:14px">${idxRows(own)}</div>`;
-    }else if(k==='sleep'){
-      const s=(TODAY.streaks||[]).find(x=>x.key==='sleep_zone');
-      const streakRow=s?`<div class="reason rise" style="--i:2"><span>Серия сна</span><span>${s.count} ${s.count===1?'ночь':'ночей'} · рекорд ${s.record}</span></div>`:'';
-      extra=streakRow+`<div class="rise" style="--i:3;margin-top:14px">${idxRows(own)}</div>`;
-    }else{
-      extra=`<div class="rise" style="--i:2;margin-top:18px">${idxRows(own)}</div>`;
+    if(k==='recovery'){
+      const gate=TODAY.gate,statusWord=T.acwr_status==='HIGH'?'Нагрузка выше обычного':T.acwr_status==='LOW'?'Нагрузка ниже обычного':'Нагрузка в норме';
+      return {html:`${top('Заряд')}
+      <div class="ov-hero rise" style="--i:1"><div class="lbl">Нагрузка сегодня</div><p style="font-family:var(--serif);font-size:30px;font-weight:300;line-height:1.15;margin-top:8px">${statusWord}</p>
+      ${gate.blocked?`<p class="ov-sub" style="color:var(--warm-ink)">${gate.label} — без бега, прыжков и ударных.</p>`:`<p class="ov-sub" style="color:var(--accent-ink)">Ограничений по здоровью нет.</p>`}</div>
+      <div class="rise" style="--i:2;margin-top:18px">${idxRows(own)}${T.acwr!=null?`<div class="reason"><span>Нагрузка (ACWR)</span><span>${T.acwr}${T.acwr_status?' · '+T.acwr_status:''}</span></div>`:''}${T.resting_hr!=null?`<div class="reason"><span>Пульс покоя</span><span>${T.resting_hr}</span></div>`:''}</div>
+      <div class="ov-chart rise" style="--i:3" id="ovChart"><div class="lbl" style="margin-bottom:4px">ВСР за 30 ночей${T.hrv_avg7!=null?` · 7д ${T.hrv_avg7} · 30д ${T.hrv_avg30}`:''}</div>${lineChart({data:T.hrv_history.map(x=>x.value),w:320,h:130,base:T.hrv_avg30})}</div>
+      <p class="ov-coach rise" style="--i:4">${T.coach}</p>${pubList(T.publications,'Свежее по теме',5)}`,
+      after(){replay($('#ovChart'))}}
     }
-    return {html:`${top(names[k])}
-    <div class="ov-hero rise" style="--i:1"><div class="lbl">Сегодня</div><div class="big">${score!=null?score:'—'}<small>из 100</small></div></div>
-    ${own.length||k==='food'?extra:'<p class="empty rise" style="--i:2">Пока нет данных.</p>'}`}},
+    if(k==='sleep'){
+      const hrs=v=>v==null?'—':(Math.floor(v/60)+':'+String(v%60).padStart(2,'0'));
+      return {html:`${top('Сон')}
+      <div class="ov-hero rise" style="--i:1"><div class="lbl">Прошлая ночь</div><div class="big">${hrs(T.last_night_min)}</div>
+        <p class="ov-sub" style="color:var(--accent-ink)">${T.avg14_min==null?'Пока мало ночей для среднего':T.delta_min>=0?`+${T.delta_min} мин к среднему за 14 ночей`:`${T.delta_min} мин к среднему за 14 ночей`}</p></div>
+      <div class="ov-chart rise" style="--i:2" id="ovChart"><div class="lbl" style="margin-bottom:4px">Часы сна · 14 ночей</div>${lineChart({data:T.history.map(x=>x.hours),w:320,h:130,base:T.avg14_min!=null?T.avg14_min/60:null})}</div>
+      <div class="stats rise" style="--i:3">${[['Глубокий',T.deep_min!=null?hrs(T.deep_min):'—'],['REM',T.rem_min!=null?hrs(T.rem_min):'—'],['Качество',T.efficiency_pct!=null?T.efficiency_pct+'%':'—']].map(s=>`<div class="stat"><div class="lbl">${s[0]}</div><div class="v">${s[1]}</div></div>`).join('')}</div>
+      <p class="ov-coach rise" style="--i:4">${T.coach}</p>${pubList(T.publications,'Свежее по теме',5)}`,
+      after(){replay($('#ovChart'))}}
+    }
+    if(k==='move'){
+      const st=(RHYTHM&&RHYTHM.steps)||{};
+      return {html:`${top('Движение')}
+      <div class="hdr rise" style="--i:1;margin-top:14px"><span>Шаги сегодня</span><span class="status">${st.now_steps!=null?`${st.now_steps} из ${st.target}${st.status_word?' · '+st.status_word:''}`:'нет данных'}</span></div>
+      <div class="ov-chart rise" style="--i:2" id="ovChart"><div class="lbl" style="margin-bottom:4px">Шаги по дням · неделя</div>${lineChart({data:T.history_daily.map(x=>x.steps),w:320,h:130,min:0})}</div>
+      <p class="ov-coach rise" style="--i:3">${T.coach}</p>${pubList(T.publications,'Свежее по теме',5)}`,
+      after(){replay($('#ovChart'))}}
+    }
+    /* food */
+    const lv=(RHYTHM&&RHYTHM.levers)||{},rows=['protein','fat','sodium'].filter(x=>lv[x]&&lv[x].has_data).map(x=>leverRow(lv[x])).join('');
+    const rest=own.filter(r=>!['Насыщенные жиры','Натрий'].includes(r.label));
+    return {html:`${top('Питание')}
+    ${rows||'<p class="empty rise" style="--i:1">Рычаги появятся после первого приёма пищи.</p>'}
+    ${rest.length?`<div class="rise" style="--i:3;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Ещё в лимите</div>${idxRows(rest)}</div>`:''}
+    ${pubList(T.publications,'Свежее по теме',4)}`};
+  },
   yesterday(snap){if(!snap)return {html:`${top('Вчера')}<p class="empty rise" style="--i:1" style="margin-top:20px">Снимок вчерашнего дня ещё не записан.</p>`};
     const r=snap.ring||{};
     return {html:`${top('Вчера')}
@@ -1637,11 +1682,11 @@ function setTheme(mode){document.documentElement.dataset.theme=mode;const l=$('#
 document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t)return;const a=t.dataset.a,k=t.dataset.k;
   if(t.tagName==='A'&&a)e.preventDefault();
   switch(a){
-    case'chip':haptic();openSheet('segment',k,t);break;
+    case'chip':haptic();fetchJSON('/vita/topic/'+k).then(detail=>openSheet('segment',{k,detail},t));break;
     case'verdict':{const v=verdictWord();if(v.k==='none')toast('Часы не видели тебя с утра — как только появятся данные, индекс посчитается.');else openSheet('today',null,t);break}
     case'index':openSheet('index',null,t);break;
     case'streaks':openSheet('streaks',null,t);break;
-    case'recovery':openSheet('segment','recovery',t);break;
+    case'recovery':fetchJSON('/vita/topic/recovery').then(detail=>openSheet('segment',{k:'recovery',detail},t));break;
     case'dayback':haptic();loadYesterday().then(snap=>{openSheet('yesterday',snap,t)});break;
     case'close':closeSheet();break;
     case'toast':haptic();toast(t.dataset.msg);break;

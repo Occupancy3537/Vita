@@ -137,6 +137,71 @@ def test_build_index_breakdown_empty_when_no_data():
     assert vita.build_index_breakdown({"decision": {"reasons": []}, "budget": []}, {"metrics": []}) == []
 
 
+# ─────── детали кругляша (Vita v2, этап 2 — живая просьба Влада, реальные шторки макета) ───────
+
+def _fake_hrv_history(values):
+    return [{"date": f"2026-09-{i+1:02d}", "ВСР_ночная": v} for i, v in enumerate(values)]
+
+
+def test_build_recovery_detail_computes_hrv_averages(monkeypatch):
+    monkeypatch.setattr(vita, "_recent_daily_values", lambda cur, cols, days:
+                         _fake_hrv_history([40, 41, 42, 43, 44, 45, 46]) if cols == ["ВСР_ночная"]
+                         else [{"date": "2026-09-28", "Пульс_ночной_средний": 54}])
+    monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [])
+    today = {"acwr": 0.9, "acwr_status": "LOW", "load_high": False}
+    out = vita.build_recovery_detail(_FC(), today, {"blocked": False})
+    assert out["hrv_last"] == 46
+    assert out["hrv_avg7"] == 43.0
+    assert out["hrv_avg30"] == 43.0
+    assert out["resting_hr"] == 54
+    assert "Нагрузка низкая" in out["coach"]
+
+
+def test_build_recovery_detail_load_high_overrides_coach(monkeypatch):
+    monkeypatch.setattr(vita, "_recent_daily_values", lambda cur, cols, days: [])
+    monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [])
+    out = vita.build_recovery_detail(_FC(), {"acwr": 2.0, "acwr_status": "HIGH", "load_high": True},
+                                      {"blocked": True, "label": "щадящий режим · L5/S1"})
+    assert "Нагрузка выше обычного" in out["coach"]
+    assert "щадящий режим" in out["coach"]
+    assert out["hrv_last"] is None and out["hrv_avg7"] is None
+
+
+def test_build_sleep_detail_flags_shorter_than_average(monkeypatch):
+    history = [{"date": f"2026-09-{i+1:02d}", "Чистый_сон_мин": 420, "Глубокий_сон_мин": 70,
+                "REM_сон_мин": 90, "Эффективность_сна_": 88} for i in range(14)]
+    monkeypatch.setattr(vita, "_recent_daily_values", lambda cur, cols, days: history)
+    monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [])
+    out = vita.build_sleep_detail(_FC(), sleep_min_today=380)
+    assert out["avg14_min"] == 420
+    assert out["delta_min"] == -40
+    assert "Короче среднего" in out["coach"]
+    assert out["deep_min"] == 70 and out["rem_min"] == 90 and out["efficiency_pct"] == 88
+    assert len(out["history"]) == 14 and out["history"][0]["hours"] == 7.0
+
+
+def test_build_sleep_detail_no_history_is_honest_not_fake():
+    out = vita.build_sleep_detail(_FC(), sleep_min_today=400)
+    assert out["avg14_min"] is None and out["delta_min"] is None
+    assert "не хватает" in out["coach"]
+
+
+def test_build_move_detail_uses_gate_for_coach(monkeypatch):
+    monkeypatch.setattr(vita, "_recent_daily_values", lambda cur, cols, days: [])
+    monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [])
+    steps = {"now_steps": 4200, "target": 12000, "status_word": "в темпе", "behind_pace": False}
+    out = vita.build_move_detail(_FC(), steps, {"blocked": True, "label": "щадящий режим"})
+    assert out["steps_now"] == 4200 and out["steps_target"] == 12000
+    assert "щадящего режима" in out["coach"]
+
+
+def test_build_food_topic_detail_returns_publications(monkeypatch):
+    monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [{"title": "x", "grade": "RCT", "why": "", "url": None}])
+    out = vita.build_food_topic_detail(_FC())
+    assert out["segment"] == "food"
+    assert len(out["publications"]) == 1
+
+
 # ─────── ring.ahead — виртуальное выполнение главной подсказки ───────
 
 def test_main_action_segment_food_when_protein_gap_large():
@@ -930,3 +995,48 @@ def test_state_normal_day_has_real_numbers(monkeypatch):
     assert out["chips"]["sleep_min"] == 424
     assert out["chips"]["hrv"]["value"] == 52
     assert out["chips"]["protein_consumed"] == 90.0
+
+
+# =====================================================================
+# Vita v2, этап 2 — GET /vita/topic/{segment} (живые данные, реальный DB)
+# =====================================================================
+
+def test_vita_topic_401_without_cookie():
+    r = client.get("/vita/topic/recovery")
+    assert r.status_code == 401
+
+
+def test_vita_topic_404_unknown_segment():
+    r = client.get("/vita/topic/bogus", cookies=_cookie())
+    assert r.status_code == 404
+
+
+def test_vita_topic_recovery_200_has_expected_keys():
+    r = client.get("/vita/topic/recovery", cookies=_cookie())
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("hrv_last", "hrv_avg7", "hrv_avg30", "hrv_history", "resting_hr", "acwr", "coach", "publications"):
+        assert key in body
+
+
+def test_vita_topic_sleep_200_has_expected_keys():
+    r = client.get("/vita/topic/sleep", cookies=_cookie())
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("last_night_min", "avg14_min", "delta_min", "history", "deep_min", "rem_min",
+                "efficiency_pct", "coach", "publications"):
+        assert key in body
+
+
+def test_vita_topic_move_200_has_expected_keys():
+    r = client.get("/vita/topic/move", cookies=_cookie())
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("steps_now", "steps_target", "history_daily", "coach", "publications"):
+        assert key in body
+
+
+def test_vita_topic_food_200_has_publications():
+    r = client.get("/vita/topic/food", cookies=_cookie())
+    assert r.status_code == 200
+    assert "publications" in r.json()

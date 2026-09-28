@@ -14,6 +14,7 @@ get_health_dashboard()/get_today_nutrition() (app/dashboard.py), не копир
 import json
 import logging
 import re
+import statistics
 from datetime import timedelta
 from typing import Optional
 
@@ -214,6 +215,120 @@ def build_index_breakdown(today: dict, health: dict) -> list[dict]:
         rows.append({"mark": _JUDGMENT_MARK[_budget_judgment(b)], "label": b["label"],
                      "detail": f"{b['consumed']}/{b['cap']} {b['unit']}", "segment": "food"})
     return rows
+
+
+# =====================================================================
+# Детали кругляша (Vita v2, этап 2, 2026-09-28) — живая просьба Влада после
+# первого фикса ("список тот же, только отфильтрованный — в макете не так"):
+# взять реальные шторки макета (recovery()/topic('sleep')/move()/nutr()) и
+# подключить настоящие данные, а не просто резать общий breakdown. У каждого
+# сегмента — своя история/статистика из health.daily_trends (была не нужна
+# ДО этого момента — калибровке/сериям хватало последнего дня, здесь нужны
+# графики) + реальные публикации card.publication по теме (157 строк в базе,
+# не выдуманные). Честно НЕ реализовано (нет источника данных вообще):
+# почасовой график шагов внутри дня (health.* хранит только суточный итог,
+# см. health.live_steps_today) и недельная тепловая карта микронутриентов
+# (нет референсных норм по каждому нутриенту в системе — не то же самое,
+# что просто просуммировать историю). "Движение" ниже честно показывает
+# ДНЕВНОЙ (не часовой) тренд шагов за неделю вместо этого.
+# =====================================================================
+
+_TOPIC_PUB_TERM = {"recovery": "heart rate variability", "sleep": "sleep",
+                    "move": "physical activity", "food": "protein"}
+
+
+def _recent_daily_values(cur, columns: list[str], days: int) -> list[dict]:
+    """Последние `days` дней выбранных колонок health.daily_trends, по
+    возрастанию даты — независимо от _fetch_history/_DAILY_TRENDS_COLS (та
+    тяжелее, тянет ещё meals/targets, не нужные для графиков сегмент-шторок)."""
+    cols = ", ".join(f'"{c}"' for c in (["Дата"] + columns))
+    cur.execute(f'SELECT {cols} FROM health.daily_trends ORDER BY "Дата" DESC LIMIT %s', (days,))
+    rows = [dict(zip(["Дата"] + columns, r)) for r in cur.fetchall() if r[0]]
+    rows.reverse()
+    return [{"date": r["Дата"].isoformat(), **{c: _num(r[c]) for c in columns}} for r in rows]
+
+
+def _topic_publications(cur, segment: str, limit: int = 5) -> list[dict]:
+    from app.consilium import _relevant_publications
+    from app.research_scan import _GRADE_LABEL
+
+    pubs = _relevant_publications(cur, _TOPIC_PUB_TERM.get(segment, ""), limit=limit)
+    return [{"title": p["title"], "grade": _GRADE_LABEL.get(p.get("design_type"), p.get("design_type") or "тип не определён"),
+             "why": p.get("why_for_you") or "", "url": p.get("url")} for p in pubs]
+
+
+def build_recovery_detail(cur, today: dict, gate: dict) -> dict:
+    history = _recent_daily_values(cur, ["ВСР_ночная"], 30)
+    vals = [r["ВСР_ночная"] for r in history if r["ВСР_ночная"] is not None]
+    rhr_row = _recent_daily_values(cur, ["Пульс_ночной_средний"], 1)
+    acwr, acwr_status, load_high = today.get("acwr"), today.get("acwr_status"), today.get("load_high")
+    if load_high:
+        coach = "Нагрузка выше обычного — восстановление сейчас в приоритете."
+    elif acwr_status == "LOW":
+        coach = "Нагрузка низкая, восстановление в порядке — можно держать текущий темп."
+    else:
+        coach = "Восстановление в норме, ограничений по нагрузке нет."
+    if gate.get("blocked"):
+        coach += f" {gate['label']} — без ударных нагрузок."
+    return {
+        "segment": "recovery",
+        "hrv_last": vals[-1] if vals else None,
+        "hrv_avg7": round(statistics.mean(vals[-7:]), 1) if vals else None,
+        "hrv_avg30": round(statistics.mean(vals), 1) if vals else None,
+        "hrv_history": [{"date": r["date"], "value": r["ВСР_ночная"]} for r in history if r["ВСР_ночная"] is not None],
+        "resting_hr": rhr_row[0]["Пульс_ночной_средний"] if rhr_row else None,
+        "acwr": acwr, "acwr_status": acwr_status,
+        "coach": coach,
+        "publications": _topic_publications(cur, "recovery"),
+    }
+
+
+def build_sleep_detail(cur, sleep_min_today: Optional[int]) -> dict:
+    history_min = _recent_daily_values(cur, ["Чистый_сон_мин", "Глубокий_сон_мин", "REM_сон_мин", "Эффективность_сна_"], 14)
+    hours_history = [{"date": r["date"], "hours": round(r["Чистый_сон_мин"] / 60, 2)}
+                      for r in history_min if r["Чистый_сон_мин"] is not None]
+    minutes = [r["Чистый_сон_мин"] for r in history_min if r["Чистый_сон_мин"] is not None]
+    avg14 = round(statistics.mean(minutes)) if minutes else None
+    last = history_min[-1] if history_min else {}
+    delta = (sleep_min_today - avg14) if (sleep_min_today is not None and avg14) else None
+    if delta is None:
+        coach = "Пока рано сравнивать со средним — данных за 14 ночей не хватает."
+    elif delta >= 15:
+        coach = f"Сон длиннее среднего на {delta} мин — хорошая база для серии."
+    elif delta <= -15:
+        coach = f"Короче среднего на {abs(delta)} мин — сегодня стоит лечь пораньше."
+    else:
+        coach = "Сон стабилен, в пределах обычного диапазона."
+    return {
+        "segment": "sleep",
+        "last_night_min": sleep_min_today, "avg14_min": avg14, "delta_min": delta,
+        "history": hours_history,
+        "deep_min": last.get("Глубокий_сон_мин"), "rem_min": last.get("REM_сон_мин"),
+        "efficiency_pct": last.get("Эффективность_сна_"),
+        "coach": coach,
+        "publications": _topic_publications(cur, "sleep"),
+    }
+
+
+def build_move_detail(cur, steps: dict, gate: dict) -> dict:
+    # "Шаги_за_вчера" — единственная посуточная история шагов в системе
+    # (см. докстринг секции выше: часовой разбивки нет вообще).
+    history = [{"date": r["date"], "steps": int(r["Шаги_за_вчера"])}
+               for r in _recent_daily_values(cur, ["Шаги_за_вчера"], 7) if r["Шаги_за_вчера"] is not None]
+    coach = ("Цель снижена на время щадящего режима: ходьба и плавание, без бега и прыжков."
+             if gate.get("blocked") else "Ограничений по нагрузке нет — держи темп.")
+    return {
+        "segment": "move",
+        "steps_now": steps.get("now_steps"), "steps_target": steps.get("target"),
+        "status_word": steps.get("status_word"), "behind_pace": steps.get("behind_pace"),
+        "history_daily": history,
+        "coach": coach,
+        "publications": _topic_publications(cur, "move"),
+    }
+
+
+def build_food_topic_detail(cur) -> dict:
+    return {"segment": "food", "publications": _topic_publications(cur, "food")}
 
 
 # =====================================================================
@@ -1029,3 +1144,32 @@ def vita_case_evidence_endpoint(problem_id: str, _: None = Depends(require_sessi
     if result is None:
         raise HTTPException(status_code=404, detail="кейс не найден")
     return result
+
+
+_TOPIC_SEGMENTS = ("recovery", "sleep", "move", "food")
+
+
+@router.get("/vita/topic/{segment}")
+def vita_topic_endpoint(segment: str, _: None = Depends(require_session)) -> dict:
+    """Vita v2, этап 2 (живая просьба Влада) — детали конкретного кругляша:
+    история/статистика из health.daily_trends + реальные публикации по теме,
+    подгружается лениво по тапу (та же схема, что /vita/yesterday и
+    /vita/cases/{id}/evidence — не раздувает /vita/today ради данных,
+    нужных только при открытой шторке)."""
+    if segment not in _TOPIC_SEGMENTS:
+        raise HTTPException(status_code=404, detail=f"неизвестный сегмент: {segment}")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            today = get_today_dashboard(cur)
+            gate = build_gate(today)
+            if segment == "recovery":
+                return build_recovery_detail(cur, today, gate)
+            if segment == "sleep":
+                health = get_health_dashboard(cur)
+                metric_by_key = {m["key"]: m for m in (health.get("metrics") or [])}
+                sleep_min = metric_by_key.get("sleep_min", {}).get("value")
+                return build_sleep_detail(cur, sleep_min)
+            if segment == "move":
+                steps = build_steps(cur, gate)
+                return build_move_detail(cur, steps, gate)
+            return build_food_topic_detail(cur)
