@@ -605,6 +605,10 @@ svg{display:block}
 .lchip em{font-style:normal;color:var(--muted);margin-left:4px;font-variant-numeric:tabular-nums}
 .lchip.on{background:var(--accent);color:#fff;box-shadow:none}
 .lchip.on em{color:rgba(255,255,255,.8)}
+.ls-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:14px}
+.ls-row b{font-weight:600;font-variant-numeric:tabular-nums}
+.ls-miss{margin-top:8px;font-size:12.5px;color:var(--warm-ink)}
+.ls-note{margin-top:8px;font-size:11.5px;color:var(--muted)}
 .ls-next{display:flex;gap:7px;align-items:flex-start;margin-top:12px;font-size:12.5px;line-height:1.45;color:var(--ink2)}
 .ls-next svg{flex:none;width:13px;height:13px;color:var(--teal);margin-top:2px}
 .grp .lbl{margin-bottom:4px}
@@ -1367,6 +1371,7 @@ async function loadToday(){[TODAY,RHYTHM]=await Promise.all([fetchJSON('/vita/to
 async function loadYesterday(){if(!yestLoaded){YEST=await fetchJSON('/vita/yesterday');yestLoaded=true}return YEST}
 /* ================= ВРАЧ и Я (сверка с макетом v7) — /vita/doctor, /vita/me, /vita/medpassport ================= */
 let DOC=null,ME=null,MEDP=null;
+let curLab='',curPanel=0;  /* выбранная лаба и вкладка дат («Сдачи») */
 async function loadDoctor(force){if(DOC&&!force)return;DOC=await fetchJSON('/vita/doctor')}
 async function loadMe(force){if(ME&&!force)return;ME=await fetchJSON('/vita/me')}
 async function loadMedp(){if(!MEDP)MEDP=await fetchJSON('/vita/medpassport');return MEDP}
@@ -1411,9 +1416,9 @@ function renderDoctor(){if(!DOC)return;const c=DOC.consilium,n=(DOC.notes||[])[0
   if(d){const days=Math.round((new Date(d.date+'T00:00:00')-new Date(new Date().toDateString()))/864e5);
     $('#nextDraw').innerHTML=`<div class="nd-k"><span>Следующая сдача</span><b>${days<=0?'сегодня':'через '+days+' '+plural(days,'день','дня','дней')}</b></div>
     <div class="nd-d">${dateFmt(d.date).replace(/^[^,]*, /,'')}</div>
-    <div class="nd-m"><b>${d.n} ${plural(d.n,'анализ','анализа','анализов')}</b>${d.price_rub?` · <b>${fmt(d.price_rub)} ₽</b>`:''}${d.fasting?' · натощак':''}</div>
+    <div class="nd-m"><b>${d.n} ${plural(d.n,'анализ','анализа','анализов')}</b>${d.price_rub?` · <b>${fmt(d.price_rub)} ₽</b>`:''}${d.lab_name?` · ${esc(d.lab_name)}`:''}${d.fasting?' · натощак':''}</div>
     <button class="btnP press" data-a="draw">Что сдаём</button>`}
-  $('#dates').innerHTML=(DOC.draws||[]).length>1?`<span>Сдачи:</span>`+DOC.draws.map((x,i)=>`<span class="dpill${i?'':' on'}">${shortDate(x.date)}</span>`).join(''):'';
+  $('#dates').innerHTML=(DOC.draws||[]).length>1?`<span>Сдачи:</span>`+DOC.draws.map((x,i)=>`<button class="dpill press${i===curPanel?' on':''}" data-a="drawp" data-k="${i}" aria-label="Сдача ${shortDate(x.date)}">${shortDate(x.date)}</button>`).join(''):'';
   $$('.rise',$('#s-plan')).forEach(e=>e.classList.add('in'));
 }
 function renderMe(){if(!ME)return;const pa=ME.phenoage||{},h=ME.history||[],dr=ME.drivers||[],sy=ME.systems||[];
@@ -1788,6 +1793,7 @@ const B={
     const groups={};d.markers.forEach(m=>{const g=m.category||'Прочее';(groups[g]=groups[g]||[]).push(m)});
     return {html:`${top('Сдача · '+shortDate(d.date))}
     <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${d.n}</b><span>${plural(d.n,'анализ','анализа','анализов')}${d.price_rub?' · '+fmt(d.price_rub)+' ₽':''}</span></div><p class="fsub">${dateFmt(d.date)}${d.fasting?' · натощак':''}${d.tubes.length?' · пробирки: '+d.tubes.join(', '):''}</p></div>
+    ${(d.labs&&d.labs.length&&d.pick)?`<div class="fsec rise" style="--i:2"><span class="lbl">Лаборатория и цена</span><div class="labSum"><div class="ls-row"><span>${d.pick.covered} из ${d.pick.n} анализов</span><b>${fmt(d.pick.price_rub)} ₽</b></div><div class="ls-labs">${d.labs.map(l=>`<button class="lchip press${l.key===d.pick.key?' on':''}" data-a="lab" data-k="${esc(l.key)}" title="${l.cheapest?'дешевле всего':''}">${esc(l.name)}<em>${fmt(l.price_rub)} ₽</em></button>`).join('')}</div>${d.pick.missing.length?`<p class="ls-miss">${esc(d.pick.name)} не делает: ${d.pick.missing.map(esc).join(', ')}.</p>`:''}<p class="ls-note">Прайс от ${d.pick.parsed_at?shortDate(d.pick.parsed_at.slice(0,10)):'—'}${d.labs.length>1?` · дешевле всего: ${esc(d.pick.name)}`:''}. Тап по лабе — пересчитать.${(()=>{const n=d.pick.breakdown.reduce((s,b)=>s+(b.extra?b.extra.length:0),0);return n?` В комплексы входят ещё ${n} ${plural(n,'показатель','показателя','показателей')} — про запас.`:''})()}</p></div></div>`:''}
     ${Object.entries(groups).map(([g,ms],i)=>`<div class="fsec rise" style="--i:${2+i}"><span class="lbl">${g}</span><div class="rows">${ms.map(m=>row(svg('tube'),'',m.name,m.why||'',m.fasting?'<span class="rV" style="font-size:12px">натощак</span>':'')).join('').replace(/<small>/g,'<small class="wrap">')}</div></div>`).join('')}
     ${d.shifted.length?`<p class="gvNote rise" style="--i:8">Сдвинуто ради одного забора: ${d.shifted.map(x=>x.name).join(', ')}.</p>`:''}
     ${d.export_text?`<button class="btnP press rise" style="--i:9" data-a="copydraw">Скопировать список для лаборатории</button>`:''}
@@ -1869,7 +1875,7 @@ function closeSheet(opt={}){if(!ov.classList.contains('open'))return;haptic();
     }
   }
   settle(()=>{if(ov.classList.contains('open'))return;ov.classList.remove('show');morph.style.cssText='';ov.style.cssText='';ovAnims.forEach(x=>x.cancel());ovAnims=[];appEl.classList.remove('morphing');sheetInert(false);if(sheetReturn&&sheetReturn.isConnected){try{sheetReturn.focus({preventScroll:true})}catch(e){}}})}
-function refreshSheet(){if(!['today','index'].includes(sheetKey))return;
+function refreshSheet(){if(!['today','index','draw'].includes(sheetKey))return;
   ovS.innerHTML=B[sheetKey]().html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}
 let drag=null,dragged=false;
 const dStart=(y)=>{if(!ov.classList.contains('open')||ovS.scrollTop>0||ovAnims.some(a=>a.playState==='running'))return;drag={y,t:performance.now(),dy:0,on:false}};
@@ -2004,6 +2010,10 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'micro':{haptic();const w=t.closest('.hmW'),on=!w.classList.contains('open');$$('.hmW',ovS).forEach(x=>x.classList.remove('open'));w.classList.toggle('open',on);break}
     case'foodyest':haptic();openSheet('foodYest',null,t);break;
     case'medpass':haptic();loadMedp().then(mp=>openSheet('medpass',mp,t)).catch(()=>toast('Не удалось загрузить медпаспорт'));break;
+    case'lab':{haptic();const k=t.dataset.k;if(!k||k===curLab)break;
+      fetchJSON('/vita/doctor?lab='+encodeURIComponent(k)).then(doc=>{DOC=doc;curLab=k;renderDoctor();refreshSheet()}).catch(()=>toast('Не удалось пересчитать под лабу'));break}
+    case'drawp':{haptic();const i=Math.max(0,+t.dataset.k||0);
+      fetchJSON('/vita/doctor?panel='+i+(curLab?'&lab='+encodeURIComponent(curLab):'')).then(doc=>{DOC=doc;curPanel=i;renderDoctor();openSheet('draw',null,t)}).catch(()=>toast('Не удалось открыть сдачу'));break}
     case'copydraw':{haptic();const x=DOC&&DOC.next_draw&&DOC.next_draw.export_text;if(!x)break;
       (navigator.clipboard?navigator.clipboard.writeText(x):Promise.reject()).then(()=>toast('Список скопирован — вставь в заявку лаборатории.')).catch(()=>toast('Не удалось скопировать'));break}
     case'gochecks':haptic();if(ov.classList.contains('open'))closeSheet();if(k)qMode=k;goTab('cases',true);break;
