@@ -1244,6 +1244,20 @@ def build_week(cur, today_iso: str) -> Optional[dict]:
 # lab_optimizer.generate_plan. shape_doctor — чистая, тестируется без базы.
 # =====================================================================
 
+def _marker_group(source_type: str, code: str) -> str:
+    """Группа в шторке «Сдача» — КТО назначил, а не система организма
+    (просьба Влада, 29.09: «какие анализы входят в панель PhenoAge, а какие
+    назначил ИИ врач; группировать по органам не надо»)."""
+    if source_type == "standing":
+        from app.lab_catalog import PHENOAGE_PANEL_MARKERS
+        return "Панель PhenoAge" if code in PHENOAGE_PANEL_MARKERS else "Плановый мониторинг"
+    if source_type == "intervention_monitor":
+        return "Контроль добавки"
+    if source_type in ("manual", "recommendation"):
+        return "Назначил врач"
+    return "По показаниям"
+
+
 def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict], plan: dict,
                  panel: int = 0) -> dict:
     latest = next((r for r in reports if r.get("status") == "completed"), None)
@@ -1269,6 +1283,7 @@ def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict],
             "lab_name": pick.get("name"), "labs": p.get("labs") or [], "pick": pick or None,
             "export_text": p.get("export_text"),
             "markers": [{"name": m["name"], "why": m.get("why") or "", "category": m.get("category"),
+                         "group": _marker_group(m.get("source_type") or "", m.get("code") or ""),
                          "fasting": m.get("fasting_required"), "source": m.get("source_type")} for m in p["markers"]],
             "shifted": p.get("shifted") or [],
         }

@@ -43,6 +43,7 @@ from app.db import schema
 from app.lab_catalog import (
     INTERVENTION_MONITOR_RULES,
     LAB_CATALOG,
+    PHENOAGE_PANEL_MARKERS,
     find_markers_in_text,
     parse_relative_days,
 )
@@ -214,6 +215,19 @@ def _build_panels(due_items: list[DueItem], today: date, horizon_days: int,
     urgent = [it for it in items if it.urgent]
     normal = [it for it in items if not it.urgent]
 
+    # Панель PhenoAge АТОМАРНА (правило одного дня, Влад 2026-09-29): формула
+    # Levine честна только по крови одного забора, «дособирать» маркеры с
+    # разных дат бессмысленно. Все 9 стоящих PhenoAge-маркеров едут одним
+    # забором с самым ранним сроком среди них (псевдо-элемент разворачивается
+    # в состав группы ниже) и никогда не подрезаются лимитом на забор.
+    pheno_set = frozenset(PHENOAGE_PANEL_MARKERS)
+    pheno_unit = [it for it in normal if it.code in pheno_set]
+    if pheno_unit:
+        normal = [it for it in normal if it.code not in pheno_set]
+        normal.append(DueItem("__phenoage__", min(it.due_date for it in pheno_unit),
+                              "standing", None, "панель PhenoAge одним забором"))
+        normal.sort(key=lambda it: (it.due_date, it.code))
+
     for it in urgent:
         raw_panels.append((max(it.due_date, today), [it]))
         conflicts.append({
@@ -250,8 +264,11 @@ def _build_panels(due_items: list[DueItem], today: date, horizon_days: int,
         remaining = rest
         panel_date = anchor_effective
 
+        if "__phenoage__" in {it.code for it in group}:
+            group = [it for it in group if it.code != "__phenoage__"] + pheno_unit
         if len(group) > max_per_draw:
-            group.sort(key=lambda it: (it.due_date, it.code))
+            # подрезка не выкидывает PhenoAge-маркеры (один забор — не договорённость)
+            group.sort(key=lambda it: (it.code not in pheno_set, it.due_date, it.code))
             overflow = group[max_per_draw:]
             group = group[:max_per_draw]
             push_date = panel_date + timedelta(days=OVERFLOW_PUSH_DAYS)

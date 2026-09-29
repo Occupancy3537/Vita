@@ -39,6 +39,14 @@ from app.lab_prices_map import COVERS
 
 logger = logging.getLogger(__name__)
 
+# Легаси-компоненты ОАК, которые НИ ОДНА лаба не продаёт отдельной позицией:
+# M047 «Цветовой показатель» — устаревший расчётный (современные анализаторы
+# не выдают, MCHC уже в каталоге), M060 «Палочкоядерные %» — только ручной
+# подсчёт диффа. Они остаются в плане и в export_text (это маркеры наблюдения),
+# но из ЦЕНОВОЙ математики исключены — иначе каждая лаба вечна «с дыркой»,
+# и честное правило «полные лабы — вперёд» никогда не срабатывает.
+NOT_SEPARATELY_ORDERABLE = {"M047", "M060"}
+
 
 @dataclass(frozen=True)
 class LabItem:
@@ -131,35 +139,89 @@ def _missing_names(codes: list[str]) -> list[str]:
     return [LAB_CATALOG[c]["name"] if c in LAB_CATALOG else c for c in codes]
 
 
+_RU_MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
+
+
+def _plural_ru(n: int) -> str:
+    # копия lab_optimizer._plural_ru: импортировать его сюда нельзя — там
+    # psycopg на уровне модуля, а ядро цен обязано тестироваться без БД
+    if n % 10 == 1 and n % 100 != 11:
+        return ""
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "а"
+    return "ов"
+
+
+def _ru_money(v: float) -> str:
+    return f"{v:,.0f}".replace(",", " ")
+
+
+def build_export_text(panel: dict, pick: dict) -> str:
+    """Список ЗАКУПКИ для выбранной лаборатории: какие ПОЗИЦИИ прайса заказать
+    (код лабы + название + цена + что закрывает), чтобы итог сошёлся с ценой
+    оффера. Это не список маркеров (он и так на экране), а ровно то, что
+    диктует оператору в лаборатории: комплексы не развёрнуты в синглы,
+    синглы не слиты в комплексы. Пробирки — количеством, не типами (по макету)."""
+    tubes = panel.get("tube_types") or []
+    d_iso = panel.get("date") or ""
+    try:
+        from datetime import date as _d
+        dd = _d.fromisoformat(d_iso)
+        date_txt = f"{dd.day} {_RU_MONTHS[dd.month - 1]}"
+    except ValueError:
+        date_txt = d_iso
+    n = pick.get("n") or panel.get("n_markers") or 0
+    lines = [f"{date_txt} — панель из {n} анализ{_plural_ru(n)}, пробирки: {len(tubes)}"
+             + (", натощак" if panel.get("fasting_required") else "") + "."]
+    lines.append(f"{pick.get('name', '')}, {_ru_money(pick.get('price_rub') or 0)} ₽"
+                 f" (прайс от {str(pick.get('parsed_at') or '')[:10]}):")
+    for i, b in enumerate(pick.get("breakdown") or [], 1):
+        covers = ", ".join(LAB_CATALOG[c]["name"] for c in b.get("covers", []) if c in LAB_CATALOG)
+        note = f" [{b['note']}]" if b.get("note") else ""
+        lines.append(f"{i}. {b.get('code')} {b.get('name')} — {_ru_money(b.get('price_rub') or 0)} ₽{note}")
+        if covers:
+            lines.append(f"   закрывает: {covers}")
+    for m in pick.get("missing") or []:
+        lines.append(f"«{m}» — {pick.get('name', 'лаборатория')} не делает, сдать в другой лаборатории.")
+    lines.append(f"Итого: {_ru_money(pick.get('price_rub') or 0)} ₽.")
+    return "\n".join(lines)
+
+
 def panel_offers(codes: list[str], items_by_lab: dict[str, list[LabItem]]) -> list[dict]:
     """Офферы всех лаб по готовой панели. Сортировка результата: полностью
     покрывающие по возрастанию цены (тай-брейк — key лабы), лабы с дырками
-    после них. Первый элемент = pick."""
-    codes = sorted(set(codes))
-    if not codes:
+    после них. Первый элемент = pick.
+
+    Не заказываемые отдельно маркеры (NOT_SEPARATELY_ORDERABLE) из ценовой
+    математики исключены, но в covered ЗАСЧИТЫВАЮТСЯ как покрытые (денежно они
+    бесплатны и идут в составе ОАК) — чтобы сводка «N из N» сходилась с числом
+    маркеров панели, а missing содержал только реальные дыры лабы."""
+    all_codes = sorted(set(codes))
+    priceable = [c for c in all_codes if c not in NOT_SEPARATELY_ORDERABLE]
+    if not priceable:
         return []
     offers = []
     for lab in sorted(items_by_lab):
         items = items_by_lab[lab]
-        sol = min_cover(codes, items)
+        sol = min_cover(priceable, items)
         if sol is None:
             continue
         chosen = sol["items"]
         breakdown = []
         for it in chosen:
-            in_panel = sorted(set(it.covers) & set(codes))
+            in_panel = sorted(set(it.covers) & set(priceable))
             breakdown.append({
                 "code": it.external_code, "name": it.name,
                 "price_rub": round(it.price_rub, 2), "covers": in_panel,
-                "extra": sorted(set(it.covers) - set(codes)),  # «в комплекс входят ещё N — про запас»
+                "extra": sorted(set(it.covers) - set(priceable)),  # «в комплекс входят ещё N — про запас»
                 "note": None,  # заполняется ниже из NOTES
             })
         offers.append({
             "key": lab,
             "name": chosen[0].lab_name if chosen else lab,
             "price_rub": sol["cost"],
-            "covered": len(codes) - len(sol["missing"]),
-            "n": len(codes),
+            "covered": len(all_codes) - len(sol["missing"]),
+            "n": len(all_codes),
             "missing": _missing_names(sol["missing"]),
             "breakdown": breakdown,
             "parsed_at": sol["parsed_at"].isoformat() if sol["parsed_at"] else None,
@@ -201,3 +263,6 @@ def attach(cur, plan: dict, chosen_lab: Optional[str] = None) -> None:
             pick = next((o for o in offers if o["key"] == chosen_lab), pick)
         p["labs"] = offers
         p["pick"] = pick
+        # экспорт = список закупки выбранной лабы (коды позиций, комплексы,
+        # итог); без цен остаётся прежний маркер-список из lab_optimizer
+        p["export_text"] = build_export_text(p, pick)
