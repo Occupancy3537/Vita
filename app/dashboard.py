@@ -586,11 +586,25 @@ def get_bioage_dashboard(cur) -> dict:
         delta = _num(pl_latest["delta"])
         if delta is None and pa is not None and chrono is not None:
             delta = round((pa - chrono) * 100) / 100
+        measured = sorted(str(mv["measured"])[:10] for mv in mvals.values() if mv.get("measured"))
+        spread_days = 0
+        if len(measured) >= 2:
+            from datetime import date as _d
+            dts = [_d.fromisoformat(x) for x in measured]
+            spread_days = (max(dts) - min(dts)).days
         phenoage = {
             "date": _d10_text(pl_latest["date"]), "value": pa, "chrono_age": chrono, "delta": delta,
             "formula_version": pl_latest["formula_version"], "missing": [],
             "oldest_marker_date": pl_latest["oldest_marker_date"] or None,
+            "single_day": spread_days == 0,
         }
+        if spread_days:
+            # Правило одного дня (Влад 2026-09-29): PhenoAge по крови из разных
+            # заборов — не честный биовозраст. Показываем, но помечаем.
+            phenoage["note"] = (f"маркеры сдавались в разные дни ({measured[0]} — {measured[-1]}, "
+                                f"разброс {spread_days} дн.) — PhenoAge оценочный, "
+                                "пересчитается после полной панели одним забором")
+
         drivers.append({"label": "Хроно", "marker": None, "years": chrono, "type": "total"})
         for k in key_label:
             if contrib.get(k) is None:
