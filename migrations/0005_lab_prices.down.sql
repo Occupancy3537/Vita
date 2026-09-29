@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS card.lab_item;
+DROP TABLE IF EXISTS card.lab;

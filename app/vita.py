@@ -1244,7 +1244,8 @@ def build_week(cur, today_iso: str) -> Optional[dict]:
 # lab_optimizer.generate_plan. shape_doctor — чистая, тестируется без базы.
 # =====================================================================
 
-def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict], plan: dict) -> dict:
+def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict], plan: dict,
+                 panel: int = 0) -> dict:
     latest = next((r for r in reports if r.get("status") == "completed"), None)
     consilium_block = None
     if latest:
@@ -1259,11 +1260,14 @@ def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict],
         }
     panels = plan.get("panels") or []
     next_draw = None
-    if panels:
-        p = panels[0]
+    p = panels[panel] if 0 <= panel < len(panels) else (panels[0] if panels else None)
+    if p:
+        pick = p.get("pick") or {}  # цены лаб (этап 1 плана docs/PRICES_PLAN_QWEN.md)
         next_draw = {
             "date": p["date"], "n": p["n_markers"], "fasting": p["fasting_required"], "tubes": p["tube_types"],
-            "price_rub": p.get("total_price_rub"), "export_text": p.get("export_text"),
+            "price_rub": pick.get("price_rub") or p.get("total_price_rub"),
+            "lab_name": pick.get("name"), "labs": p.get("labs") or [], "pick": pick or None,
+            "export_text": p.get("export_text"),
             "markers": [{"name": m["name"], "why": m.get("why") or "", "category": m.get("category"),
                          "fasting": m.get("fasting_required"), "source": m.get("source_type")} for m in p["markers"]],
             "shifted": p.get("shifted") or [],
@@ -1278,12 +1282,14 @@ def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict],
     }
 
 
-def build_doctor(cur) -> dict:
-    from app import consilium, lab_optimizer
+def build_doctor(cur, lab=None, panel: int = 0) -> dict:
+    from app import consilium, lab_optimizer, lab_prices
     from app.doctor.context import _labs_out_of_range, _recent_doctor_notes
     reports = consilium.get_consilium_reports(cur, limit=5)["reports"]
+    plan = lab_optimizer.generate_plan(cur)
+    lab_prices.attach(cur, plan, chosen_lab=lab)  # цены поверх готового состава — даты/пробирки не трогает
     return shape_doctor(reports, _recent_doctor_notes(cur, limit=3), _labs_out_of_range(cur, limit=10),
-                        lab_optimizer.generate_plan(cur))
+                        plan, panel=panel)
 
 
 # =====================================================================
@@ -1528,10 +1534,13 @@ def vita_case_evidence_endpoint(problem_id: str, _: None = Depends(require_sessi
 # =====================================================================
 
 @router.get("/vita/doctor")
-def vita_doctor_endpoint(_: None = Depends(require_session)) -> dict:
+def vita_doctor_endpoint(lab: str = "", panel: int = 0,
+                         _: None = Depends(require_session)) -> dict:
+    # lab — выбрать лабу в карточке сдачи (тап по чипу), panel — вкладка дат
+    # (живые dpill): обе опциональны, дефолт = cheapest-лаба и первая панель.
     with get_conn() as conn:
         with conn.cursor() as cur:
-            return build_doctor(cur)
+            return build_doctor(cur, lab=lab.strip() or None, panel=max(0, panel))
 
 
 @router.get("/vita/medpassport")

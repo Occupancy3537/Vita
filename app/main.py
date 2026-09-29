@@ -404,16 +404,22 @@ def outcomes_quarterly(token: str = Query(default="")) -> dict:
 
 @app.get("/labs/plan")
 def labs_plan(token: str = Query(default=""), horizon_days: int = Query(default=180),
-              max_per_draw: int = Query(default=12)) -> dict:
+              max_per_draw: int = Query(default=12), lab: str = Query(default="")) -> dict:
     """Тикет «оптимизатор сдачи анализов» (2026-09-26, Часть 3.4) — план панелей
     на N дней вперёд (данные + API; витрина «План» — Vita v2, экран не здесь).
     Тот же DASHBOARD_TOKEN, что остальные /dashboard/* и /outcomes/* — НЕ в
     nginx-вайтлисте (K1, см. AGENT_SYNC #92), доступен только с 127.0.0.1
-    до появления экрана Vita, сознательно."""
+    до появления экрана Vita, сознательно.
+    lab (этап 1 плана docs/PRICES_PLAN_QWEN.md, 2026-09-29) — приклеить к
+    панелям цены лаб и выбрать pick'ом указанную (gemotest/invitro/tafi/unilab);
+    без параметра pick = самая дешёвая полнопокрывающая."""
     _check_dashboard_token(token)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            return lab_optimizer.generate_plan(cur, horizon_days=horizon_days, max_per_draw=max_per_draw)
+            plan = lab_optimizer.generate_plan(cur, horizon_days=horizon_days, max_per_draw=max_per_draw)
+            from app import lab_prices
+            lab_prices.attach(cur, plan, chosen_lab=lab.strip() or None)
+            return plan
 
 
 class LabRequestSyncRequest(BaseModel):

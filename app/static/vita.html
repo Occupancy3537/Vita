@@ -61,6 +61,11 @@
   --g-watch-fg:#F2A17B; --g-watch-bg:rgba(226,131,92,.18);
   --g-out-fg:#D97862; --g-out-bg:rgba(217,120,98,.18);
   --shadow-float:0 14px 40px rgba(0,0,0,.5); --shadow-frame:0 30px 90px rgba(0,0,0,.55);
+  /* плоские карточки тёмной темы — слито из отдельного блока (аудит Qwen P6), значения те же */
+  --card:#1A1F22;--card-sh:0 0 0 1px rgba(255,255,255,.045);--amber-soft:rgba(224,196,106,.14);
+  --t-sleep:var(--card);--t-hrv:var(--card);--t-energy:var(--card);--t-warm:var(--card);--t-neutral:var(--card);
+  --g-sleep:transparent;--g-hrv:transparent;--g-energy:transparent;--g-warm:transparent;--g-neutral:transparent;--card-edge:transparent;
+  --g-watch-fg:#E0C46A;--g-watch-bg:rgba(224,196,106,.14)
 }
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -88,6 +93,24 @@ svg{display:block}
 .lbl{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}
 .press{transition:scale .35s var(--ease)}
 .press.down{scale:.98}
+/* boot-скелетон, error-state, offline-баннер, мобильная тема (аудит Qwen P1/P3/P5) */
+.skel{position:relative;overflow:hidden;background:var(--line-soft)}
+.skel::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,var(--surface-hi),transparent);animation:skel 1.6s ease infinite}
+@keyframes skel{to{transform:translateX(100%)}}
+@media (prefers-reduced-motion:reduce){.skel::after{animation:none}}
+#bootSkel{margin-top:6px}
+#bootSkel[hidden],#bootErr[hidden],#netBan[hidden]{display:none}
+#bootErr{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:70px 24px 0}
+#bootErr .beIc{width:44px;height:44px;color:var(--warm);margin-bottom:4px}
+#bootErr h2{font-size:20px;font-weight:300;letter-spacing:-.01em}
+#bootErr p{font-size:13.5px;color:var(--ink2);max-width:260px;line-height:1.5}
+#bootRetry{margin-top:10px;min-height:44px;padding:0 26px;border-radius:22px;background:var(--ink);color:var(--bg);font-size:13.5px;font-weight:600}
+#netBan{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(104px + env(safe-area-inset-bottom,0px));z-index:60;padding:9px 14px;border-radius:16px;background:var(--ink);color:var(--bg);font-size:12.5px;font-weight:500;white-space:nowrap;box-shadow:var(--shadow-float)}
+.hright{display:flex;align-items:center;gap:8px}
+.tbTheme{display:none;flex:none;width:36px;height:36px;border-radius:18px;background:var(--chip-bg);box-shadow:inset 0 0 0 1px var(--line);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);place-items:center}
+.tbTheme svg{width:16px;height:16px;color:var(--ink2)}
+@media (max-width:899px),(max-height:719px){.tbTheme{display:grid}}
+#s-today.booting .chips,#s-today.booting .hero,#s-today.booting #needYou{display:none}
 .tag{display:inline-flex;align-items:center;height:21px;padding:0 9px;border-radius:7px;font-size:11px;font-weight:500;letter-spacing:.01em;white-space:nowrap;background:var(--line-soft);color:var(--ink2)}
 .grade{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:7px;font-size:11px;font-weight:500;white-space:nowrap}
 .grade.g-exc{color:var(--g-exc-fg);background:var(--g-exc-bg)}
@@ -115,7 +138,6 @@ svg{display:block}
 .switcher{position:relative;display:flex;gap:10px}
 .switcher button{position:relative;width:78px;height:32px;font-size:13px;font-weight:500;color:var(--muted);transition:color .3s ease;text-align:center}
 .switcher button.on{color:var(--ink)}
-.sw-under{position:absolute;bottom:2px;left:0;width:78px;height:2px;border-radius:2px;background:var(--accent);transition:transform .4s var(--spring)}
 .pager{flex:1;min-height:0;overflow:hidden;touch-action:pan-y}
 .track{display:flex;width:200%;height:100%;transition:transform .5s var(--spring);will-change:transform}
 .screen{height:100%;overflow-y:auto;overflow-x:hidden;padding:0 20px 112px;scrollbar-width:none;overscroll-behavior-y:contain}
@@ -583,6 +605,10 @@ svg{display:block}
 .lchip em{font-style:normal;color:var(--muted);margin-left:4px;font-variant-numeric:tabular-nums}
 .lchip.on{background:var(--accent);color:#fff;box-shadow:none}
 .lchip.on em{color:rgba(255,255,255,.8)}
+.ls-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:14px}
+.ls-row b{font-weight:600;font-variant-numeric:tabular-nums}
+.ls-miss{margin-top:8px;font-size:12.5px;color:var(--warm-ink)}
+.ls-note{margin-top:8px;font-size:11.5px;color:var(--muted)}
 .ls-next{display:flex;gap:7px;align-items:flex-start;margin-top:12px;font-size:12.5px;line-height:1.45;color:var(--ink2)}
 .ls-next svg{flex:none;width:13px;height:13px;color:var(--teal);margin-top:2px}
 .grp .lbl{margin-bottom:4px}
@@ -926,10 +952,6 @@ svg{display:block}
   --t-sleep:var(--card);--t-hrv:var(--card);--t-energy:var(--card);--t-warm:var(--card);--t-neutral:var(--card);
   --g-sleep:transparent;--g-hrv:transparent;--g-energy:transparent;--g-warm:transparent;--g-neutral:transparent;--card-edge:transparent;
   --g-watch-fg:#7E6512;--g-watch-bg:rgba(154,125,30,.13)}
-:root[data-theme="dark"]{--card:#1A1F22;--card-sh:0 0 0 1px rgba(255,255,255,.045);--amber-soft:rgba(224,196,106,.14);
-  --t-sleep:var(--card);--t-hrv:var(--card);--t-energy:var(--card);--t-warm:var(--card);--t-neutral:var(--card);
-  --g-sleep:transparent;--g-hrv:transparent;--g-energy:transparent;--g-warm:transparent;--g-neutral:transparent;--card-edge:transparent;
-  --g-watch-fg:#E0C46A;--g-watch-bg:rgba(224,196,106,.14)}
 /* типографика: 4 размера — число · заголовок · текст · подпись; без разрядки */
 .lbl{font-size:13px;letter-spacing:0;text-transform:none;font-weight:600;color:var(--ink2)}
 .secH{margin:0 2px 10px;align-items:center}
@@ -1176,19 +1198,13 @@ svg{display:block}
 .stLeg span{display:flex;align-items:center;gap:6px}
 .stLeg i{width:12px;height:12px;border-radius:3px}
 </style>
-<style>
-/* Vita v2, этап 1 — заглушки «скоро» для Врач/Проверки/Я (не в объёме этого тикета) */
-.soon-screen{display:flex;flex-direction:column;min-height:70vh}
-.soon{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:40px 24px;color:var(--muted)}
-.soon-ic{font-size:40px;opacity:.8}
-.soon p{max-width:280px;font-size:14.5px;line-height:1.5}
-</style>
 </head>
 <body>
 <div id="controls">
   <button id="themePill" class="pill" data-a="theme"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg><span id="themeLabel">Тема: светлая</span></button>
 </div>
 <div id="app">
+  <div id="netBan" hidden>Нет соединения — показаны последние данные</div>
   <div class="pullRefresh" id="pullRefresh"><span class="prSpin"></span></div>
   <main class="stage" id="stage">
     <!-- СЕГОДНЯ -->
@@ -1198,8 +1214,20 @@ svg{display:block}
       <div class="pager" id="pager">
         <div class="track" id="track">
           <div class="screen" id="s-today">
-            <div class="hdr onPhoto rise" style="--i:0"><span class="dnav"><button class="dArr press" id="dBack" data-a="dayback" aria-label="Вчера"><svg class="ic" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><span class="dcol"><span id="tDate"></span><button class="tSub press" id="tStatus" data-a="recovery"></button></span><button class="dArr press" id="dFwd" data-a="dayfwd" aria-label="Сегодня" hidden><svg class="ic" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button></span><button class="stPill press" id="streaks" data-a="streaks" aria-label="Серии"></button></div>
-            <div class="chips onPhoto rise" style="--i:1" id="chips"></div>
+            <div class="hdr onPhoto rise" style="--i:0"><span class="dnav"><button class="dArr press" id="dBack" data-a="dayback" aria-label="Вчера"><svg class="ic" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><span class="dcol"><span id="tDate"></span><button class="tSub press" id="tStatus" data-a="recovery"></button></span><button class="dArr press" id="dFwd" data-a="dayfwd" aria-label="Сегодня" hidden><svg class="ic" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button></span><span class="hright"><button class="tbTheme press" data-a="theme" aria-label="Сменить тему"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg></button><button class="stPill press" id="streaks" data-a="streaks" aria-label="Серии"></button></span></div>
+            <div id="bootSkel" hidden aria-hidden="true">
+            <div class="skel" style="height:36px;width:150px;border-radius:18px;margin-top:14px"></div>
+            <div class="skel" style="height:230px;width:230px;border-radius:50%;margin:26px auto 0"></div>
+            <div class="skel" style="height:26px;width:190px;border-radius:13px;margin:20px auto 0"></div>
+            <div class="skel" style="height:64px;width:100%;border-radius:18px;margin-top:32px"></div>
+          </div>
+          <div id="bootErr" hidden>
+            <svg class="ic beIc" viewBox="0 0 24 24"><path d="M12 4 2.8 20h18.4Z"/><path d="M12 10.2v4.3"/><path d="M12 17.6v.05"/></svg>
+            <h2>Не удалось загрузить данные</h2>
+            <p id="bootErrMsg">Сервис недоступен. Проверь соединение и попробуй ещё раз.</p>
+            <button id="bootRetry" class="press">Повторить</button>
+          </div>
+          <div class="chips onPhoto rise" style="--i:1" id="chips"></div>
             <div class="hero onPhoto rise" id="heroBox" style="--i:2">
               <button class="idxBtn" data-a="index" aria-label="Прогноз дня: из чего он"><div class="arcBox" id="arcBox"></div>
               <div class="bioBig" id="dayNum">—</div>
@@ -1240,13 +1268,13 @@ svg{display:block}
 
   <nav class="tabbar" id="tabbar" role="tablist">
     <span class="tb-pill" id="tbPill"></span>
-    <button class="tb on press" data-go="today"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M3 17.5h18M6.5 20.5h11"/><path d="M7 17.5a5 5 0 0 1 10 0"/><path d="M12 6.5V4M6.3 9.3 4.6 7.6M17.7 9.3l1.7-1.7M3.5 13.5h1.6M18.9 13.5h1.6"/></svg></span>Сегодня</button>
-    <button class="tb press" data-go="cases"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="16.5" r="2.2"/><circle cx="11.5" cy="6" r="2.2"/><circle cx="18.5" cy="14" r="2.2"/><path d="M7 14.5l3.4-6.5M13.3 7.3l3.8 5M8.2 16.2l8.1-1.8"/></svg><i class="badge" id="caseBadge"></i></span>Проверки</button>
-    <button class="tb press" data-go="plan"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M6.5 3.5v5a4.5 4.5 0 0 0 9 0v-5"/><path d="M5 3.5h3M14 3.5h3"/><path d="M11 13v2.5a4.5 4.5 0 0 0 9 0v-1.5"/><circle cx="20" cy="12" r="1.8"/></svg></span>Врач</button>
-    <button class="tb press" data-go="me"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M8 3c0 4.6 8 5.6 8 9s-8 4.4-8 9"/><path d="M16 3c0 4.6-8 5.6-8 9s8 4.4 8 9"/><path d="M9.3 6.2h5.4M9.3 17.8h5.4"/></svg></span>Я</button>
+    <button class="tb on press" data-go="today" role="tab" aria-selected="true"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M3 17.5h18M6.5 20.5h11"/><path d="M7 17.5a5 5 0 0 1 10 0"/><path d="M12 6.5V4M6.3 9.3 4.6 7.6M17.7 9.3l1.7-1.7M3.5 13.5h1.6M18.9 13.5h1.6"/></svg></span>Сегодня</button>
+    <button class="tb press" data-go="cases" role="tab" aria-selected="false"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="16.5" r="2.2"/><circle cx="11.5" cy="6" r="2.2"/><circle cx="18.5" cy="14" r="2.2"/><path d="M7 14.5l3.4-6.5M13.3 7.3l3.8 5M8.2 16.2l8.1-1.8"/></svg><i class="badge" id="caseBadge"></i></span>Проверки</button>
+    <button class="tb press" data-go="plan" role="tab" aria-selected="false"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M6.5 3.5v5a4.5 4.5 0 0 0 9 0v-5"/><path d="M5 3.5h3M14 3.5h3"/><path d="M11 13v2.5a4.5 4.5 0 0 0 9 0v-1.5"/><circle cx="20" cy="12" r="1.8"/></svg></span>Врач</button>
+    <button class="tb press" data-go="me" role="tab" aria-selected="false"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M8 3c0 4.6 8 5.6 8 9s-8 4.4-8 9"/><path d="M16 3c0 4.6-8 5.6-8 9s8 4.4 8 9"/><path d="M9.3 6.2h5.4M9.3 17.8h5.4"/></svg></span>Я</button>
   </nav>
 
-  <div class="ov" id="ov" role="dialog" aria-modal="true"><div class="screen" id="ovScreen"></div></div>
+  <div class="ov" id="ov" role="dialog" aria-modal="true" tabindex="-1"><div class="screen" id="ovScreen"></div></div>
   <div class="toast" id="toast" role="status"><span id="toastT"></span><button id="toastB">Отменить</button></div>
 </div>
 <script>
@@ -1261,6 +1289,7 @@ svg{display:block}
    EVENTS/STREAKS/CONC/CQ/REP/EPS/LABS/панели сдачи — заменены живыми данными
    ровно там, где реальный бэкенд их даёт (см. ПЛАН СБОРКИ в git-истории макета).*/
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const haptic=(ms=6)=>{try{navigator.vibrate&&navigator.vibrate(ms)}catch(e){}};
 const eo4=t=>1-Math.pow(1-t,4);
@@ -1294,9 +1323,9 @@ function lineChart({data,w=320,h=140,color=ACCENT,min,max,base=null,labels=null,
 function pubList(pubs,title='Свежее по теме',i=6){
   if(!pubs||!pubs.length)return '';
   return `<div class="pubs rise" style="--i:${i}"><div class="lbl">${title}</div>${pubs.map(p=>{
-    const tag=p.url?`<a class="pub press" href="${p.url}" target="_blank" rel="noopener">`:`<div class="pub">`;
+    const tag=p.url?`<a class="pub press" href="${esc(p.url)}" target="_blank" rel="noopener">`:`<div class="pub">`;
     const close=p.url?'</a>':'</div>';
-    return `${tag}<div class="pt">${p.title}</div><div class="pr2"><span class="tag">${p.grade}</span>${p.why?`<span class="pw2">${p.why}</span>`:''}${p.url?`<span class="pl">открыть${svg('right')}</span>`:''}</div>${close}`;
+    return `${tag}<div class="pt">${esc(p.title)}</div><div class="pr2"><span class="tag">${esc(p.grade)}</span>${p.why?`<span class="pw2">${esc(p.why)}</span>`:''}${p.url?`<span class="pl">открыть${svg('right')}</span>`:''}</div>${close}`;
   }).join('')}</div>`;
 }
 
@@ -1327,12 +1356,22 @@ const top=(name,i=0)=>`<div class="ov-top rise" style="--i:${i}"><button class="
 
 /* ================= ДАННЫЕ: живые /vita/today + /vita/rhythm + /vita/yesterday ================= */
 let TODAY=null, RHYTHM=null, YEST=null, yestLoaded=false;
-async function fetchJSON(url){const r=await fetch(url,{credentials:'same-origin'});if(r.status===401){location.href='/vita/login';throw new Error('401')}if(!r.ok&&r.status!==404)throw new Error('HTTP '+r.status);return r.status===404?null:r.json()}
-async function postJSON(url,body){const r=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(r.status===401){location.href='/vita/login';throw new Error('401')}if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}
-async function loadToday(){[TODAY,RHYTHM]=await Promise.all([fetchJSON('/vita/today'),fetchJSON('/vita/rhythm')])}
+/* таймаут fetch 10 c + один авто-retry для GET (аудит Qwen, P1); POST не повторяем — не идемпотентен */
+async function fetchT(url,opt={},retriable){const hasAC=typeof AbortController!=='undefined';
+  for(let a=0;;a++){const ac=hasAC?new AbortController():null,tm=ac?setTimeout(()=>ac.abort(),10000):null;
+    try{const r=await fetch(url,{credentials:'same-origin',...opt,...(ac?{signal:ac.signal}:{})});
+      if(r.status===401){location.href='/vita/login';throw new Error('401')}
+      if(retriable&&a===0&&(r.status>=500||r.status===429))continue;
+      return r}
+    catch(e){if(retriable&&a===0&&ac&&e.name==='AbortError')continue;throw e}
+    finally{if(tm)clearTimeout(tm)}}}
+async function fetchJSON(url){const r=await fetchT(url,{},true);if(!r.ok&&r.status!==404)throw new Error('HTTP '+r.status);return r.status===404?null:r.json()}
+async function postJSON(url,body){const r=await fetchT(url,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)},false);if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}
+async function loadToday(){[TODAY,RHYTHM]=await Promise.all([fetchJSON('/vita/today'),fetchJSON('/vita/rhythm')]);if(!TODAY)throw new Error('HTTP 404')}
 async function loadYesterday(){if(!yestLoaded){YEST=await fetchJSON('/vita/yesterday');yestLoaded=true}return YEST}
 /* ================= ВРАЧ и Я (сверка с макетом v7) — /vita/doctor, /vita/me, /vita/medpassport ================= */
 let DOC=null,ME=null,MEDP=null;
+let curLab='',curPanel=0;  /* выбранная лаба и вкладка дат («Сдачи») */
 async function loadDoctor(force){if(DOC&&!force)return;DOC=await fetchJSON('/vita/doctor')}
 async function loadMe(force){if(ME&&!force)return;ME=await fetchJSON('/vita/me')}
 async function loadMedp(){if(!MEDP)MEDP=await fetchJSON('/vita/medpassport');return MEDP}
@@ -1350,18 +1389,18 @@ function renderChecksTab(){
   let html;
   if(qMode==='questions'){
     html=items.length?`<div class="qsec"><span class="lbl">Нужно решение</span><div class="rows">${items.map(q=>
-      row(svg(SRC_ICON[q.source]||'spark'),'amber',q.title,q.detail,'','question',q.id)).join('')}</div></div>`
+      row(svg(SRC_ICON[q.source]||'spark'),'amber',esc(q.title),esc(q.detail),'','question',q.id)).join('')}</div></div>`
       :`<p class="quietRow">${svg('check')}Открытых вопросов нет</p>`;
   }else if(qMode==='checks'){
     html=items.length?`<div class="qsec"><span class="lbl">Идут</span><div class="rows">${items.map(x=>{
-      const r=row(x.window_days?progRing(x.day_n,x.day_of):svg(SRC_ICON[x.source]||'spark'),'',x.title,
-        x.window_days?`день ${x.day_n} из ${x.day_of}${x.verdict_date?' · вердикт '+shortDate(x.verdict_date):''}`:(x.expectation||''),
-        x.verdict_label?`<span class="rV">${x.verdict_label}</span>`:'','check',x.id);
+      const r=row(x.window_days?progRing(x.day_n,x.day_of):svg(SRC_ICON[x.source]||'spark'),'',esc(x.title),
+        x.window_days?`день ${x.day_n} из ${x.day_of}${x.verdict_date?' · вердикт '+shortDate(x.verdict_date):''}`:(esc(x.expectation||'')),
+        x.verdict_label?`<span class="rV">${esc(x.verdict_label)}</span>`:'','check',x.id);
       return x.window_days?r.replace('<span class="rIc ">','<span class="rIc" style="background:none">'):r}).join('')}</div></div>`
       :`<p class="quietRow">${svg('check')}Идущих проверок нет</p>`;
   }else{
     html=items.length?`<div class="qsec"><span class="lbl">Подтвердилось</span><div class="rows">${items.map(h=>
-      row(svg('check'),'ok',h.title,h.expectation||'',`<span class="rV ok">с ${shortDate(h.verdict_date)}</span>`,'check',h.id)).join('')}</div></div>`
+      row(svg('check'),'ok',esc(h.title),esc(h.expectation||''),`<span class="rV ok">с ${shortDate(h.verdict_date)}</span>`,'check',h.id)).join('')}</div></div>`
       :`<p class="quietRow">${svg('check')}Подтверждённых привычек пока нет</p>`;
   }
   $('#qList').innerHTML=html;
@@ -1369,24 +1408,24 @@ function renderChecksTab(){
 }
 
 function renderDoctor(){if(!DOC)return;const c=DOC.consilium,n=(DOC.notes||[])[0],f=(DOC.labs_flags||[])[0],d=DOC.next_draw;
-  $('#docRows').innerHTML=(c?row(svg('team'),'teal','Консилиум',`${shortDate(c.date)} · ${c.topic||'итог'}`,'','consrep')
+  $('#docRows').innerHTML=(c?row(svg('team'),'teal','Консилиум',`${shortDate(c.date)} · ${esc(c.topic||'итог')}`,'','consrep')
       :row(svg('team'),'teal','Консилиум','собрать — командой «/консилиум» в Telegram','','toast').replace('data-a="toast"','data-a="toast" data-msg="Консилиум запускается командой «/консилиум» в Telegram; раз в месяц — сам."'))
-    +(n?row(svg('doc'),'','Заключение врача',`${shortDate(n.date)}${n.category?' · '+n.category:''}`,'','notes'):'')
-    +row(svg('tube'),f?'warm':'','Медпаспорт',f?`вне референса: ${f.marker} ${fmt(f.value,f.value%1?1:0)}`:'все маркеры в референсе',f?'<i class="rDot warm"></i>':'','medpass');
+    +(n?row(svg('doc'),'','Заключение врача',`${shortDate(n.date)}${n.category?' · '+esc(n.category):''}`,'','notes'):'')
+    +row(svg('tube'),f?'warm':'','Медпаспорт',f?`вне референса: ${esc(f.marker)} ${fmt(f.value,f.value%1?1:0)}`:'все маркеры в референсе',f?'<i class="rDot warm"></i>':'','medpass');
   $('#drawH').hidden=!d;$('#nextDraw').hidden=!d;
   if(d){const days=Math.round((new Date(d.date+'T00:00:00')-new Date(new Date().toDateString()))/864e5);
     $('#nextDraw').innerHTML=`<div class="nd-k"><span>Следующая сдача</span><b>${days<=0?'сегодня':'через '+days+' '+plural(days,'день','дня','дней')}</b></div>
     <div class="nd-d">${dateFmt(d.date).replace(/^[^,]*, /,'')}</div>
-    <div class="nd-m"><b>${d.n} ${plural(d.n,'анализ','анализа','анализов')}</b>${d.price_rub?` · <b>${fmt(d.price_rub)} ₽</b>`:''}${d.fasting?' · натощак':''}</div>
+    <div class="nd-m"><b>${d.n} ${plural(d.n,'анализ','анализа','анализов')}</b>${d.price_rub?` · <b>${fmt(d.price_rub)} ₽</b>`:''}${d.lab_name?` · ${esc(d.lab_name)}`:''}${d.fasting?' · натощак':''}</div>
     <button class="btnP press" data-a="draw">Что сдаём</button>`}
-  $('#dates').innerHTML=(DOC.draws||[]).length>1?`<span>Сдачи:</span>`+DOC.draws.map((x,i)=>`<span class="dpill${i?'':' on'}">${shortDate(x.date)}</span>`).join(''):'';
+  $('#dates').innerHTML=(DOC.draws||[]).length>1?`<span>Сдачи:</span>`+DOC.draws.map((x,i)=>`<button class="dpill press${i===curPanel?' on':''}" data-a="drawp" data-k="${i}" aria-label="Сдача ${shortDate(x.date)}">${shortDate(x.date)}</button>`).join(''):'';
   $$('.rise',$('#s-plan')).forEach(e=>e.classList.add('in'));
 }
 function renderMe(){if(!ME)return;const pa=ME.phenoage||{},h=ME.history||[],dr=ME.drivers||[],sy=ME.systems||[];
   const f1=v=>v==null?'—':fmt(v,1);
   let html=`<div class="ageCard rise" style="--i:1"><div class="ageH"><span>Биовозраст · PhenoAge</span>${pa.delta!=null?`<em>${pa.delta<0?'−':'+'}${fmt(Math.abs(pa.delta),1)} ${Math.abs(pa.delta)%1?'года':plural(Math.abs(pa.delta),'год','года','лет')}</em>`:''}</div>
     <div class="ageT"><div><small>Паспорт</small><b>${f1(pa.chrono_age)}<span>лет</span></b></div><div class="bio"><small>Биологический</small><b>${f1(pa.value)}</b></div></div>
-    <p class="ageF">${pa.value!=null?`По крови ${pa.date?shortDate(pa.date):''} · обновится со следующей сдачей`:(pa.note||'PhenoAge ещё не рассчитан')}</p></div>`;
+    <p class="ageF">${pa.value!=null?`По крови ${pa.date?shortDate(pa.date):''} · обновится со следующей сдачей`:(esc(pa.note||'PhenoAge ещё не рассчитан'))}</p></div>`;
   /* лесенка: между сдачами значение держится ровно; меньше 3 точек — график не рисуем (бенчмарк) */
   if(h.length>=3){const w=320,H=124,pt=12,pb=20,ih=H-pt-pb,vs=h.map(x=>x.phenoage),mn=Math.min(...vs)-1,mx=Math.max(...vs)+1,t0=new Date(h[0].date),t1=new Date(h[h.length-1].date),sp=Math.max(1,t1-t0);
     const X=d=>8+(new Date(d)-t0)/sp*(w-24),Y=v=>pt+ih-(v-mn)/(mx-mn)*ih;let d=`M${X(h[0].date)},${Y(vs[0])}`;for(let i=1;i<h.length;i++)d+=` H${X(h[i].date)} V${Y(vs[i])}`;
@@ -1398,11 +1437,11 @@ function renderMe(){if(!ME)return;const pa=ME.phenoage||{},h=ME.history||[],dr=M
     const fd=v=>(v<0?'−':'+')+fmt(Math.abs(v),1);
     html+=`<div class="secH rise" style="--i:3;margin-top:28px"><span class="lbl">Что дало</span><span>кровь · ${dr.length} ${plural(dr.length,'маркер','маркера','маркеров')}</span></div>
     <div class="gvCard rise" style="--i:3"><div class="gv end"><span class="gn">Паспорт</span><span class="gb" style="background:none"><i style="left:${X(pa.chrono_age)}%"></i></span><span class="gd">${f1(pa.chrono_age)}</span></div>
-    ${dr.map(x=>{const a=cur,b=cur+x.years;cur=b;return `<div class="gv"><span class="gn">${x.label}</span><span class="gb" style="background:none"><i class="${x.years>0?'old':''}" style="left:${X(Math.min(a,b))}%;width:${Math.max(1.5,Math.abs(x.years)/(hi-lo)*100)}%"></i></span><span class="gd ${x.years>0?'old':''}">${fd(x.years)}</span></div>`}).join('')}
+    ${dr.map(x=>{const a=cur,b=cur+x.years;cur=b;return `<div class="gv"><span class="gn">${esc(x.label)}</span><span class="gb" style="background:none"><i class="${x.years>0?'old':''}" style="left:${X(Math.min(a,b))}%;width:${Math.max(1.5,Math.abs(x.years)/(hi-lo)*100)}%"></i></span><span class="gd ${x.years>0?'old':''}">${fd(x.years)}</span></div>`}).join('')}
     <div class="gv end"><span class="gn">PhenoAge</span><span class="gb" style="background:none"><i style="left:${X(pa.value)}%"></i></span><span class="gd">${f1(pa.value)}</span></div></div>
     <p class="gvNote rise" style="--i:3">Вклад маркера — по формуле PhenoAge.${TODAY&&TODAY.ring&&TODAY.ring.bioage_days?` Сегодня образ жизни — ${TODAY.ring.bioage_days<0?'моложе':'старше'} на ${fmt(Math.abs(TODAY.ring.bioage_days),1)} ${plural(Math.round(Math.abs(TODAY.ring.bioage_days)),'день','дня','дней')} (оценка по исследованиям).`:''}</p>`}
   if(sy.length)html+=`<div class="secH rise" style="--i:4;margin-top:28px"><span class="lbl">Системы</span><span>по крови</span></div>
-    <div class="sysGrid rise" style="--i:4">${sy.map(g=>`<button class="sysC press" data-a="medpass"><span class="rIc ${g.status==='out'?'warm':g.status==='watch'?'amber':'teal'}">${svg(g.status==='ok'?'check':'tube')}</span><b>${g.name}</b><small><i class="${g.status==='out'?'o':g.status==='watch'?'w':''}"></i>${g.status==='ok'?`${g.n} в норме`:g.flagged.slice(0,2).join(', ')+(g.status==='out'?' вне референса':' — не в оптимуме')}</small></button>`).join('')}</div>`;
+    <div class="sysGrid rise" style="--i:4">${sy.map(g=>`<button class="sysC press" data-a="medpass"><span class="rIc ${g.status==='out'?'warm':g.status==='watch'?'amber':'teal'}">${svg(g.status==='ok'?'check':'tube')}</span><b>${esc(g.name)}</b><small><i class="${g.status==='out'?'o':g.status==='watch'?'w':''}"></i>${g.status==='ok'?`${g.n} в норме`:esc(g.flagged.slice(0,2).join(', '))+(g.status==='out'?' вне референса':' — не в оптимуме')}</small></button>`).join('')}</div>`;
   html+=`<div class="rows rise" style="--i:5;margin-top:22px">${row(svg('flame'),'','Серии','рекорды, заморозки, 14 дней','','streaks')}${row(svg('tube'),'','Медпаспорт','все маркеры и динамика','','medpass')}</div>`;
   $('#meBody').innerHTML=html;$$('.rise',$('#s-me')).forEach(e=>e.classList.add('in'));replay($('#bioCard'));
 }
@@ -1474,11 +1513,12 @@ const shortDate=iso=>{if(!iso)return'';const d=new Date(iso+'T00:00:00');return 
 const plural=(n,a,b,c)=>{const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&&(h<12||h>14)?b:c};
 
 function renderToday(){
+  sToday.classList.remove('booting');const bs=$('#bootSkel');if(bs)bs.remove();const be=$('#bootErr');if(be)be.hidden=true;
   const st=TODAY.state,v=verdictWord();
   $('#tDate').innerHTML=dateFmt(TODAY.date);
   $('#dBack').hidden=false;$('#dFwd').hidden=true;
   const gate=TODAY.gate;
-  $('#tStatus').innerHTML=`<i class="dot-live${st.no_watch?' gray':''}"></i>${gate.blocked?gate.label:'Без ограничений'}`;
+  $('#tStatus').innerHTML=`<i class="dot-live${st.no_watch?' gray':''}"></i>${gate.blocked?esc(gate.label):'Без ограничений'}`;
   $('#dayLbl').textContent=st.closed?'Итог дня':TODAY.ring.score==null?'Не оценивается':'Прогноз дня';
   $('#dayNum').textContent=TODAY.ring.score!=null?TODAY.ring.score:'—';
   $('#vKick').className='vk '+v.k;$('#vKick').innerHTML=`<i></i>${v.w}`;$('#emo').textContent=v.t;
@@ -1490,7 +1530,7 @@ function renderToday(){
      открывает шторку «Решить» со всеми (B.inbox). Пусто = отсутствует. */
   const inbox=TODAY.inbox||[];
   $('#needYou').innerHTML=inbox.length?row(svg(inbox[0].kind==='verdict'?'check':'spark'),
-    inbox[0].tone==='green'?'ok':'amber',inbox[0].title,inbox[0].sub,
+    inbox[0].tone==='green'?'ok':'amber',esc(inbox[0].title),esc(inbox[0].sub),
     inbox.length>1?`<span class="rN">+${inbox.length-1}</span>`:'','inbox'):'';
   $('#caseBadge').classList.toggle('on',(TODAY.pending_questions||0)>0);
   /* серии — пилюля в шапке */
@@ -1548,7 +1588,7 @@ function enterToday(){
 const MARK={y:()=>svg('check'),w:()=>'<b style="color:#fff;font-size:12px">!</b>',n:()=>'<b style="color:#fff;font-size:12px">!</b>'};
 const rowMark={good:'y',neutral:'y',warn:'w',bad:'n'};
 let FOODT=null;
-const srcRows=(ss,u)=>{const mx=Math.max(...ss.map(x=>x.value),1);return ss.slice(0,4).map(x=>`<div class="src">${svg('dots')}<span style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.name}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,u==='г'&&x.value<10?1:0)} ${u}</span></div>`).join('')};
+const srcRows=(ss,u)=>{const mx=Math.max(...ss.map(x=>x.value),1);return ss.slice(0,4).map(x=>`<div class="src">${svg('dots')}<span style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.name)}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,u==='г'&&x.value<10?1:0)} ${u}</span></div>`).join('')};
 const STREAK_IC={sleep_zone:'moon','Натрий':'salt','Добавленный сахар':'cube','Насыщенные жиры':'shield'};
 const B={
   today(){const n=TODAY.nudge,lv=(RHYTHM&&RHYTHM.levers)||{},stp=(RHYTHM&&RHYTHM.steps)||{},score=TODAY.ring.score,ahead=TODAY.ring.ahead;
@@ -1556,23 +1596,23 @@ const B={
     const main=n&&n.go==='protein'&&lv.protein&&lv.protein.has_data?'protein':n&&n.go==='steps'?'steps':null;
     let hero,bar='',src='';
     if(main==='protein'){const p=lv.protein,dec=0;
-      hero=`<div class="fbig"><b>${fmt(p.consumed,dec)}</b><span>из ${fmt(p.target,dec)} г белка</span></div><p class="fsub ${p.status==='done'?'':'am'}">${n.text}</p>`;
+      hero=`<div class="fbig"><b>${fmt(p.consumed,dec)}</b><span>из ${fmt(p.target,dec)} г белка</span></div><p class="fsub ${p.status==='done'?'':'am'}">${esc(n.text)}</p>`;
       bar=`<div class="rise" style="--i:2"><div class="bb"><i style="width:${Math.min(100,p.consumed/p.target*75)}%"></i><u></u></div><div class="bbL"><span>0</span><span>цель ${fmt(p.target)} г</span></div></div>`;
       const ss=p.sources||[],mx=ss.length?Math.max(...ss.map(x=>x.value)):1;
-      src=ss.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Откуда</span><div class="srcs" style="opacity:1;transform:none;padding:0">${ss.slice(0,3).map(x=>`<div class="src">${svg('dots')}<span style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.name}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,1)} г</span></div>`).join('')}</div></div>`:'';
+      src=ss.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Откуда</span><div class="srcs" style="opacity:1;transform:none;padding:0">${ss.slice(0,3).map(x=>`<div class="src">${svg('dots')}<span style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.name)}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,1)} г</span></div>`).join('')}</div></div>`:'';
     }else if(main==='steps'&&stp.now_steps!=null){
-      hero=`<div class="fbig"><b>${fmt(stp.now_steps)}</b><span>из ${fmt(stp.target)} шагов</span></div><p class="fsub am">${n.text}</p>`;
+      hero=`<div class="fbig"><b>${fmt(stp.now_steps)}</b><span>из ${fmt(stp.target)} шагов</span></div><p class="fsub am">${esc(n.text)}</p>`;
       bar=`<div class="rise" style="--i:2"><div class="bb"><i style="width:${Math.min(100,stp.now_steps/stp.target*75)}%"></i><u></u></div><div class="bbL"><span>0</span><span>цель ${fmt(stp.target)}${stp.status_word?' · '+stp.status_word:''}</span></div></div>`;
     }else{
-      hero=`<div class="fbig"><b>${score!=null?score:'—'}</b><span>прогноз дня</span></div><p class="fsub">${n?n.text:'Делать ничего не нужно — день идёт в коридоре.'}</p>`;
+      hero=`<div class="fbig"><b>${score!=null?score:'—'}</b><span>прогноз дня</span></div><p class="fsub">${n?esc(n.text):'Делать ничего не нужно — день идёт в коридоре.'}</p>`;
     }
     const gives=[];
     if(n&&ahead!=null&&score!=null&&ahead>score)gives.push(row(svg('spark'),'teal',n.short||'Главное действие',`прогноз ${ahead} · оценочно`));
-    (TODAY.streaks||[]).filter(x=>x.status==='at_risk').forEach(x=>gives.push(row(svg('flame'),'amber',`Серия «${x.label}» · ${x.count} ${plural(x.count,'день','дня','дней')}`,'сохранится')));
+    (TODAY.streaks||[]).filter(x=>x.status==='at_risk').forEach(x=>gives.push(row(svg('flame'),'amber',`Серия «${esc(x.label)}» · ${x.count} ${plural(x.count,'день','дня','дней')}`,'сохранится')));
     const more=[],fine=[];
     ['fat','sodium'].forEach(k=>{const l=lv[k];if(!l||!l.has_data)return;const dec=l.target<10?1:0;
-      if(l.status==='ok')fine.push(l.label);else more.push(row(svg(k==='sodium'?'salt':'shield'),l.status==='over'?'warm':'amber',`${l.label} ${fmt(l.consumed,dec)} из ${fmt(l.target,dec)} ${l.unit}`,l.note,'','chip','food'))});
-    if(main!=='protein'&&lv.protein&&lv.protein.has_data&&lv.protein.status!=='done')more.push(row(svg('protein'),'teal',`Белок ${fmt(lv.protein.consumed)} из ${fmt(lv.protein.target)} г`,lv.protein.note,'','chip','food'));
+      if(l.status==='ok')fine.push(l.label);else more.push(row(svg(k==='sodium'?'salt':'shield'),l.status==='over'?'warm':'amber',`${esc(l.label)} ${fmt(l.consumed,dec)} из ${fmt(l.target,dec)} ${esc(l.unit)}`,esc(l.note),'','chip','food'))});
+    if(main!=='protein'&&lv.protein&&lv.protein.has_data&&lv.protein.status!=='done')more.push(row(svg('protein'),'teal',`Белок ${fmt(lv.protein.consumed)} из ${fmt(lv.protein.target)} г`,esc(lv.protein.note),'','chip','food'));
     (TODAY.ring.breakdown||[]).filter(r=>r.mark==='y').forEach(r=>{if(!fine.includes(r.label))fine.push(r.label)});
     const title=main==='protein'?'Белок сегодня':main==='steps'?'Шаги сегодня':'Сегодня';
     return {html:`${top(title)}
@@ -1589,13 +1629,13 @@ const B={
     return {html:`${top(TODAY.state.closed?'Итог дня':'Прогноз дня')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">${TODAY.state.closed?'Как закрылся день':'Чем закончится день'}</div><div class="big">${score!=null?score:'—'}<small>${ahead!=null&&ahead>score?`→ можно ${ahead} · оценочно`:'из 100'}</small></div>
       <p class="ov-sub" style="color:var(--accent-ink)">${TODAY.state.closed?'Сутки закрыты — цифра больше не меняется.':'Если ничего не менять — так и закроется.'} ${ahead!=null&&ahead>score?'Прогноз «можно» — оценочный, ещё не откалиброван на достаточной истории.':''}</p></div>
-    <div class="rise" style="--i:2;margin-top:18px">${rows.length?rows.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${r.label}${r.detail?`<small>${r.detail}</small>`:''}</span></div>`).join(''):'<p class="empty">Пока недостаточно данных за сегодня.</p>'}</div>`}},
+    <div class="rise" style="--i:2;margin-top:18px">${rows.length?rows.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${esc(r.label)}${r.detail?`<small>${esc(r.detail)}</small>`:''}</span></div>`).join(''):'<p class="empty">Пока недостаточно данных за сегодня.</p>'}</div>`}},
   streaks(){const streaks=TODAY.streaks||[],alive=streaks.filter(s=>s.status!=='paused').length,fz=TODAY.freezes_available;
     return {html:`${top('Серии')}
     <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${alive}</b><span>из ${streaks.length} серий живы</span></div><p class="fsub">${fz} ${fz===1?'заморозка':fz>=2&&fz<=4?'заморозки':'заморозок'} в запасе — срыв не всегда обнулит серию</p></div>
     <div class="stList rise" style="--i:2">${streaks.map(s=>{const p=s.status==='paused',r=s.status==='at_risk',cap=p?'на паузе — нет данных':r?'под угрозой сегодня':s.count>=s.record?'рекорд — держи':(s.next_milestone?`ещё ${s.next_milestone-s.count} до ${s.next_milestone} · рекорд ${s.record}`:`рекорд ${s.record}`);
       const strip=(s.days||[]).map(d=>`<i class="${{y:'y',f:'f',x:'',p:'p',t:'t',r:'t'}[d.c]}" title="${d.date}">${d.c==='f'?svg('snow'):''}</i>`).join('');
-      return `<div class="stR2${p?' pause':''}${r?' risk':''}"><div class="stR2h"><span class="rIc ${p?'':r?'amber':'teal'}">${svg(STREAK_IC[s.key]||'flame')}</span><span class="rT"><b>${s.label}</b><small>${cap}</small></span><span class="stN">${s.count}</span></div>${strip?`<div class="strip">${strip}</div>`:''}</div>`}).join('')||'<p class="empty">Пока нет ни одной серии в истории.</p>'}</div>
+      return `<div class="stR2${p?' pause':''}${r?' risk':''}"><div class="stR2h"><span class="rIc ${p?'':r?'amber':'teal'}">${svg(STREAK_IC[s.key]||'flame')}</span><span class="rT"><b>${esc(s.label)}</b><small>${cap}</small></span><span class="stN">${s.count}</span></div>${strip?`<div class="strip">${strip}</div>`:''}</div>`}).join('')||'<p class="empty">Пока нет ни одной серии в истории.</p>'}</div>
     <div class="stLeg rise" style="--i:3"><span><i style="background:var(--accent)"></i>выполнено</span><span><i style="background:color-mix(in srgb,var(--accent) 30%,transparent)"></i>заморозка</span><span><i style="box-shadow:inset 0 0 0 1.2px var(--faint)"></i>пауза</span><span><i style="box-shadow:inset 0 0 0 1.5px var(--accent)"></i>сегодня</span></div>
     <p class="ov-coach rise" style="--i:4">Нет данных — серия на паузе, а не сгорает. Срыв тратит заморозку из общей копилки.</p>`}},
   inbox(){const ev=TODAY.inbox||[],qs=(CHECKS&&CHECKS.items.questions)||[];
@@ -1604,10 +1644,10 @@ const B={
     <div class="rise" style="--i:1;margin-top:18px;display:flex;flex-direction:column;gap:10px">${ev.length?ev.map(e=>{const q=e.kind==='question'&&qs.find(x=>x.id===e.id);
       const acts=q?`<button data-a="qcheck" data-k="${q.id}">Проверить 3 недели</button><button class="m" data-a="qdecline" data-k="${q.id}">Не оно</button>${q.source==='детектив'&&q.problem_id?`<button class="m" data-a="evidence" data-k="${q.problem_id}">Доказательства</button>`:''}`
         :`<button data-a="gochecks" data-k="${e.kind==='verdict'?'checks':'questions'}">Открыть в Проверках</button>`;
-      return `<div class="bcard ${e.tone==='green'?'teal':'amber'}"><span class="mc-ic">${svg(e.kind==='verdict'?'check':'spark')}</span><span class="bbody"><span class="stw ${e.tone==='green'?'teal':'amber'}">${e.kind==='verdict'?'Вердикт проверки':'Нужно решение'}</span><b>${e.title}</b><small>${e.sub}</small><span class="nacts">${acts}</span></span></div>`}).join(''):'<p class="empty">Пока нечего решать.</p>'}</div>`}},
+      return `<div class="bcard ${e.tone==='green'?'teal':'amber'}"><span class="mc-ic">${svg(e.kind==='verdict'?'check':'spark')}</span><span class="bbody"><span class="stw ${e.tone==='green'?'teal':'amber'}">${e.kind==='verdict'?'Вердикт проверки':'Нужно решение'}</span><b>${esc(e.title)}</b><small>${esc(e.sub)}</small><span class="nacts">${acts}</span></span></div>`}).join(''):'<p class="empty">Пока нечего решать.</p>'}</div>`}},
   question(qid){const q=((CHECKS&&CHECKS.items.questions)||[]).find(x=>x.id===qid);if(!q)return{html:top('Вопрос')};
     return {html:`${top('Вопрос')}
-    <div class="ov-hero rise" style="--i:1"><div class="lbl">${q.source}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${q.title}</p><p class="ov-sub" style="color:var(--accent-ink)">${q.detail||q.what||''}</p></div>
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">${esc(q.source)}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${esc(q.title)}</p><p class="ov-sub" style="color:var(--accent-ink)">${esc(q.detail||q.what||'')}</p></div>
     ${q.source==='детектив'?`<button class="whyRow press rise" style="--i:2" data-a="evidence" data-k="${q.problem_id}">${svg('hint')}Доказательства</button>`:''}
     <div class="btns rise" style="--i:3;justify-content:center;margin-top:18px">
       <button class="btn pri press" data-a="qcheck" data-k="${qid}">Проверить 3 недели</button>
@@ -1617,16 +1657,16 @@ const B={
   check(id){const items=[...((CHECKS&&CHECKS.items.checks)||[]),...((CHECKS&&CHECKS.items.habits)||[])];
     const c=items.find(x=>x.id===id);if(!c)return{html:top('Проверка')};
     return {html:`${top(c.status==='привычка'?'Привычка':'Проверка')}
-    <div class="ov-hero rise" style="--i:1"><div class="lbl">${c.source}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${c.title}</p>${c.expectation?`<p class="ov-sub" style="color:var(--accent-ink)">Ожидание: ${c.expectation}</p>`:''}</div>
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">${esc(c.source)}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${c.title}</p>${c.expectation?`<p class="ov-sub" style="color:var(--accent-ink)">Ожидание: ${esc(c.expectation)}</p>`:''}</div>
     ${c.window_days?`<div class="rise" style="--i:2;margin-top:18px"><div class="ckbar" style="margin:0 0 6px"><i style="width:${Math.min(100,c.day_n/c.day_of*100)}%"></i></div><div class="ck-m" style="margin-bottom:14px">день ${c.day_n} из ${c.day_of}${c.verdict_date?' · вердикт '+shortDate(c.verdict_date):''}</div></div>`:''}
-    ${c.verdict_label?`<div class="reason rise" style="--i:3"><span>Вердикт</span><span>${c.verdict_label}</span></div>`:''}
+    ${c.verdict_label?`<div class="reason rise" style="--i:3"><span>Вердикт</span><span>${esc(c.verdict_label)}</span></div>`:''}
     <p class="disc rise" style="--i:4">Вердикт считается сам: сработало, частично, не сработало или не выполнялось. Сработавшее становится привычкой.</p>`}},
   evidence(ev){if(!ev)return{html:top('Доказательства')};
     const f=(ev.findings||[])[0];
     return {html:`${top('Доказательства')}
-    <div class="ov-hero rise" style="--i:1"><div class="lbl">${ev.title}</div>${f?`<p class="ov-sub" style="color:var(--accent-ink)">«${f.factor}» (${f.lag_days===0?'тот же день':'лаг '+f.lag_days+'д'}): ${f.n} из ${f.m} случаев (${Math.round(f.rate*100)}%) против ${Math.round(f.base_rate*100)}% в обычные дни${f.evidence_grade?' · '+f.evidence_grade:''}</p>`:''}</div>
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">${esc(ev.title)}</div>${f?`<p class="ov-sub" style="color:var(--accent-ink)">«${esc(f.factor)}» (${f.lag_days===0?'тот же день':'лаг '+f.lag_days+'д'}): ${f.n} из ${f.m} случаев (${Math.round(f.rate*100)}%) против ${Math.round(f.base_rate*100)}% в обычные дни${f.evidence_grade?' · '+esc(f.evidence_grade):''}</p>`:''}</div>
     <div class="rise" style="--i:2;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Эпизоды · еда за ${ev.window_hours} ч до реакции</div>${(ev.episodes||[]).map(e=>
-      `<div class="reason"><span>${e.onset_ts.slice(0,10)}${e.symptom?`<small style="display:block;font-size:12px;color:var(--muted);margin-top:2px">${e.symptom}</small>`:''}</span><span style="text-align:right;max-width:60%;color:var(--ink2)">${(e.meals||[]).map(m=>`${m.description} (−${m.hours_before.toFixed(1)}ч)`).join('; ')||'еды в окне не найдено'}</span></div>`).join('')||'<p class="empty">Эпизодов пока нет.</p>'}</div>
+      `<div class="reason"><span>${e.onset_ts.slice(0,10)}${e.symptom?`<small style="display:block;font-size:12px;color:var(--muted);margin-top:2px">${esc(e.symptom)}</small>`:''}</span><span style="text-align:right;max-width:60%;color:var(--ink2)">${(e.meals||[]).map(m=>`${esc(m.description)} (−${m.hours_before.toFixed(1)}ч)`).join('; ')||'еды в окне не найдено'}</span></div>`).join('')||'<p class="empty">Эпизодов пока нет.</p>'}</div>
     <p class="disc rise" style="--i:3">Детектив сравнивает дни эпизодов с обычными днями. Совпадение — ещё не причина.</p>`}},
   segment(arg){const k=arg.k,T=arg.detail;
     /* Живая просьба Влада (2026-09-28, второй заход): «список тот же, только
@@ -1634,15 +1674,15 @@ const B={
        данные». Ниже — реальные шторки макета (recovery()/topic('sleep')/
        move()/nutr()) на живых данных /vita/topic/{segment}, не общий список. */
     const own=(TODAY.ring.breakdown||[]).filter(r=>r.segment===k);
-    const idxRows=rs=>rs.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${r.label}${r.detail?`<small>${r.detail}</small>`:''}</span></div>`).join('');
+    const idxRows=rs=>rs.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${esc(r.label)}${r.detail?`<small>${esc(r.detail)}</small>`:''}</span></div>`).join('');
     if(k==='recovery'){
       const gate=TODAY.gate,statusWord=T.acwr_status==='HIGH'?'Нагрузка выше обычного':T.acwr_status==='LOW'?'Нагрузка ниже обычного':'Нагрузка в норме';
       return {html:`${top('Заряд')}
       <div class="ov-hero rise" style="--i:1"><div class="lbl">Нагрузка сегодня</div><p style="font-family:var(--serif);font-size:30px;font-weight:300;line-height:1.15;margin-top:8px">${statusWord}</p>
-      ${gate.blocked?`<p class="ov-sub" style="color:var(--warm-ink)">${gate.label} — без бега, прыжков и ударных.</p>`:`<p class="ov-sub" style="color:var(--accent-ink)">Ограничений по здоровью нет.</p>`}</div>
+      ${gate.blocked?`<p class="ov-sub" style="color:var(--warm-ink)">${esc(gate.label)} — без бега, прыжков и ударных.</p>`:`<p class="ov-sub" style="color:var(--accent-ink)">Ограничений по здоровью нет.</p>`}</div>
       <div class="rise" style="--i:2;margin-top:18px">${idxRows(own)}${T.acwr!=null?`<div class="reason"><span>Нагрузка (ACWR)</span><span>${T.acwr}${T.acwr_status?' · '+T.acwr_status:''}</span></div>`:''}${T.resting_hr!=null?`<div class="reason"><span>Пульс покоя</span><span>${T.resting_hr}</span></div>`:''}</div>
       <div class="ov-chart rise" style="--i:3" id="ovChart"><div class="lbl" style="margin-bottom:4px">ВСР за 30 ночей${T.hrv_avg7!=null?` · 7д ${T.hrv_avg7} · 30д ${T.hrv_avg30}`:''}</div>${lineChart({data:T.hrv_history.map(x=>x.value),w:320,h:130,base:T.hrv_avg30})}</div>
-      <p class="ov-coach rise" style="--i:4">${T.coach}</p>${pubList(T.publications,'Свежее по теме',5)}`,
+      <p class="ov-coach rise" style="--i:4">${esc(T.coach)}</p>${pubList(T.publications,'Свежее по теме',5)}`,
       after(){replay($('#ovChart'))}}
     }
     if(k==='sleep'){
@@ -1660,7 +1700,7 @@ const B={
         <p class="ov-sub" style="color:var(--accent-ink)">${T.avg14_min==null?'Пока мало ночей для среднего':T.delta_min>=0?`+${T.delta_min} мин к среднему за 14 ночей`:`${T.delta_min} мин к среднему за 14 ночей`}${T.sleep_score!=null?` · оценка сна ${Math.round(T.sleep_score)}`:''}</p></div>
       <div class="ov-chart rise" style="--i:2" id="ovChart"><div class="lbl" style="margin-bottom:4px">Часы сна · 14 ночей</div>${lineChart({data:T.history.map(x=>x.hours),w:320,h:130,base:T.avg14_min!=null?T.avg14_min/60:null})}</div>
       <div class="stats g4 rise" style="--i:3">${[['Лёгкий',hrs(T.light_min)],['Глубокий',hrs(T.deep_min)],['Быстрый (РЕМ)',hrs(T.rem_min)],['Бодрствование',T.awake_min!=null?T.awake_min+' мин':'—']].map(s=>`<div class="stat"><div class="lbl">${s[0]}</div><div class="v">${s[1]}</div></div>`).join('')}</div>
-      <p class="ov-coach rise" style="--i:4">${T.coach}</p>${pubList(T.publications,'Свежее по теме',5)}`,
+      <p class="ov-coach rise" style="--i:4">${esc(T.coach)}</p>${pubList(T.publications,'Свежее по теме',5)}`,
       after(){replay($('#ovChart'))}}
     }
     if(k==='move'){
@@ -1675,7 +1715,7 @@ const B={
       <div class="ov-chart rise" style="--i:2" id="ovChart"><div class="lbl" style="margin-bottom:4px">Шаги по дням · неделя</div>${lineChart({data:T.history_daily.map(x=>x.steps),w:320,h:130,min:0})}</div>
       ${T.acwr!=null?`<div class="rise" style="--i:3;margin-top:14px"><div class="reason"><span>Нагрузка (ACWR)</span><span>${T.acwr}${T.acwr_status?' · '+T.acwr_status:''}</span></div></div>`:''}
       ${workouts?`<div class="rise" style="--i:4;margin-top:14px"><div class="lbl" style="margin-bottom:6px">Тренировки сегодня</div>${workouts}</div>`:''}
-      <p class="ov-coach rise" style="--i:5">${T.coach}</p>${pubList(T.publications,'Свежее по теме',6)}`,
+      <p class="ov-coach rise" style="--i:5">${esc(T.coach)}</p>${pubList(T.publications,'Свежее по теме',6)}`,
       after(){replay($('#ovChart'))}}
     }
     /* food — макет v7 «Питание сегодня»: За день (4 плитки, тап по «Белки» — источники) ·
@@ -1693,7 +1733,7 @@ const B={
       if(!l.has_data)return `<div class="lever nodata"><div class="lever-h"><div class="lever-row"><span class="lever-name"><b>${{fat:'Насыщенные жиры',sodium:'Натрий',sugar:'Добавленный сахар'}[k]}</b></span><span class="lever-meta">нет данных сегодня</span></div><div class="bb"></div></div></div>`;
       const dec=l.unit==='г'&&l.target<10?1:0,meta=l.status==='over'?'<em class="wm">перебор</em>':l.status==='warn'?'<em class="wm">близко к лимиту</em>':'в коридоре';
       return `<div class="lever" data-lever="${k}"><button class="lever-h" data-a="lever" data-k="${k}" aria-expanded="false">
-        <div class="lever-row"><span class="lever-name"><b>${l.label}</b><span>${fmt(l.consumed,dec)}/${fmt(l.target,dec)} ${l.unit}</span></span><span class="lever-meta">${meta}${svg('chev','ic chev')}</span></div>
+        <div class="lever-row"><span class="lever-name"><b>${l.label}</b><span>${fmt(l.consumed,dec)}/${fmt(l.target,dec)} ${esc(l.unit)}</span></span><span class="lever-meta">${meta}${svg('chev','ic chev')}</span></div>
         <div class="bb"><i class="${l.status==='over'?'over':''}" style="width:${Math.min(100,l.consumed/l.target*75)}%"></i><u></u></div></button>
         <div class="lever-more"><div><div class="srcs">${(l.sources||[]).length?srcRows(l.sources,l.unit):''}<p class="src-note">${l.note}</p></div></div></div></div>`}).join('');
     const anyLever=LV.some(k=>lv[k].has_data);
@@ -1753,6 +1793,7 @@ const B={
     const groups={};d.markers.forEach(m=>{const g=m.category||'Прочее';(groups[g]=groups[g]||[]).push(m)});
     return {html:`${top('Сдача · '+shortDate(d.date))}
     <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${d.n}</b><span>${plural(d.n,'анализ','анализа','анализов')}${d.price_rub?' · '+fmt(d.price_rub)+' ₽':''}</span></div><p class="fsub">${dateFmt(d.date)}${d.fasting?' · натощак':''}${d.tubes.length?' · пробирки: '+d.tubes.join(', '):''}</p></div>
+    ${(d.labs&&d.labs.length&&d.pick)?`<div class="fsec rise" style="--i:2"><span class="lbl">Лаборатория и цена</span><div class="labSum"><div class="ls-row"><span>${d.pick.covered} из ${d.pick.n} анализов</span><b>${fmt(d.pick.price_rub)} ₽</b></div><div class="ls-labs">${d.labs.map(l=>`<button class="lchip press${l.key===d.pick.key?' on':''}" data-a="lab" data-k="${esc(l.key)}" title="${l.cheapest?'дешевле всего':''}">${esc(l.name)}<em>${fmt(l.price_rub)} ₽</em></button>`).join('')}</div>${d.pick.missing.length?`<p class="ls-miss">${esc(d.pick.name)} не делает: ${d.pick.missing.map(esc).join(', ')}.</p>`:''}<p class="ls-note">Прайс от ${d.pick.parsed_at?shortDate(d.pick.parsed_at.slice(0,10)):'—'}${d.labs.length>1?` · дешевле всего: ${esc(d.pick.name)}`:''}. Тап по лабе — пересчитать.${(()=>{const n=d.pick.breakdown.reduce((s,b)=>s+(b.extra?b.extra.length:0),0);return n?` В комплексы входят ещё ${n} ${plural(n,'показатель','показателя','показателей')} — про запас.`:''})()}</p></div></div>`:''}
     ${Object.entries(groups).map(([g,ms],i)=>`<div class="fsec rise" style="--i:${2+i}"><span class="lbl">${g}</span><div class="rows">${ms.map(m=>row(svg('tube'),'',m.name,m.why||'',m.fasting?'<span class="rV" style="font-size:12px">натощак</span>':'')).join('').replace(/<small>/g,'<small class="wrap">')}</div></div>`).join('')}
     ${d.shifted.length?`<p class="gvNote rise" style="--i:8">Сдвинуто ради одного забора: ${d.shifted.map(x=>x.name).join(', ')}.</p>`:''}
     ${d.export_text?`<button class="btnP press rise" style="--i:9" data-a="copydraw">Скопировать список для лаборатории</button>`:''}
@@ -1792,13 +1833,19 @@ function shapeOf(el){if(!el||!el.isConnected)return null;
   const al=bg.match(/rgba\([^)]*,\s*([\d.]+)\)/)||bg.match(/\/\s*([\d.]+)\s*\)/);if(bg==='transparent'||(al&&+al[1]<.9))bg=getComputedStyle(appEl).backgroundColor;
   return {clip:`inset(${(b.top-a.top).toFixed(1)}px ${(a.right-b.right).toFixed(1)}px ${(a.bottom-b.bottom).toFixed(1)}px ${(b.left-a.left).toFixed(1)}px round ${r.toFixed(1)}px)`,bg}}
 function settle(fn){Promise.all(ovAnims.map(x=>x.finished)).then(fn).catch(()=>{})}
-function openSheet(key,arg,el){const b=B[key](arg);sheetKey=key;haptic(10);
+/* доступность шторки: aria-labelledby, focus trap, inert фона, возврат фокуса (аудит Qwen, P2) */
+let sheetReturn=null;
+const sheetInert=on=>{[$('#stage'),$('#controls')].forEach(n=>{if(!n)return;if(on)n.setAttribute('inert','');else n.removeAttribute('inert')})};
+function focusSheet(){const f=$$('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])',ovS).filter(x=>!x.disabled&&x.getClientRects().length);(f[0]||ov).focus({preventScroll:true})}
+function openSheet(key,arg,el){const b=B[key](arg);sheetKey=key;haptic(10);if(el)sheetReturn=el;
   ovS.innerHTML=b.html;ovS.scrollTop=0;
-  if(ov.classList.contains('open')){reveal(ov);b.after&&setTimeout(b.after,120);return}
+  const ol=$('.ov-top .lbl',ovS);if(ol){ol.id='ovTitle';ov.setAttribute('aria-labelledby','ovTitle')}
+  if(ov.classList.contains('open')){reveal(ov);setTimeout(focusSheet,0);b.after&&setTimeout(b.after,120);return}
   fromEl=el;fromKey=keyOf(el);ovAnims.forEach(x=>x.cancel());ovAnims=[];
   const sh=reduce?null:shapeOf(el),bgc=getComputedStyle(appEl).backgroundColor;
   appEl.classList.add('morphing');morph.style.cssText='display:block';ov.style.cssText='';
   ov.classList.add('show','open');stage.classList.add('behind');
+  sheetInert(true);setTimeout(focusSheet,0);
   if(sh){
     ovAnims.push(morph.animate([{clipPath:sh.clip,backgroundColor:sh.bg,opacity:.6},{opacity:1,offset:.2},{clipPath:FULL,backgroundColor:bgc,opacity:1}],{duration:480,easing:EZ}));
     ovAnims.push(ov.animate([{clipPath:sh.clip},{clipPath:FULL}],{duration:480,easing:EZ}));
@@ -1827,8 +1874,8 @@ function closeSheet(opt={}){if(!ov.classList.contains('open'))return;haptic();
       ovAnims.push(morph.animate([{opacity:1},{opacity:0}],{duration:reduce?150:260,delay:reduce?0:110,easing:'ease-in-out',fill:'forwards'}));
     }
   }
-  settle(()=>{if(ov.classList.contains('open'))return;ov.classList.remove('show');morph.style.cssText='';ov.style.cssText='';ovAnims.forEach(x=>x.cancel());ovAnims=[];appEl.classList.remove('morphing')})}
-function refreshSheet(){if(!['today','index'].includes(sheetKey))return;
+  settle(()=>{if(ov.classList.contains('open'))return;ov.classList.remove('show');morph.style.cssText='';ov.style.cssText='';ovAnims.forEach(x=>x.cancel());ovAnims=[];appEl.classList.remove('morphing');sheetInert(false);if(sheetReturn&&sheetReturn.isConnected){try{sheetReturn.focus({preventScroll:true})}catch(e){}}})}
+function refreshSheet(){if(!['today','index','draw'].includes(sheetKey))return;
   ovS.innerHTML=B[sheetKey]().html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}
 let drag=null,dragged=false;
 const dStart=(y)=>{if(!ov.classList.contains('open')||ovS.scrollTop>0||ovAnims.some(a=>a.playState==='running'))return;drag={y,t:performance.now(),dy:0,on:false}};
@@ -1848,7 +1895,12 @@ ov.addEventListener('touchend',dEnd);ov.addEventListener('touchcancel',dEnd);
 ov.addEventListener('mousedown',e=>{if(e.button===0)dStart(e.clientY)});
 addEventListener('mousemove',e=>{if(drag)dMove(e.clientY,e)});addEventListener('mouseup',dEnd);
 ov.addEventListener('click',e=>{if(dragged){e.stopPropagation();e.preventDefault()}},true);
-addEventListener('keydown',e=>{if($('#ov').classList.contains('show')&&e.key==='Escape')closeSheet()});
+addEventListener('keydown',e=>{if($('#ov').classList.contains('show')&&e.key==='Escape')closeSheet();
+  else if($('#ov').classList.contains('open')&&e.key==='Tab'){const f=$$('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])',ov).filter(x=>!x.disabled&&x.getClientRects().length);if(!f.length)return;
+    const first=f[0],last=f[f.length-1],inOv=ov.contains(document.activeElement);
+    if(!inOv){e.preventDefault();first.focus()}
+    else if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}});
 document.addEventListener('pointerdown',e=>{const p=e.target.closest('.press');if(p)p.classList.add('down')});
 const upP=()=>$$('.press.down').forEach(p=>p.classList.remove('down'));
 ['pointerup','pointercancel','dragstart'].forEach(ev=>document.addEventListener(ev,upP));
@@ -1924,12 +1976,13 @@ function goTab(k,force){if(k===curTab&&!force)return;haptic();
   const nt=$(`.tab[data-tab="${k}"]`);nt.classList.add('from');void nt.offsetWidth;nt.classList.remove('from');
   $$('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===k));
   $('#tbPill').style.transform=`translateX(${order.indexOf(k)*100}%)`;
-  $$('.tb').forEach(b=>b.classList.toggle('on',b.dataset.go===k));
+  $$('.tb').forEach(b=>{b.classList.toggle('on',b.dataset.go===k);b.setAttribute('aria-selected',b.dataset.go===k?'true':'false')});
   if(k==='today')enterToday();else if(k==='cases'){loadChecks().then(renderChecksTab);reveal($(`#s-${k}`))}
   else if(k==='plan'){reveal($('#s-plan'));loadDoctor().then(renderDoctor).catch(()=>toast('Не удалось загрузить «Врача»'))}
   else if(k==='me'){reveal($('#s-me'));loadMe().then(renderMe).catch(()=>toast('Не удалось загрузить «Я»'))}
   else reveal($(`#s-${k}`));}
 $$('.tb').forEach(b=>b.addEventListener('click',()=>goTab(b.dataset.go)));
+$('#tabbar').addEventListener('keydown',e=>{if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;const i=order.indexOf(curTab),n=(i+(e.key==='ArrowRight'?1:order.length-1))%order.length;goTab(order[n]);const b=$('.tb[data-go="'+order[n]+'"]');b&&b.focus()});
 
 /* ================= TOAST / THEME ================= */
 let tt,undoFn=null;const tEl=$('#toast'),tB=$('#toastB');
@@ -1957,6 +2010,10 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'micro':{haptic();const w=t.closest('.hmW'),on=!w.classList.contains('open');$$('.hmW',ovS).forEach(x=>x.classList.remove('open'));w.classList.toggle('open',on);break}
     case'foodyest':haptic();openSheet('foodYest',null,t);break;
     case'medpass':haptic();loadMedp().then(mp=>openSheet('medpass',mp,t)).catch(()=>toast('Не удалось загрузить медпаспорт'));break;
+    case'lab':{haptic();const k=t.dataset.k;if(!k||k===curLab)break;
+      fetchJSON('/vita/doctor?lab='+encodeURIComponent(k)).then(doc=>{DOC=doc;curLab=k;renderDoctor();refreshSheet()}).catch(()=>toast('Не удалось пересчитать под лабу'));break}
+    case'drawp':{haptic();const i=Math.max(0,+t.dataset.k||0);
+      fetchJSON('/vita/doctor?panel='+i+(curLab?'&lab='+encodeURIComponent(curLab):'')).then(doc=>{DOC=doc;curPanel=i;renderDoctor();openSheet('draw',null,t)}).catch(()=>toast('Не удалось открыть сдачу'));break}
     case'copydraw':{haptic();const x=DOC&&DOC.next_draw&&DOC.next_draw.export_text;if(!x)break;
       (navigator.clipboard?navigator.clipboard.writeText(x):Promise.reject()).then(()=>toast('Список скопирован — вставь в заявку лаборатории.')).catch(()=>toast('Не удалось скопировать'));break}
     case'gochecks':haptic();if(ov.classList.contains('open'))closeSheet();if(k)qMode=k;goTab('cases',true);break;
@@ -1980,10 +2037,25 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
 /* ================= BOOT ================= */
 let savedTheme='light';try{savedTheme=localStorage.getItem('vita-theme')||'light'}catch(e){}
 setTheme(savedTheme);
-loadToday().then(()=>{renderToday();requestAnimationFrame(()=>requestAnimationFrame(()=>enterToday()))}).catch(err=>{
-  console.error('Vita: не удалось загрузить /vita/today', err);
-  $('#tDate').textContent='Не удалось загрузить данные';
-});
+/* offline-баннер (аудит Qwen, P1) */
+const netBan=$('#netBan');
+function netUpd(){if(netBan)netBan.hidden=navigator.onLine}
+addEventListener('online',()=>{netUpd();toast('Соединение восстановлено')});
+addEventListener('offline',netUpd);netUpd();
+/* boot: скелетон → данные; при ошибке — error-state с «Повторить» (аудит Qwen, P1) */
+function bootLoad(){
+  sToday.classList.add('booting');
+  const sk=$('#bootSkel');if(sk)sk.hidden=false;
+  const be=$('#bootErr');if(be)be.hidden=true;
+  loadToday().then(()=>{renderToday();requestAnimationFrame(()=>requestAnimationFrame(()=>enterToday()))}).catch(err=>{
+    console.error('Vita: не удалось загрузить /vita/today',err);
+    sToday.classList.remove('booting');
+    if(sk)sk.hidden=true;
+    if(be){be.hidden=false;const m=$('#bootErrMsg');if(m)m.textContent='Сервис недоступен'+(err&&err.message&&err.message!=='401'?' ('+err.message+')':'')+'. Проверь соединение и попробуй ещё раз.'}
+  });
+}
+$('#bootRetry').addEventListener('click',bootLoad);
+bootLoad();
 })();
 </script>
 </body>
