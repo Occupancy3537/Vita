@@ -155,6 +155,7 @@ def _report(cur) -> None:
     cur.execute(sql.SQL("SELECT lab_key, external_code, name FROM {t} "
                         "WHERE kind = 'single' ORDER BY lab_key, external_code").format(
         t=sql.Identifier(schema(), "lab_item")))
+    singles = cur.fetchall()  # до второго execute: он затирает результат первого
     catalog_names = {code: e["name"] for code, e in LAB_CATALOG.items()}
     cur.execute(sql.SQL("SELECT count(*) FROM {t} WHERE kind = 'complex'").format(
         t=sql.Identifier(schema(), "lab_item")))
@@ -162,7 +163,7 @@ def _report(cur) -> None:
     print(f"маппинг: {len(COVERS)} позиций; комплексов в прайсе: {complex_total} "
           f"(замаплены только стандартные наборы, чекапы — этап 3)")
     by_lab: dict[str, int] = {}
-    for lab, ext, name in cur.fetchall():
+    for lab, ext, name in singles:
         if (lab, ext) in COVERS:
             continue
         norm = _norm(name)
