@@ -8,7 +8,7 @@ app/lab_prices_ingest.parse_rows — чистые функции (докстри
 from datetime import datetime, timezone
 
 from app.lab_catalog import LAB_CATALOG
-from app.lab_prices import LabItem, min_cover, panel_offers
+from app.lab_prices import NOT_SEPARATELY_ORDERABLE, LabItem, min_cover, panel_offers
 from app.lab_prices_ingest import detect_kind, parse_rows
 from app.lab_prices_map import COVERS
 
@@ -114,6 +114,28 @@ def test_panel_offers_deterministic():
 
 def test_panel_offers_empty_codes():
     assert panel_offers([], {"gemotest": []}) == []
+
+
+def test_not_orderable_markers_do_not_make_holes():
+    """M047/M060 (цветовой показатель, палочкоядерные) не продаёт ни одна лаба —
+    они не должны превращать ВСЕ лабы в «с дыркой» и ломать правило «полные
+    вперёд». Панель: ОАК-группа + оба легаси-кода; оффер = 12 из 12, missing пуст."""
+    oak = ["M039", "M043", "M049", "M062"]
+    panel = oak + sorted(NOT_SEPARATELY_ORDERABLE)  # 6 маркеров, из них 2 не заказные
+    items_by_lab = {
+        "gemotest": [_it("gemotest", "1.1", "ОАК", 610, oak)],
+        "invitro": [_it("invitro", "2852", "ОАК без диффа", 255, ["M039", "M043", "M049"])],
+    }
+    offers = panel_offers(panel, items_by_lab)
+    assert [o["key"] for o in offers] == ["gemotest", "invitro"]  # полная лаба первая
+    assert offers[0]["covered"] == 6 and offers[0]["n"] == 6
+    assert offers[0]["missing"] == []
+    # у Инвитро реальная дыра (нет M062), легаси-коды в missing не попадают
+    assert offers[1]["missing"] == ["Лимфоциты %"]
+
+
+def test_not_orderable_only_panel_has_no_price():
+    assert panel_offers(sorted(NOT_SEPARATELY_ORDERABLE), {"l": [_it("l", "a", "x", 100, ["M039"])]}) == []
 
 
 # ─────────────────────────── парсер прайса ───────────────────────────

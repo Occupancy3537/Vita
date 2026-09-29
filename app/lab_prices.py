@@ -39,6 +39,14 @@ from app.lab_prices_map import COVERS
 
 logger = logging.getLogger(__name__)
 
+# Легаси-компоненты ОАК, которые НИ ОДНА лаба не продаёт отдельной позицией:
+# M047 «Цветовой показатель» — устаревший расчётный (современные анализаторы
+# не выдают, MCHC уже в каталоге), M060 «Палочкоядерные %» — только ручной
+# подсчёт диффа. Они остаются в плане и в export_text (это маркеры наблюдения),
+# но из ЦЕНОВОЙ математики исключены — иначе каждая лаба вечна «с дыркой»,
+# и честное правило «полные лабы — вперёд» никогда не срабатывает.
+NOT_SEPARATELY_ORDERABLE = {"M047", "M060"}
+
 
 @dataclass(frozen=True)
 class LabItem:
@@ -134,32 +142,38 @@ def _missing_names(codes: list[str]) -> list[str]:
 def panel_offers(codes: list[str], items_by_lab: dict[str, list[LabItem]]) -> list[dict]:
     """Офферы всех лаб по готовой панели. Сортировка результата: полностью
     покрывающие по возрастанию цены (тай-брейк — key лабы), лабы с дырками
-    после них. Первый элемент = pick."""
-    codes = sorted(set(codes))
-    if not codes:
+    после них. Первый элемент = pick.
+
+    Не заказываемые отдельно маркеры (NOT_SEPARATELY_ORDERABLE) из ценовой
+    математики исключены, но в covered ЗАСЧИТЫВАЮТСЯ как покрытые (денежно они
+    бесплатны и идут в составе ОАК) — чтобы сводка «N из N» сходилась с числом
+    маркеров панели, а missing содержал только реальные дыры лабы."""
+    all_codes = sorted(set(codes))
+    priceable = [c for c in all_codes if c not in NOT_SEPARATELY_ORDERABLE]
+    if not priceable:
         return []
     offers = []
     for lab in sorted(items_by_lab):
         items = items_by_lab[lab]
-        sol = min_cover(codes, items)
+        sol = min_cover(priceable, items)
         if sol is None:
             continue
         chosen = sol["items"]
         breakdown = []
         for it in chosen:
-            in_panel = sorted(set(it.covers) & set(codes))
+            in_panel = sorted(set(it.covers) & set(priceable))
             breakdown.append({
                 "code": it.external_code, "name": it.name,
                 "price_rub": round(it.price_rub, 2), "covers": in_panel,
-                "extra": sorted(set(it.covers) - set(codes)),  # «в комплекс входят ещё N — про запас»
+                "extra": sorted(set(it.covers) - set(priceable)),  # «в комплекс входят ещё N — про запас»
                 "note": None,  # заполняется ниже из NOTES
             })
         offers.append({
             "key": lab,
             "name": chosen[0].lab_name if chosen else lab,
             "price_rub": sol["cost"],
-            "covered": len(codes) - len(sol["missing"]),
-            "n": len(codes),
+            "covered": len(all_codes) - len(sol["missing"]),
+            "n": len(all_codes),
             "missing": _missing_names(sol["missing"]),
             "breakdown": breakdown,
             "parsed_at": sol["parsed_at"].isoformat() if sol["parsed_at"] else None,
