@@ -41,6 +41,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+import mimetypes
 from pathlib import Path
 from typing import Callable, Literal, Optional
 
@@ -129,6 +130,10 @@ app.include_router(vita_router)
 # персональные данные): без этого браузер не сможет установить приложение на
 # домашний экран ДО входа по паролю. Сама страница (vita.html) сюда не
 # попадает — она отдаётся только через гейтед /vita в app/vita.py.
+# Образ python:3.12-slim не содержит /etc/mime.types — без этого Python не
+# резолвит .woff2 (self-host шрифтов, 2026-09-29) и StaticFiles отдаёт его
+# как text/plain; часть браузеров такой @font-face молча игнорирует.
+mimetypes.add_type("font/woff2", ".woff2")
 app.mount("/vita-assets", StaticFiles(directory=Path(__file__).parent / "static" / "vita_public"), name="vita-assets")
 
 
