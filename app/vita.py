@@ -446,12 +446,63 @@ def build_food_topic_detail(cur) -> dict:
     from app.dashboard import get_weekly_nutrition
 
     weekly = get_weekly_nutrition(cur)
+    return shape_food_topic(weekly, _yesterday_meals(cur), _topic_publications(cur, "food"))
+
+
+def _week_top_sources(src: Optional[dict], limit: int = 3) -> list[str]:
+    """Сверка с макетом v7: тап по нутриенту — «откуда он брался за неделю».
+    Суммирует дневные топ-источники (get_weekly_nutrition.sources[...].byDay) по
+    неделе. Персонального AI-совета «чем восполнить» на бэкенде нет —
+    показываем честное «откуда был» + справку из nutrient_targets.Примечание."""
+    acc: dict[str, float] = {}
+    for day in (src or {}).get("byDay") or []:
+        for item in day or []:
+            acc[item["name"]] = acc.get(item["name"], 0) + (item.get("pct") or 0)
+    return [n for n, _ in sorted(acc.items(), key=lambda kv: kv[1], reverse=True)[:limit]]
+
+
+def shape_food_topic(weekly: dict, yesterday: dict, publications: list[dict]) -> dict:
+    sources = weekly.get("sources") or {}
     heatmap = [
-        {"label": h["label"], "avg_pct": h["avgPct"], "level": h["level"],
-         "unit": h["unit"], "days_pct": h["values"]}
+        {"label": h["label"], "avg_pct": h["avgPct"], "level": h["level"], "unit": h["unit"],
+         "days_pct": h["values"], "note": h.get("note") or None,
+         "top_sources": _week_top_sources(sources.get(h["label"]))}
         for h in (weekly.get("heatmap") or [])
     ]
-    return {"segment": "food", "micro_heatmap": heatmap, "publications": _topic_publications(cur, "food")}
+    dq = weekly.get("diet_quality") or {}
+    ahei = dq.get("ahei") or {}
+    plants = dq.get("plants") or {}
+    return {
+        "segment": "food",
+        "days": weekly.get("days") or [],
+        "micro_heatmap": heatmap,
+        "normal": [m["label"] for m in (weekly.get("normal") or []) if m.get("label")],
+        "diet_quality": None if dq.get("error") or not ahei else {
+            "ahei_week": ahei.get("week_avg"), "ahei_target": ahei.get("target"), "ahei_max": ahei.get("max"),
+            "plants": plants.get("count"), "plants_target": plants.get("target"),
+        },
+        "yesterday": yesterday,
+        "publications": publications,
+    }
+
+
+def _yesterday_meals(cur) -> dict:
+    """Экран «Вчера» из шторки «Питание» (макет v7): приёмы пищи вчерашних суток
+    с белком — прямо из health.meals (та же таблица, что _dish_sources)."""
+    tz = timeutil.person_tz_name()
+    cur.execute(
+        'SELECT to_char("Date" AT TIME ZONE %s, \'HH24:MI\'), "Meal_description", "Proteins", "Calories", "Насыщенные жиры" '
+        'FROM health.meals WHERE ("Date" AT TIME ZONE %s)::date = (now() AT TIME ZONE %s)::date - 1 '
+        'ORDER BY "Date"',
+        (tz, tz, tz),
+    )
+    meals, sat_fat = [], 0.0
+    for t, d, p, k, f in cur.fetchall():
+        meals.append({"t": t, "d": (d or "").strip(), "p": round(_num(p) or 0), "k": round(_num(k) or 0)})
+        sat_fat += _num(f) or 0
+    # «Жиры 24/28 г · серия не прервалась» (макет v7) — насыщенные жиры вчерашних суток
+    return {"meals": meals, "protein": sum(m["p"] for m in meals), "kcal": sum(m["k"] for m in meals),
+            "sat_fat": round(sat_fat, 1) if meals else None}
 
 
 # =====================================================================
@@ -621,6 +672,10 @@ def build_nudge(state: dict, steps: dict, protein: dict, now_local) -> Optional[
 _LEVER_META = {
     "fat": {"label": "Насыщенные жиры", "budget_label": "Насыщенные жиры", "col": "Насыщенные жиры", "streak_label": "Жиры в норме"},
     "sodium": {"label": "Натрий", "budget_label": "Натрий", "col": "Натрий", "streak_label": "Соль в норме"},
+    # Сверка «Питания» с макетом v7 (2026-09-29): в макете лимиты — клинически
+    # значимые пределы; сахар в том же _CLINICAL_LIMITS и в сериях, но рычагом
+    # не был — «Лимиты» показывали только два из трёх.
+    "sugar": {"label": "Добавленный сахар", "budget_label": "Добавленный сахар", "col": "Добавленный сахар", "streak_label": "Сахар в норме"},
 }
 
 
@@ -1288,7 +1343,23 @@ def build_rhythm(cur) -> dict:
         "gate": gate,
         "steps": steps,
         "levers": levers,
+        "macros": build_macros(tn, (today.get("meals_today") or 0) > 0),
     }
+
+
+def build_macros(tn: dict, food_logged: bool) -> Optional[dict]:
+    """Плитки «За день» (макет v7, шторка «Питание»): съедено/цель по ккал и БЖУ —
+    те же числа, что уже считает get_today_nutrition (summary). Еды нет — None
+    (фронтенд пишет «появятся после первого приёма», не рисует нули)."""
+    if not food_logged:
+        return None
+    summ = tn.get("summary") or {}
+    macros = summ.get("macros") or {}
+    def pair(d):
+        d = d or {}
+        return {"consumed": _num(d.get("consumed")), "target": _num(d.get("target"))}
+    return {"kcal": pair(summ.get("calories")), "protein": pair(macros.get("proteins")),
+            "fat": pair(macros.get("fats")), "carbs": pair(macros.get("carbs"))}
 
 
 # =====================================================================

@@ -874,7 +874,7 @@ svg{display:block}
 .week{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:center}
 .dial{position:relative;text-align:center}
 .dial svg{width:100%;max-width:150px;margin:0 auto;overflow:visible}
-.dial .dv{position:absolute;left:0;right:0;bottom:4px;font-size:32px;font-weight:200;letter-spacing:-.02em}
+.dial .dv{position:absolute;left:0;right:0;top:36px;bottom:auto;font-size:32px;font-weight:200;letter-spacing:-.02em;line-height:1}
 .dial .lbl{margin-top:8px}
 .plants{border-left:1px solid var(--line);padding-left:16px}
 .plants .pv{font-size:38px;font-weight:200;letter-spacing:-.02em;line-height:1}
@@ -1301,6 +1301,7 @@ function pubList(pubs,title='Свежее по теме',i=6){
 }
 
 const I={
+  chev:'<path d="M6 9l6 6 6-6"/>',egg:'<path d="M12 3c3.5 0 6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 2.5-10 6-10z"/>',yogurt:'<path d="M5 8h14l-2 12H7L5 8z"/><path d="M4 8h16M9 5h6"/>',chicken:'<path d="M15.5 4a4.5 4.5 0 0 1 0 9l-4.5 4.5a2 2 0 1 1-3-1 2 2 0 1 1 1-3L13.5 9A4.5 4.5 0 0 1 15.5 4z"/>',fish:'<path d="M3 12c3-4 7-5 11-4l4-3v14l-4-3c-4 1-8 0-11-4z"/><circle cx="8" cy="11.5" r=".6"/>',apple:'<path d="M12 7c-2-1.5-7-1-7 5 0 4 3 8 5 8 1 0 1.3-.5 2-.5s1 .5 2 .5c2 0 5-4 5-8 0-6-5-6.5-7-5z"/><path d="M12 7c0-2 1-3.5 3-4"/>',leaf:'<path d="M5 19c0-8 6-14 14-14 0 8-6 14-14 14z"/><path d="M5 19l9-9"/>',bread:'<path d="M5 11a3.5 3.5 0 0 1 1.5-6.5h11A3.5 3.5 0 0 1 19 11v8H5v-8z"/>',
   doc:'<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',drop:'<path d="M8 3.5h8l-.7 5.3a3.3 3.3 0 0 1-6.6 0z"/><path d="M12 12.2v7.6M8.6 20.3h6.8"/>',snow:'<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M9.6 4.6 12 6.2l2.4-1.6M9.6 19.4 12 17.8l2.4 1.6M4.6 10.6l2.5-.6-.6-2.6M19.4 13.4l-2.5.6.6 2.6M4.6 13.4l2.5.6-.6 2.6M19.4 10.6l-2.5-.6.6-2.6"/>',team:'<circle cx="12" cy="7.8" r="2.6"/><circle cx="5.6" cy="10.2" r="2"/><circle cx="18.4" cy="10.2" r="2"/><path d="M7.6 19.5c.5-3 2.2-4.7 4.4-4.7s3.9 1.7 4.4 4.7"/><path d="M2.6 18c.3-2 1.4-3.3 3-3.5M21.4 18c-.3-2-1.4-3.3-3-3.5"/>',tube:'<path d="M9 3h6M10 3v11.5a2 2 0 0 0 4 0V3"/><path d="M10 10h4"/>',cube:'<path d="M12 3.5l7.5 4.2v8.6L12 20.5l-7.5-4.2V7.7z"/><path d="M4.5 7.7 12 12l7.5-4.3M12 12v8.5"/>',
   check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>', right:'<path d="M9 6l6 6-6 6"/>', back:'<path d="M15 5l-7 7 7 7"/>',
   charge:'<path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5" opacity=".35"/><path d="M12.8 7.5l-3.3 5h3l-.8 4 3.3-5h-3z"/>',
@@ -1546,15 +1547,8 @@ function enterToday(){
 /* ================= ШТОРКИ (единый компонент — B{}+openSheet/closeSheet, без изменений механики) ================= */
 const MARK={y:()=>svg('check'),w:()=>'<b style="color:#fff;font-size:12px">!</b>',n:()=>'<b style="color:#fff;font-size:12px">!</b>'};
 const rowMark={good:'y',neutral:'y',warn:'w',bad:'n'};
-function leverRow(l){
-  if(!l||!l.has_data)return `<p class="empty">Нет данных сегодня.</p>`;
-  const dec=l.unit==='г'&&l.target<10?1:0;
-  const src=(l.sources||[]),smax=src.length?Math.max(...src.map(s=>s.value)):1;
-  return `<div class="fsec rise" style="--i:2"><div class="lbl">${l.label} · ${fmt(l.consumed,dec)}/${fmt(l.target,dec)} ${l.unit}</div>
-  <div class="bb"><i class="fill${l.status==='over'?' over':''}" style="width:${Math.min(100,l.consumed/l.target*75)}%"></i><u></u></div></div>
-  ${src.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Откуда</span><div class="srcs" style="opacity:1;transform:none;padding:0">${src.map(s=>`<div class="src">${svg('dots')}<span style="width:96px">${s.name}</span><span class="sb"><i style="width:${s.value/smax*100}%"></i></span><span class="g">${fmt(s.value,l.unit==='г'?1:0)} ${l.unit}</span></div>`).join('')}</div></div>`:''}
-  <p class="fsec rise" style="--i:4" style="margin-top:10px">${l.note}</p>`;
-}
+let FOODT=null;
+const srcRows=(ss,u)=>{const mx=Math.max(...ss.map(x=>x.value),1);return ss.slice(0,4).map(x=>`<div class="src">${svg('dots')}<span style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.name}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,u==='г'&&x.value<10?1:0)} ${u}</span></div>`).join('')};
 const STREAK_IC={sleep_zone:'moon','Натрий':'salt','Добавленный сахар':'cube','Насыщенные жиры':'shield'};
 const B={
   today(){const n=TODAY.nudge,lv=(RHYTHM&&RHYTHM.levers)||{},stp=(RHYTHM&&RHYTHM.steps)||{},score=TODAY.ring.score,ahead=TODAY.ring.ahead;
@@ -1684,20 +1678,67 @@ const B={
       <p class="ov-coach rise" style="--i:5">${T.coach}</p>${pubList(T.publications,'Свежее по теме',6)}`,
       after(){replay($('#ovChart'))}}
     }
-    /* food */
-    const lv=(RHYTHM&&RHYTHM.levers)||{},rows=['protein','fat','sodium'].filter(x=>lv[x]&&lv[x].has_data).map(x=>leverRow(lv[x])).join('');
-    const rest=own.filter(r=>!['Насыщенные жиры','Натрий'].includes(r.label));
-    /* макет v7: тепловая карта — строка = нутриент, 7 клеток = дни, в конце — среднее */
+    /* food — макет v7 «Питание сегодня»: За день (4 плитки, тап по «Белки» — источники) ·
+       Лимиты (жиры, натрий, сахар; тап — откуда) · Микро · неделя (тепловая карта; тап — откуда
+       брался и справка) · «Вчера ›» — приёмы пищи, AHEI и растения недели. */
+    FOODT=T;
+    const lv=(RHYTHM&&RHYTHM.levers)||{},mc=RHYTHM&&RHYTHM.macros;
+    const tile=(l,x,u,tap)=>{const c=x&&x.consumed,t=x&&x.target,w=c!=null&&t?Math.min(100,c/t*100):0,tag=tap?'button':'div';
+      return `<${tag} class="mac${tap?' tapm':''}"${tap?' data-a="macsrc"':''}><span class="lbl">${l}${tap?svg('chev','ic mchev'):''}</span><b>${c!=null?fmt(c):'—'}</b><span class="of">${t?`из ${fmt(t)} ${u}`:'цель не задана'}</span><div class="mb"><i style="width:${w}%"></i></div></${tag}>`};
+    const macros=mc?[tile('Ккал',mc.kcal,'ккал'),tile('Белки',mc.protein,'г',lv.protein&&lv.protein.has_data),tile('Жиры',mc.fat,'г'),tile('Углеводы',mc.carbs,'г')].join('')
+      :'<p class="empty">Еда сегодня не записана — БЖУ появятся после первого приёма.</p>';
+    const pr=lv.protein,prSrc=pr&&pr.has_data&&(pr.sources||[]).length?`<div class="psrc" id="protSrc" hidden><div class="lbl" style="margin-bottom:4px">Источники белка сегодня</div>${srcRows(pr.sources,'г')}<p class="src-note">${pr.note}</p></div>`:'';
+    const LV=['fat','sodium','sugar'].filter(k=>lv[k]);
+    const levers=LV.map(k=>{const l=lv[k];
+      if(!l.has_data)return `<div class="lever nodata"><div class="lever-h"><div class="lever-row"><span class="lever-name"><b>${{fat:'Насыщенные жиры',sodium:'Натрий',sugar:'Добавленный сахар'}[k]}</b></span><span class="lever-meta">нет данных сегодня</span></div><div class="bb"></div></div></div>`;
+      const dec=l.unit==='г'&&l.target<10?1:0,meta=l.status==='over'?'<em class="wm">перебор</em>':l.status==='warn'?'<em class="wm">близко к лимиту</em>':'в коридоре';
+      return `<div class="lever" data-lever="${k}"><button class="lever-h" data-a="lever" data-k="${k}" aria-expanded="false">
+        <div class="lever-row"><span class="lever-name"><b>${l.label}</b><span>${fmt(l.consumed,dec)}/${fmt(l.target,dec)} ${l.unit}</span></span><span class="lever-meta">${meta}${svg('chev','ic chev')}</span></div>
+        <div class="bb"><i class="${l.status==='over'?'over':''}" style="width:${Math.min(100,l.consumed/l.target*75)}%"></i><u></u></div></button>
+        <div class="lever-more"><div><div class="srcs">${(l.sources||[]).length?srcRows(l.sources,l.unit):''}<p class="src-note">${l.note}</p></div></div></div></div>`}).join('');
+    const anyLever=LV.some(k=>lv[k].has_data);
+    const leverLabels=LV.map(k=>lv[k].label).filter(Boolean);
+    const otherLimits=own.filter(r=>!leverLabels.includes(r.label)&&!['Насыщенные жиры','Натрий','Добавленный сахар'].includes(r.label));
+    /* микро — строка = нутриент, клетки = дни недели, в конце — среднее; тап — откуда брался и справка */
+    const WD=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'],days=T.days||[];
     const cc=v=>v==null?'':v>=90?'c3':v>=75?'c2':v>=60?'c1':v>=45?'lo':'';
     const hm=T.micro_heatmap||[],nd=hm.reduce((a,m)=>Math.max(a,(m.days_pct||[]).length),0);
-    const heat=hm.length?`<div class="hm"><div class="hmH" style="grid-template-columns:92px repeat(${nd},1fr) 44px"><span></span>${Array.from({length:nd},(_,i)=>`<span>${i===nd-1?'сег.':'−'+(nd-1-i)}</span>`).join('')}<span>ср.</span></div>`
-      +hm.map(m=>`<div class="hmR" style="grid-template-columns:92px repeat(${nd},1fr) 44px"><span>${m.label}</span>${(m.days_pct||[]).map(v=>`<i class="${cc(v)}" title="${v==null?'нет данных':Math.round(v)+'%'}"></i>`).join('')}<em>${Math.round(m.avg_pct)}%</em></div>`).join('')+`</div>`:'';
-    return {html:`${top('Питание')}
-    ${rows||'<p class="empty rise" style="--i:1">Рычаги появятся после первого приёма пищи.</p>'}
-    ${rest.length?`<div class="rise" style="--i:3;margin-top:18px"><div class="lbl" style="margin-bottom:6px">Ещё в лимите</div>${idxRows(rest)}</div>`:''}
-    ${heat?`<div class="fsec rise" style="--i:4"><span class="lbl">Микро · неделя</span>${heat}<p class="gvNote">Только отклонения: недобор от 85% нормы или перебор 2+ дня.</p></div>`:''}
-    ${pubList(T.publications,'Свежее по теме',5)}`};
+    const dl=Array.from({length:nd},(_,i)=>{const d=days[days.length-nd+i];return d?WD[new Date(d+'T00:00:00').getDay()]:''});
+    const gcol=`grid-template-columns:92px repeat(${nd},1fr) 44px`;
+    const micro=hm.length?`<div class="hm"><div class="hmH" style="${gcol}"><span></span>${dl.map(x=>`<span>${x}</span>`).join('')}<span>среднее</span></div>`
+      +hm.map(m=>{const why=[(m.top_sources||[]).length?`За неделю больше всего дали: <b>${m.top_sources.join(', ')}</b>.`:'В записях еды за неделю его почти не было.',m.note?`Справка: ${m.note}`:''].filter(Boolean).join(' ');
+        return `<div class="hmW"><button class="hmR" style="${gcol}" data-a="micro"><span>${m.label}</span>${(m.days_pct||[]).map(v=>`<i class="${cc(v)}" title="${v==null?'нет данных':Math.round(v)+'%'}"></i>`).join('')}<em>${Math.round(m.avg_pct)}%</em></button><div class="hmA"><div><p>${why}</p></div></div></div>`}).join('')
+      +((T.normal||[]).length?`<div class="hmOk">${svg('check')}В норме за неделю: ${T.normal.slice(0,8).join(', ')}</div>`:'')+`</div>`
+      :`<p class="quietRow">${svg('check')}За неделю микронутриенты в норме${(T.normal||[]).length?': '+T.normal.slice(0,6).join(', '):''}.</p>`;
+    return {html:`${top('Питание сегодня')}
+    <div class="sectionHead rise" style="--i:1;margin-top:18px"><span class="lbl">За день</span><button class="linkline" data-a="foodyest">Вчера${svg('right')}</button></div>
+    <div class="macros rise" style="--i:1">${macros}</div>${prSrc}
+    <div class="sectionHead rise" style="--i:2"><span class="lbl">Лимиты</span><span>${anyLever?'тап — откуда':''}</span></div>
+    <div class="levers rise" style="--i:2">${levers}</div>
+    ${anyLever?'':'<p class="foot rise" style="--i:2">Лимиты оживут после первой записи еды.</p>'}
+    ${otherLimits.length?`<p class="quietRow rise" style="--i:2">${svg('check')}Ещё в лимите: ${otherLimits.map(r=>`${r.label.toLowerCase()} ${r.detail}`).join(', ')}</p>`:''}
+    <div class="sectionHead rise" style="--i:3"><span class="lbl">Микро · неделя</span><span>${hm.length?'тап — откуда':''}</span></div>
+    <div class="micro rise" style="--i:3">${micro}</div>`};
   },
+  /* «Вчера» из шторки «Питание» — макет v7: приёмы пищи с белком, AHEI и растения недели, свежее по теме */
+  foodYest(){
+    /* «Жиры 24/28 г · серия не прервалась» — лимит из сегодняшнего рычага, статус — вчерашняя клетка полосы серии */
+    const yFat=y=>{if(y.sat_fat==null)return `≈ ${fmt(y.kcal)} ккал`;const cap=RHYTHM&&RHYTHM.levers&&RHYTHM.levers.fat&&RHYTHM.levers.fat.target;
+      const st=(TODAY.streaks||[]).find(x=>x.key==='Насыщенные жиры'),d=st&&st.days&&st.days.length>1?st.days[st.days.length-2].c:null;
+      const ser={y:'серия не прервалась',f:'серию спасла заморозка',x:'серия прервалась'}[d];
+      return `Жиры ${fmt(y.sat_fat,y.sat_fat%1?1:0)}${cap?'/'+fmt(cap)+' г':' г'}${ser?' · '+ser:''}`};
+    const T=FOODT||{},y=T.yesterday||{meals:[]},dq=T.diet_quality,MI=['egg','yogurt','chicken','fish','apple','leaf','bread'];
+    const pick=d=>/яйц|омлет/i.test(d)?'egg':/йогурт|творог|кефир/i.test(d)?'yogurt':/кур|индей|мяс|говя/i.test(d)?'chicken':/рыб|треск|лосос|сельд/i.test(d)?'fish':/яблок|фрукт|ягод|банан/i.test(d)?'apple':/салат|овощ|шпинат/i.test(d)?'leaf':'bread';
+    const ah=dq&&dq.ahei_week!=null?dq.ahei_week:null,amax=dq&&dq.ahei_max||110;
+    return {html:`${top('Питание · вчера')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">Вчера · ${y.meals.length} ${plural(y.meals.length,'приём','приёма','приёмов')}</div><div class="big">${y.meals.length?fmt(y.protein):'—'}<small>г белка</small></div>${y.meals.length?`<p class="ov-sub" style="color:var(--accent-ink)">${yFat(y)}</p>`:''}</div>
+    ${y.meals.length?`<div class="meals rise" style="--i:2">${y.meals.map(m=>`<div class="meal"><div class="ph">${svg(pick(m.d))}</div><b>${m.d.length>44?m.d.slice(0,42)+'…':m.d}</b><span>${m.t} · белок ${m.p} г</span></div>`).join('')}</div>`:'<p class="empty rise" style="--i:2">Вчера еда не записана.</p>'}
+    ${dq?`<div class="week rise" style="--i:3" id="ovChart">
+      ${ah!=null?`<div class="dial"><svg viewBox="0 0 180 100"><path d="M14 92 A76 76 0 0 1 166 92" fill="none" stroke="var(--line)" stroke-width="3" stroke-linecap="round"/><path d="M14 92 A76 76 0 0 1 166 92" pathLength="1" fill="none" stroke="${ACCENT}" stroke-width="3.2" stroke-linecap="round" style="stroke-dasharray:${Math.min(1,ah/amax).toFixed(3)} 1"/></svg><div class="dv">${Math.round(ah)}</div><div class="lbl">AHEI · неделя</div></div>`:''}
+      ${dq.plants!=null?`<div class="plants"><div class="pv">${dq.plants}</div><p>видов растений · цель ${dq.plants_target} — <b>${dq.plants>=dq.plants_target?'взята':'ещё '+(dq.plants_target-dq.plants)}</b></p></div>`:''}
+    </div>`:''}
+    ${ah!=null?`<p class="ov-coach rise" style="--i:4">AHEI — индекс качества рациона: цель ${dq.ahei_target}, сейчас ${Math.round(ah)}. Считается за неделю, не за день.</p>`:''}
+    ${pubList(T.publications,'Свежее по теме',5)}`}},
   consrep(){const c=DOC&&DOC.consilium;if(!c)return {html:top('Консилиум')};
     return {html:`${top('Консилиум')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">${dateFmt(c.date)}${c.roles.length?' · '+c.roles.join(', '):''}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${c.topic||''}</p>${c.question?`<p class="ov-sub" style="color:var(--accent-ink)">${c.question}</p>`:''}</div>
@@ -1911,6 +1952,10 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'theme':haptic();setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');break;
     case'inbox':haptic();loadChecks().catch(()=>{}).then(()=>openSheet('inbox',null,t));break;
     case'consrep':case'notes':case'draw':haptic();openSheet(a,null,t);break;
+    case'macsrc':{haptic();const ps=$('#protSrc');if(ps){ps.hidden=!ps.hidden;t.classList.toggle('on',!ps.hidden)}break}
+    case'lever':{haptic();const lv=t.closest('.lever'),on=!lv.classList.contains('open');$$('.lever',ovS).forEach(x=>{x.classList.remove('open');const b=$('.lever-h',x);b&&b.setAttribute('aria-expanded','false')});if(on){lv.classList.add('open');t.setAttribute('aria-expanded','true')}break}
+    case'micro':{haptic();const w=t.closest('.hmW'),on=!w.classList.contains('open');$$('.hmW',ovS).forEach(x=>x.classList.remove('open'));w.classList.toggle('open',on);break}
+    case'foodyest':haptic();openSheet('foodYest',null,t);break;
     case'medpass':haptic();loadMedp().then(mp=>openSheet('medpass',mp,t)).catch(()=>toast('Не удалось загрузить медпаспорт'));break;
     case'copydraw':{haptic();const x=DOC&&DOC.next_draw&&DOC.next_draw.export_text;if(!x)break;
       (navigator.clipboard?navigator.clipboard.writeText(x):Promise.reject()).then(()=>toast('Список скопирован — вставь в заявку лаборатории.')).catch(()=>toast('Не удалось скопировать'));break}

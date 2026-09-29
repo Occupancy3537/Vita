@@ -229,7 +229,10 @@ def test_build_food_topic_detail_returns_publications_and_heatmap(monkeypatch):
     assert out["segment"] == "food"
     assert len(out["publications"]) == 1
     assert out["micro_heatmap"] == [{"label": "Магний", "avg_pct": 62, "level": 2, "unit": "мг",
-                                      "days_pct": [60, 55, 70, 58, 65, 61, 63]}]
+                                      "days_pct": [60, 55, 70, 58, 65, 61, 63],
+                                      # сверка с макетом v7: справка и «откуда был за неделю» для тапа по строке
+                                      "note": None, "top_sources": []}]
+    assert out["yesterday"] == {"meals": [], "protein": 0, "kcal": 0, "sat_fat": None}
 
 
 def test_build_food_topic_detail_empty_heatmap_when_nothing_deviates(monkeypatch):
@@ -1270,3 +1273,57 @@ def test_shape_me_drivers_sorted_and_systems_grouped():
 def test_new_vita_tabs_require_session():
     for path in ("/vita/doctor", "/vita/me", "/vita/medpassport"):
         assert client.get(path).status_code == 401
+
+
+# ─────── «Питание» — сверка с макетом v7 (2026-09-29) ───────
+
+def test_build_macros_none_without_food_and_pairs_with_food():
+    tn = {"summary": {"calories": {"consumed": 1640, "target": "2300"},
+                      "macros": {"proteins": {"consumed": 96, "target": "160"}, "fats": {"consumed": 54.2, "target": "75"},
+                                 "carbs": {"consumed": 186, "target": "250"}}}}
+    assert vita.build_macros(tn, False) is None
+    m = vita.build_macros(tn, True)
+    assert m["kcal"] == {"consumed": 1640, "target": 2300}
+    assert m["protein"]["target"] == 160 and m["fat"]["consumed"] == 54.2 and m["carbs"]["target"] == 250
+
+
+def test_week_top_sources_sums_days_and_ranks():
+    src = {"byDay": [[{"name": "Суп", "pct": 20}, {"name": "Рыба", "pct": 30}], [], [{"name": "Суп", "pct": 25}], [{"name": "Салат", "pct": 5}]]}
+    assert vita._week_top_sources(src) == ["Суп", "Рыба", "Салат"]
+    assert vita._week_top_sources(None) == []
+
+
+def test_shape_food_topic_carries_everything_the_sheet_shows():
+    weekly = {
+        "days": ["2026-09-22", "2026-09-23"],
+        "heatmap": [{"label": "Йод", "avgPct": 45, "level": 2, "unit": "мкг", "values": [40, 50], "note": "морепродукты"}],
+        "normal": [{"label": "Клетчатка"}, {"label": "Калий"}],
+        "sources": {"Йод": {"byDay": [[{"name": "Треска", "pct": 30}], []]}},
+        "diet_quality": {"ahei": {"week_avg": 71, "target": 80, "max": 110}, "plants": {"count": 43, "target": 30}},
+    }
+    y = {"meals": [{"t": "08:10", "d": "Омлет", "p": 26, "k": 350}], "protein": 26, "kcal": 350}
+    out = vita.shape_food_topic(weekly, y, [])
+    h = out["micro_heatmap"][0]
+    assert h["days_pct"] == [40, 50] and h["note"] == "морепродукты" and h["top_sources"] == ["Треска"]
+    assert out["normal"] == ["Клетчатка", "Калий"] and out["days"] == ["2026-09-22", "2026-09-23"]
+    assert out["diet_quality"] == {"ahei_week": 71, "ahei_target": 80, "ahei_max": 110, "plants": 43, "plants_target": 30}
+    assert out["yesterday"]["protein"] == 26
+
+
+def test_shape_food_topic_diet_quality_error_is_none():
+    out = vita.shape_food_topic({"diet_quality": {"error": "boom"}}, {"meals": [], "protein": 0, "kcal": 0}, [])
+    assert out["diet_quality"] is None and out["micro_heatmap"] == [] and out["normal"] == []
+
+
+def test_sugar_is_a_limit_lever_like_fat_and_sodium():
+    assert vita._LEVER_META["sugar"]["budget_label"] == "Добавленный сахар"
+    today = {"meals_today": 0, "budget": [], "streaks": []}
+    out = vita.build_levers(_FakeCursor([]), today, {"summary": {}})
+    assert out["sugar"] == {"has_data": False}
+
+
+def test_yesterday_meals_sums_protein_kcal_and_sat_fat():
+    rows = [("08:10", "Омлет ", 26, 380, 6.5), ("19:50", "Треска", 36, "410", None)]
+    y = vita._yesterday_meals(_FakeCursor(rows))
+    assert y["protein"] == 62 and y["kcal"] == 790 and y["sat_fat"] == 6.5
+    assert y["meals"][0] == {"t": "08:10", "d": "Омлет", "p": 26, "k": 380}
