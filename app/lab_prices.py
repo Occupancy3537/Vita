@@ -139,6 +139,54 @@ def _missing_names(codes: list[str]) -> list[str]:
     return [LAB_CATALOG[c]["name"] if c in LAB_CATALOG else c for c in codes]
 
 
+_RU_MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
+
+
+def _plural_ru(n: int) -> str:
+    # копия lab_optimizer._plural_ru: импортировать его сюда нельзя — там
+    # psycopg на уровне модуля, а ядро цен обязано тестироваться без БД
+    if n % 10 == 1 and n % 100 != 11:
+        return ""
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "а"
+    return "ов"
+
+
+def _ru_money(v: float) -> str:
+    return f"{v:,.0f}".replace(",", " ")
+
+
+def build_export_text(panel: dict, pick: dict) -> str:
+    """Список ЗАКУПКИ для выбранной лаборатории: какие ПОЗИЦИИ прайса заказать
+    (код лабы + название + цена + что закрывает), чтобы итог сошёлся с ценой
+    оффера. Это не список маркеров (он и так на экране), а ровно то, что
+    диктует оператору в лаборатории: комплексы не развёрнуты в синглы,
+    синглы не слиты в комплексы. Пробирки — количеством, не типами (по макету)."""
+    tubes = panel.get("tube_types") or []
+    d_iso = panel.get("date") or ""
+    try:
+        from datetime import date as _d
+        dd = _d.fromisoformat(d_iso)
+        date_txt = f"{dd.day} {_RU_MONTHS[dd.month - 1]}"
+    except ValueError:
+        date_txt = d_iso
+    n = pick.get("n") or panel.get("n_markers") or 0
+    lines = [f"{date_txt} — панель из {n} анализ{_plural_ru(n)}, пробирки: {len(tubes)}"
+             + (", натощак" if panel.get("fasting_required") else "") + "."]
+    lines.append(f"{pick.get('name', '')}, {_ru_money(pick.get('price_rub') or 0)} ₽"
+                 f" (прайс от {str(pick.get('parsed_at') or '')[:10]}):")
+    for i, b in enumerate(pick.get("breakdown") or [], 1):
+        covers = ", ".join(LAB_CATALOG[c]["name"] for c in b.get("covers", []) if c in LAB_CATALOG)
+        note = f" [{b['note']}]" if b.get("note") else ""
+        lines.append(f"{i}. {b.get('code')} {b.get('name')} — {_ru_money(b.get('price_rub') or 0)} ₽{note}")
+        if covers:
+            lines.append(f"   закрывает: {covers}")
+    for m in pick.get("missing") or []:
+        lines.append(f"«{m}» — {pick.get('name', 'лаборатория')} не делает, сдать в другой лаборатории.")
+    lines.append(f"Итого: {_ru_money(pick.get('price_rub') or 0)} ₽.")
+    return "\n".join(lines)
+
+
 def panel_offers(codes: list[str], items_by_lab: dict[str, list[LabItem]]) -> list[dict]:
     """Офферы всех лаб по готовой панели. Сортировка результата: полностью
     покрывающие по возрастанию цены (тай-брейк — key лабы), лабы с дырками
@@ -215,3 +263,6 @@ def attach(cur, plan: dict, chosen_lab: Optional[str] = None) -> None:
             pick = next((o for o in offers if o["key"] == chosen_lab), pick)
         p["labs"] = offers
         p["pick"] = pick
+        # экспорт = список закупки выбранной лабы (коды позиций, комплексы,
+        # итог); без цен остаётся прежний маркер-список из lab_optimizer
+        p["export_text"] = build_export_text(p, pick)

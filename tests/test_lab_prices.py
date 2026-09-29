@@ -8,7 +8,7 @@ app/lab_prices_ingest.parse_rows — чистые функции (докстри
 from datetime import datetime, timezone
 
 from app.lab_catalog import LAB_CATALOG
-from app.lab_prices import NOT_SEPARATELY_ORDERABLE, LabItem, min_cover, panel_offers
+from app.lab_prices import NOT_SEPARATELY_ORDERABLE, LabItem, build_export_text, min_cover, panel_offers
 from app.lab_prices_ingest import detect_kind, parse_rows
 from app.lab_prices_map import COVERS
 
@@ -136,6 +136,45 @@ def test_not_orderable_markers_do_not_make_holes():
 
 def test_not_orderable_only_panel_has_no_price():
     assert panel_offers(sorted(NOT_SEPARATELY_ORDERABLE), {"l": [_it("l", "a", "x", 100, ["M039"])]}) == []
+
+
+# ─────────────────────────── экспорт-закупка ───────────────────────────
+
+def test_export_text_is_shopping_list():
+    """Экспорт = что заказать в выбранной лабе: коды позиций прайса, комплексы
+    не развёрнуты, итог сходится; пробирки количеством; дыры — с подсказкой."""
+    panel = {"date": "2026-09-29", "n_markers": 3, "fasting_required": True, "tube_types": ["ЭДТА", "сыворотка"]}
+    pick = {
+        "key": "gemotest", "name": "Гемотест", "price_rub": 1800, "n": 3,
+        "missing": ["Гомоцистеин"], "parsed_at": "2026-09-29T05:04:59+00:00",
+        "breakdown": [
+            {"code": "12.143", "name": "Витамин D и ферритин (суперцена)", "price_rub": 1190,
+             "covers": ["M035", "M027"], "extra": [], "note": None},
+            {"code": "3.11", "name": "Креатинин (венозная кровь)", "price_rub": 280,
+             "covers": ["M004"], "extra": [], "note": None},
+        ],
+    }
+    t = build_export_text(panel, pick)
+    assert "панель из 3 анализа, пробирки: 2, натощак" in t          # пробирки — количество
+    assert "29 сен" in t
+    assert "Гемотест, 1 800 ₽ (прайс от 2026-09-29):" in t
+    assert "1. 12.143 Витамин D и ферритин (суперцена) — 1 190 ₽" in t   # комплекс целым
+    assert "закрывает: Витамин D (25-OH), Ферритин" in t
+    assert "2. 3.11 Креатинин (венозная кровь) — 280 ₽" in t
+    assert "«Гомоцистеин» — Гемотест не делает" in t
+    assert t.strip().endswith("Итого: 1 800 ₽.")
+
+
+def test_export_text_note_passthrough():
+    panel = {"date": "2026-09-29", "n_markers": 1, "fasting_required": False, "tube_types": []}
+    pick = {"key": "gemotest", "name": "Гемотест", "price_rub": 490, "n": 1, "missing": [],
+            "parsed_at": None,
+            "breakdown": [{"code": "3.25", "name": "С-реактивный белок (СРБ)", "price_rub": 490,
+                           "covers": ["M024"], "extra": [],
+                           "note": "обычный СРБ; для PhenoAge нужен hs-CRP — уточнить в лабе"}]}
+    t = build_export_text(panel, pick)
+    assert "[обычный СРБ; для PhenoAge нужен hs-CRP — уточнить в лабе]" in t
+    assert "(прайс от ):" in t  # parsed_at нет — дисклеймер без даты, не падает
 
 
 # ─────────────────────────── парсер прайса ───────────────────────────
