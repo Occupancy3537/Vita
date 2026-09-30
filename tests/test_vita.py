@@ -1327,3 +1327,16 @@ def test_yesterday_meals_sums_protein_kcal_and_sat_fat():
     y = vita._yesterday_meals(_FakeCursor(rows))
     assert y["protein"] == 62 and y["kcal"] == 790 and y["sat_fat"] == 6.5
     assert y["meals"][0] == {"t": "08:10", "d": "Омлет", "p": 26, "k": 380}
+
+
+# ─────── точка на вкладке «Врач» (2026-09-30) ───────
+
+def test_draw_due_true_when_first_panel_is_today_or_overdue():
+    assert vita.draw_due({"panels": [{"date": "2026-09-30"}]}, "2026-09-30") is True
+    assert vita.draw_due({"panels": [{"date": "2026-09-01"}]}, "2026-09-30") is True
+
+
+def test_draw_due_false_when_panel_in_future_or_no_panels():
+    assert vita.draw_due({"panels": [{"date": "2026-10-23"}]}, "2026-09-30") is False
+    assert vita.draw_due({"panels": []}, "2026-09-30") is False
+    assert vita.draw_due({}, "2026-09-30") is False

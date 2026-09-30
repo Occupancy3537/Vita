@@ -598,8 +598,10 @@ svg{display:block}
 .ost.y{color:var(--green)}.ost.w{color:var(--amber)}.ost.o{color:var(--muted)}
 .nd-n{display:flex;gap:7px;align-items:flex-start;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);font-size:12.5px;line-height:1.45;color:var(--ink2)}
 .nd-n svg{flex:none;width:13px;height:13px;color:var(--teal);margin-top:2px}
-.dates{display:flex;align-items:center;gap:8px;margin:14px 2px 0;font-size:12px;color:var(--muted)}
-.dpill{height:30px;padding:0 12px;border-radius:15px;font-size:12.5px;color:var(--ink2);box-shadow:inset 0 0 0 1px var(--line)}
+.dates{display:flex;align-items:center;gap:6px;margin:14px 2px 0;font-size:12px;color:var(--muted);overflow-x:auto;scrollbar-width:none}
+.dates::-webkit-scrollbar{display:none}
+.dates>span{flex:none;white-space:nowrap}
+.dpill{flex:none;white-space:nowrap;height:30px;padding:0 11px;border-radius:15px;font-size:12.5px;color:var(--ink2);box-shadow:inset 0 0 0 1px var(--line)}
 .dpill.on{background:var(--ink);color:var(--bg);box-shadow:none}
 .acc{margin-top:20px}
 .accS{display:block;width:100%;border-top:1px solid var(--line);text-align:left}
@@ -1292,7 +1294,7 @@ svg{display:block}
     <span class="tb-pill" id="tbPill"></span>
     <button class="tb on press" data-go="today" role="tab" aria-selected="true"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M3 17.5h18M6.5 20.5h11"/><path d="M7 17.5a5 5 0 0 1 10 0"/><path d="M12 6.5V4M6.3 9.3 4.6 7.6M17.7 9.3l1.7-1.7M3.5 13.5h1.6M18.9 13.5h1.6"/></svg></span>Сегодня</button>
     <button class="tb press" data-go="cases" role="tab" aria-selected="false"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="16.5" r="2.2"/><circle cx="11.5" cy="6" r="2.2"/><circle cx="18.5" cy="14" r="2.2"/><path d="M7 14.5l3.4-6.5M13.3 7.3l3.8 5M8.2 16.2l8.1-1.8"/></svg><i class="badge" id="caseBadge"></i></span>Проверки</button>
-    <button class="tb press" data-go="plan" role="tab" aria-selected="false"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M6.5 3.5v5a4.5 4.5 0 0 0 9 0v-5"/><path d="M5 3.5h3M14 3.5h3"/><path d="M11 13v2.5a4.5 4.5 0 0 0 9 0v-1.5"/><circle cx="20" cy="12" r="1.8"/></svg></span>Врач</button>
+    <button class="tb press" data-go="plan" role="tab" aria-selected="false"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M6.5 3.5v5a4.5 4.5 0 0 0 9 0v-5"/><path d="M5 3.5h3M14 3.5h3"/><path d="M11 13v2.5a4.5 4.5 0 0 0 9 0v-1.5"/><circle cx="20" cy="12" r="1.8"/></svg><i class="badge" id="planBadge"></i></span>Врач</button>
     <button class="tb press" data-go="me" role="tab" aria-selected="false"><span class="ico"><svg class="ic" viewBox="0 0 24 24"><path d="M8 3c0 4.6 8 5.6 8 9s-8 4.4-8 9"/><path d="M16 3c0 4.6-8 5.6-8 9s8 4.4 8 9"/><path d="M9.3 6.2h5.4M9.3 17.8h5.4"/></svg></span>Я</button>
   </nav>
 
@@ -1555,6 +1557,7 @@ function renderToday(){
     inbox[0].tone==='green'?'ok':'amber',esc(inbox[0].title),esc(inbox[0].sub),
     inbox.length>1?`<span class="rN">+${inbox.length-1}</span>`:'','inbox'):'';
   $('#caseBadge').classList.toggle('on',(TODAY.pending_questions||0)>0);
+  $('#planBadge').classList.toggle('on',!!TODAY.lab_draw_due);
   /* серии — пилюля в шапке */
   const streaks=TODAY.streaks||[],pill=$('#streaks');
   const st2=streaks.map(s=>s.status==='paused'?'p':s.status==='at_risk'?'r':'');

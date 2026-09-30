@@ -1199,6 +1199,8 @@ def build_today(cur) -> dict:
         # гореть при ЛЮБОМ нерешённом вопросе, не только свежих из inbox
         # (разногласия консилиума там никогда не появляются, см. checks.py).
         "pending_questions": checks.pending_questions_count(cur),
+        # Точка на вкладке «Врач»: ближайшая панель сдачи уже сегодня (или просрочена).
+        "lab_draw_due": lab_draw_due(cur),
         # Неделя — заголовок главной по воскресеньям (макет v7).
         "week": build_week(cur, today.get("date") or timeutil.now_local().date().isoformat()),
     }
@@ -1256,6 +1258,23 @@ def _marker_group(source_type: str, code: str) -> str:
     if source_type in ("manual", "recommendation"):
         return "Назначил врач"
     return "По показаниям"
+
+
+def draw_due(plan: dict, today_iso: str) -> bool:
+    """Ближайшая панель сдачи наступила (дата <= сегодня): движок ставит просроченное
+    на «сегодня», поэтому точка горит, пока есть что сдавать сегодня."""
+    panels = plan.get("panels") or []
+    return bool(panels) and panels[0]["date"] <= today_iso
+
+
+def lab_draw_due(cur) -> bool:
+    from app import lab_optimizer
+    today = timeutil.now_local().date()
+    try:
+        return draw_due(lab_optimizer.generate_plan(cur, today=today), today.isoformat())
+    except Exception:  # noqa: BLE001 — точка не должна ронять главную
+        logger.exception("lab_draw_due failed")
+        return False
 
 
 def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict], plan: dict,
