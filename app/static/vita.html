@@ -2036,7 +2036,7 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'foodyest':haptic();openSheet('foodYest',null,t);break;
     case'medpass':haptic();loadMedp().then(mp=>openSheet('medpass',mp,t)).catch(()=>toast('Не удалось загрузить медпаспорт'));break;
     case'lab':{haptic();const k=t.dataset.k;if(!k||k===curLab)break;
-      fetchJSON('/vita/doctor?lab='+encodeURIComponent(k)).then(doc=>{DOC=doc;curLab=k;renderDoctor();refreshSheet()}).catch(()=>toast('Не удалось пересчитать под лабу'));break}
+      fetchJSON('/vita/doctor?lab='+encodeURIComponent(k)+'&panel='+curPanel).then(doc=>{DOC=doc;curLab=k;renderDoctor();refreshSheet()}).catch(()=>toast('Не удалось пересчитать под лабу'));break}
     case'drawp':{haptic();const i=Math.max(0,+t.dataset.k||0);
       fetchJSON('/vita/doctor?panel='+i+(curLab?'&lab='+encodeURIComponent(curLab):'')).then(doc=>{DOC=doc;curPanel=i;renderDoctor();openSheet('draw',null,t)}).catch(()=>toast('Не удалось открыть сдачу'));break}
     case'copydraw':{haptic();const x=DOC&&DOC.next_draw&&DOC.next_draw.export_text;if(!x)break;
