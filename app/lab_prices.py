@@ -162,6 +162,14 @@ def _ru_money(v: float) -> str:
 # исходном JSON (verified=false + verify_note); в БД поле не хранится — константа.
 PRICES_VERIFIED = False
 
+# Плата за взятие венозной крови (взрослая, венозная). Реальные значения с
+# страниц/карточек позиций (2026-09-30): Гемотест «Вен. кровь (+230 ₽)» на
+# карточке, Инвитро 280 ₽ (additional_services golk-API), ТАФИ «vzyatie-
+# venoznoy-krovi» 300 ₽ (в прайсе), Юнилаб «Взятие крови +300 руб» на страницах.
+# Обновляется скрейпом еженедельно (для будущего: скрейпер сохранит DRAW-BLOOD
+# позицию; пока — константа из верифицированных данных).
+DRAW_FEE_RUB = {"gemotest": 230.0, "invitro": 280.0, "tafi": 300.0, "unilab": 300.0}
+
 
 def build_export_text(panel: dict, pick: dict) -> str:
     """Список ЗАКУПКИ для выбранной лаборатории: какие ПОЗИЦИИ прайса заказать
@@ -190,6 +198,9 @@ def build_export_text(panel: dict, pick: dict) -> str:
             lines.append(f"   закрывает: {covers}")
     for m in pick.get("missing") or []:
         lines.append(f"«{m}» — {pick.get('name', 'лаборатория')} не делает, сдать в другой лаборатории.")
+    draw_fee = DRAW_FEE_RUB.get(pick.get("key") or "")
+    if draw_fee:
+        lines.append(f"Взятие венозной крови — {_ru_money(draw_fee)} ₽ (включено в итог).")
     lines.append(f"Итого: {_ru_money(pick.get('price_rub') or 0)} ₽.")
     d_iso = str(pick.get("parsed_at") or "")[:10]
     if d_iso:
@@ -230,7 +241,7 @@ def panel_offers(codes: list[str], items_by_lab: dict[str, list[LabItem]]) -> li
         offers.append({
             "key": lab,
             "name": chosen[0].lab_name if chosen else lab,
-            "price_rub": sol["cost"],
+            "price_rub": round(sol["cost"] + DRAW_FEE_RUB.get(lab, 0), 2),
             "covered": len(all_codes) - len(sol["missing"]),
             "n": len(all_codes),
             "missing": _missing_names(sol["missing"]),
@@ -238,6 +249,7 @@ def panel_offers(codes: list[str], items_by_lab: dict[str, list[LabItem]]) -> li
             "parsed_at": sol["parsed_at"].isoformat() if sol["parsed_at"] else None,
             "verified": PRICES_VERIFIED,
             "collected_at": sol["parsed_at"].isoformat() if sol["parsed_at"] else None,
+            "draw_fee_rub": DRAW_FEE_RUB.get(lab),
             "cheapest": False,
         })
     if not offers:

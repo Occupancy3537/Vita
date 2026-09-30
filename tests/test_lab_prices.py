@@ -88,7 +88,7 @@ def test_panel_offers_sorting_and_cheapest_flag():
     offers = panel_offers(codes, items_by_lab)
     assert [o["key"] for o in offers] == ["gemotest", "unilab", "invitro"]
     assert offers[0]["cheapest"] is True
-    assert offers[0]["price_rub"] == 970.0
+    assert offers[0]["price_rub"] == 1200.0  # 970 + 230 draw fee
     assert offers[2]["missing"] == ["Ферритин"]
     assert not offers[2]["cheapest"]
 
