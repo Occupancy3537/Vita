@@ -231,7 +231,7 @@ def test_build_food_topic_detail_returns_publications_and_heatmap(monkeypatch):
     assert out["micro_heatmap"] == [{"label": "Магний", "avg_pct": 62, "level": 2, "unit": "мг",
                                       "days_pct": [60, 55, 70, 58, 65, 61, 63],
                                       # сверка с макетом v7: справка и «откуда был за неделю» для тапа по строке
-                                      "note": None, "top_sources": []}]
+                                      "note": None, "top_sources": [], "upper_pct": None}]
     assert out["yesterday"] == {"meals": [], "protein": 0, "kcal": 0, "sat_fat": None}
 
 
@@ -1398,3 +1398,10 @@ def test_breakdown_limit_detail_has_no_trailing_zero():
         {"kind": "limit", "status": "ok", "label": "Кофеин", "consumed": 80.0, "cap": 400.0, "unit": "мг"}]}
     rows = vita.build_index_breakdown(today, {"metrics": []})
     assert rows[0]["detail"] == "80/400 мг"
+
+
+def test_shape_food_topic_carries_upper_limit_for_red_cells():
+    weekly = {"heatmap": [{"label": "Цинк", "avgPct": 110, "level": 3, "unit": "мг", "values": [90, 250], "upperBoundPct": 300,
+                           "note": None}], "sources": {}}
+    out = vita.shape_food_topic(weekly, {"meals": [], "protein": 0, "kcal": 0}, [])
+    assert out["micro_heatmap"][0]["upper_pct"] == 300

@@ -1156,11 +1156,17 @@ svg{display:block}
 .hmH span:first-child{text-align:left}
 .hmR{width:100%;padding:7px 0;text-align:left;border-top:1px solid var(--line-soft)}
 .hmR>span:first-child{font-size:14px}
-.hmR i{height:22px;border-radius:6px;background:var(--line-soft)}
-.hmR i.c1{background:color-mix(in srgb,var(--green) 22%,transparent)}.hmR i.c2{background:color-mix(in srgb,var(--green) 50%,transparent)}.hmR i.c3{background:var(--green)}
-.hmR i.lo{background:color-mix(in srgb,var(--amber) 22%,transparent)}
-.hmR i.bad{background:color-mix(in srgb,var(--amber) 40%,transparent)}
-.hmR em{font-style:normal;text-align:right;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--amber)}
+.hmR i{width:20px;height:20px;border-radius:50%;justify-self:center;background:transparent;box-shadow:inset 0 0 0 1.2px var(--line)}
+/* 0–100%+ нормы — четыре оттенка зелёного (выше 100 — как 100); красный — только опасный перебор; пустой кружок — нет данных */
+.hmR i.g1{background:color-mix(in srgb,var(--green) 22%,transparent);box-shadow:none}
+.hmR i.g2{background:color-mix(in srgb,var(--green) 44%,transparent);box-shadow:none}
+.hmR i.g3{background:color-mix(in srgb,var(--green) 70%,transparent);box-shadow:none}
+.hmR i.g4{background:var(--green);box-shadow:none}
+.hmR i.hot{background:color-mix(in srgb,var(--g-out-fg) 85%,transparent);box-shadow:none}
+.hmR i.today{outline:1.6px solid var(--ink);outline-offset:0}
+.hmH span.td{font-weight:700;color:var(--ink)}
+.hmR>span:first-child small{display:block;margin-top:1px;font-size:11px;line-height:1.2;color:var(--muted)}
+.hmR em{font-style:normal;text-align:right;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink2)}
 .hmA{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s var(--ease)}
 .hmA>div{overflow:hidden}
 .hmA p{padding:2px 0 10px;font-size:13px;line-height:1.45;color:var(--ink2)}
@@ -1769,14 +1775,14 @@ const B={
     const otherLimits=own.filter(r=>!leverLabels.includes(r.label)&&!['Насыщенные жиры','Натрий','Добавленный сахар'].includes(r.label));
     /* микро — строка = нутриент, клетки = дни недели, в конце — среднее; тап — откуда брался и справка */
     const WD=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'],days=T.days||[];
-    const cc=v=>v==null?'':v>=90?'c3':v>=75?'c2':v>=60?'c1':v>=45?'lo':'bad';
+    const cell=(v,up)=>v==null?'':(up!=null&&v>up)?'hot':v>=75?'g4':v>=50?'g3':v>=25?'g2':'g1';
     const hm=T.micro_heatmap||[],nd=hm.reduce((a,m)=>Math.max(a,(m.days_pct||[]).length),0);
-    const dl=Array.from({length:nd},(_,i)=>{const d=days[days.length-nd+i];return d?WD[new Date(d+'T00:00:00').getDay()]:''});
+    const dl=Array.from({length:nd},(_,i)=>{const d=days[days.length-nd+i];return d?WD[new Date(d+'T00:00:00').getDay()]:''}),tdi=(days.length&&days[days.length-1]===TODAY.date)?nd-1:-1;
     const gcol=`grid-template-columns:92px repeat(${nd},1fr) 44px`;
-    const micro=hm.length?`<div class="hm"><div class="hmH" style="${gcol}"><span></span>${dl.map(x=>`<span>${x}</span>`).join('')}<span>среднее</span></div>`
+    const micro=hm.length?`<div class="hm"><div class="hmH" style="${gcol}"><span></span>${dl.map((x,i)=>`<span${i===tdi?' class="td"':''}>${x}</span>`).join('')}<span>среднее</span></div>`
       +hm.map(m=>{const why=[(m.top_sources||[]).length?`За неделю больше всего дали: <b>${m.top_sources.join(', ')}</b>.`:'В записях еды за неделю его почти не было.',m.note?`Справка: ${m.note}`:''].filter(Boolean).join(' ');
-        return `<div class="hmW"><button class="hmR" style="${gcol}" data-a="micro"><span>${m.label}</span>${(m.days_pct||[]).map(v=>`<i class="${cc(v)}" title="${v==null?'нет данных':Math.round(v)+'%'}"></i>`).join('')}<em>${Math.round(m.avg_pct)}%</em></button><div class="hmA"><div><p>${why}</p></div></div></div>`}).join('')
-      +((T.normal||[]).length?`<div class="hmOk">${svg('check')}В норме за неделю: ${T.normal.slice(0,8).join(', ')}</div>`:'')+`<p class="gvNote" style="margin:8px 0 0">Цвет клетки — сколько нормы набрано за день: зелёный — почти норма, жёлтый — недобор (чем насыщеннее, тем сильнее). Пустая клетка — нет данных.</p></div>`
+        return `<div class="hmW"><button class="hmR" style="${gcol}" data-a="micro"><span>${m.label}<small>${(m.upper_pct!=null&&(m.days_pct||[]).some(v=>v!=null&&v>m.upper_pct))?'перебор':'недобор недели'}</small></span>${(m.days_pct||[]).map((v,i)=>`<i class="${cell(v,m.upper_pct)}${i===tdi?' today':''}" title="${v==null?'нет данных':Math.round(v)+'% нормы'}"></i>`).join('')}<em>${Math.round(m.avg_pct)}%</em></button><div class="hmA"><div><p>${why}</p></div></div></div>`}).join('')
+      +((T.normal||[]).length?`<div class="hmOk">${svg('check')}В норме за неделю: ${T.normal.slice(0,8).join(', ')}</div>`:'')+`<p class="gvNote" style="margin:8px 0 0">Цвет — доля от дневной нормы: чем насыщеннее зелёный, тем ближе к норме. Красный — только опасный перебор. Пустой кружок — нет данных.${tdi>=0?' Обведён сегодняшний день, он ещё не закончен.':''}</p></div>`
       :`<p class="quietRow">${svg('check')}За неделю микронутриенты в норме${(T.normal||[]).length?': '+T.normal.slice(0,6).join(', '):''}.</p>`;
     return {html:`${top('Питание сегодня')}
     <div class="sectionHead rise" style="--i:1;margin-top:18px"><span class="lbl">За день</span><button class="linkline" data-a="foodyest">Вчера${svg('right')}</button></div>

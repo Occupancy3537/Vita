@@ -473,6 +473,7 @@ def shape_food_topic(weekly: dict, yesterday: dict, publications: list[dict]) ->
     heatmap = [
         {"label": h["label"], "avg_pct": h["avgPct"], "level": h["level"], "unit": h["unit"],
          "days_pct": h["values"], "note": h.get("note") or None,
+         "upper_pct": h.get("upperBoundPct"),  # верхний допустимый предел в % нормы (только для пищи) — выше него клетка красная
          "top_sources": _week_top_sources(sources.get(h["label"]))}
         for h in (weekly.get("heatmap") or [])
     ]
