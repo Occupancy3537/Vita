@@ -1343,11 +1343,14 @@ function lineChart({data,w=320,h=140,color=ACCENT,min,max,base=null,labels=null,
    настоящий url публикации, если он есть, иначе просто показывает карточку. */
 function pubList(pubs,title='Свежее по теме',i=6){
   if(!pubs||!pubs.length)return '';
-  return `<div class="pubs rise" style="--i:${i}"><div class="lbl">${title}</div>${pubs.map(p=>{
+  /* Живая просьба Влада (2026-09-30): статьи не занимают экран — свёрнуты в одну строку «Свежее по теме» */
+  const items=pubs.map(p=>{
     const tag=p.url?`<a class="pub press" href="${esc(p.url)}" target="_blank" rel="noopener">`:`<div class="pub">`;
     const close=p.url?'</a>':'</div>';
     return `${tag}<div class="pt">${esc(p.title)}</div><div class="pr2"><span class="tag">${esc(p.grade)}</span>${p.why?`<span class="pw2">${esc(p.why)}</span>`:''}${p.url?`<span class="pl">открыть${svg('right')}</span>`:''}</div>${close}`;
-  }).join('')}</div>`;
+  }).join('');
+  const n=pubs.length;
+  return `<div class="pubs rise" style="--i:${i}"><div class="accS"><button class="accH" data-a="pubtoggle" aria-expanded="false"><span class="accT"><b>${title}</b><small>${n} ${plural(n,'исследование','исследования','исследований')}</small></span>${svg('chev','ic chev')}</button><div class="accB"><div>${items}</div></div></div></div>`;
 }
 
 const I={
@@ -2045,6 +2048,7 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'micro':{haptic();const w=t.closest('.hmW'),on=!w.classList.contains('open');$$('.hmW',ovS).forEach(x=>x.classList.remove('open'));w.classList.toggle('open',on);break}
     case'foodyest':haptic();openSheet('foodYest',null,t);break;
     case'medpass':haptic();loadMedp().then(mp=>openSheet('medpass',mp,t)).catch(()=>toast('Не удалось загрузить медпаспорт'));break;
+    case'pubtoggle':{haptic();const sec=t.closest('.accS'),on=!sec.classList.contains('open');sec.classList.toggle('open',on);t.setAttribute('aria-expanded',on);break}
     case'acc':{haptic();const sec=t.closest('.accS'),on=!sec.classList.contains('open');sec.classList.toggle('open',on);t.setAttribute('aria-expanded',on);drawAcc=on?t.dataset.k:null;break}
     case'lab':{haptic();const k=t.dataset.k;if(!k||k===curLab)break;
       fetchJSON('/vita/doctor?lab='+encodeURIComponent(k)+'&panel='+curPanel).then(doc=>{DOC=doc;curLab=k;renderDoctor();refreshSheet()}).catch(()=>toast('Не удалось пересчитать под лабу'));break}
