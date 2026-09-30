@@ -17,7 +17,7 @@ import csv
 import json
 import sys
 
-from .core import norm_name
+from .core import norm_name_loose
 
 
 def main(argv) -> int:
@@ -36,14 +36,14 @@ def main(argv) -> int:
     rows = json.load(open(args[0], encoding="utf-8"))
     by_lab: dict[str, dict[str, dict]] = {}
     for r in rows:
-        by_lab.setdefault(r["lab_code"], {})[norm_name(r["name"])] = r
+        by_lab.setdefault(r["lab_code"], {})[norm_name_loose(r["name"])] = r
 
     out = []
     for (lab, old_code), mcodes in sorted(COVERS.items()):
         names = [LAB_CATALOG[m]["name"] for m in mcodes if m in LAB_CATALOG]
         cands: dict[str, dict] = {}
         for nm in names:
-            hit = by_lab.get(lab, {}).get(norm_name(nm))
+            hit = by_lab.get(lab, {}).get(norm_name_loose(nm))
             if hit:
                 cands[hit["external_code"]] = hit
         if len(cands) == 1:

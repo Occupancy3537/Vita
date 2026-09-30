@@ -133,23 +133,11 @@ def collect(session, run_dir: str, stats: dict, rejects: list[dict]) -> list[dic
                 enrich.append((BASE + card["path"], code))
         stats["accepted"] = len(rows)
 
-    # обогащение комплексов: срок и состав — с карточки позиции
-    for url, code in enrich:
-        status, ihtml = get(session, url)
-        stats["requests"] += 1
-        stats["enriched"] = stats.get("enriched", 0) + 1
-        if status != 200 or not ihtml:
-            rejects.append({"lab": "gemotest", "reason": f"обогащение HTTP {status}",
-                            "url": url})
-            continue
-        iref = save_raw(run_dir, "gemotest", f"item_{re.sub(r'[^0-9]', '_', code)}", ihtml)
-        term, comp = parse_item_enrichment(ihtml)
-        # source_url/raw_ref НЕ перетираем: они указывают на источник ЦЕНЫ
-        # (страницу группы); сырой ответ карточки — в raw/
-        for r in rows:
-            if r["external_code"] == code:
-                r["turnaround_time"] = term
-                r["composition"] = comp
-                r["enrich_raw_ref"] = iref
-                break
+    # Обогащение (срок/состав с карточек) ОТКЛЮЧЕНО 2026-09-30: после двух
+    # полных проходов за день сервер Гемотеста начал отвечать на карточки по
+    # 15–40 с (мягкий троттлинг). Честный null вместо получаса задержек;
+    # вид (single/complex) у комплексов всё равно определяется по названию
+    # (detect_kind), цены/коды/URL не затронуты. Вернуть можно, вернув блок
+    # обогащения из git-истории (коммит b2a8218).
+    stats["enrichment"] = "disabled 2026-09-30: троттлинг карточек Гемотеста (15-40с), term/composition=null"
     return rows

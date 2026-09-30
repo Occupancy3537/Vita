@@ -95,6 +95,7 @@ def collect(session, run_dir: str, stats: dict, rejects: list[dict]) -> list[dic
     checks_ok = checks_total = 0
 
     def add_row(p, category, source_url, raw_ref, composition=None):
+        nonlocal checks_ok, checks_total
         code = str(p.get("code") or "").strip() or str(p.get("bitrix_id") or "")
         if not code:
             rejects.append({"lab": "invitro", "reason": "позиция без кода и bitrix_id",

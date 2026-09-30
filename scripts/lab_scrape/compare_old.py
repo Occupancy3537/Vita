@@ -14,13 +14,13 @@ from collections import Counter
 
 import httpx
 
-from .core import norm_name
+from .core import norm_name_loose
 
 
 def keyed_by_name(rows):
     out = {}
     for r in rows:
-        key = (r.get("lab_code"), norm_name(r.get("name") or ""))
+        key = (r.get("lab_code"), norm_name_loose(r.get("name") or ""))
         out.setdefault(key, []).append(r)
     return out
 
