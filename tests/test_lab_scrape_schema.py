@@ -56,12 +56,15 @@ def test_parse_rows_accepts_scrape_json():
     assert by[("tafi", "tsistatin-c")]["city"] == "Владивосток"
 
 
-def test_old_suspicious_codes_are_not_our_codes():
-    """Санкция против регресса к недостоверному сбору: наши данные обязаны
-    отличать gemotest-коды от старых выдуманных (HbA1c: у сайта «1.18»,
-    в старом файле было «3.6»)."""
+def test_old_suspicious_codes_are_gone_real_ones_mapped():
+    """Санкция против регресса к недостоверному сбору (после пересборки
+    маппинга 30.09): старых выдуманных кодов в COVERS больше нет, а реальные
+    коды сайта занесены (HbA1c: у сайта «1.18», в старом файле было «3.6»)."""
     from app.lab_prices_map import COVERS
 
-    old_hba1c = ("gemotest", "3.6")   # из старого (недостоверного) скрейпа
-    assert old_hba1c in COVERS        # старый маппинг ещё на старых кодах
-    assert _row()["external_code"] != "3.6"  # наш сбор уже на честных кодах — crosswalk обязателен
+    for old_fake in (("gemotest", "3.6"), ("gemotest", "3.30"), ("gemotest", "3.31"),
+                     ("tafi", "03-52"), ("invitro", "3016")):
+        assert old_fake not in COVERS, f"выдуманный код остался: {old_fake}"
+    assert ("gemotest", "1.18") in COVERS        # реальный код HbA1c
+    assert ("gemotest", "1.205") in COVERS       # реальный код Цистатина С
+    assert _row()["external_code"] != "3.6"
