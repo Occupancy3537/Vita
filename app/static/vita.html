@@ -630,6 +630,8 @@ svg{display:block}
 .ls-row b{font-weight:600;font-variant-numeric:tabular-nums}
 .ls-miss{margin-top:8px;font-size:12.5px;color:var(--warm-ink)}
 .ls-note{margin-top:8px;font-size:11.5px;color:var(--muted)}
+.ls-check{display:flex;gap:6px;align-items:flex-start;color:var(--ink2)}
+.ls-check::before{content:"i";flex:none;width:14px;height:14px;margin-top:1px;border-radius:50%;box-shadow:inset 0 0 0 1.2px var(--muted);color:var(--muted);font-size:10px;font-weight:600;line-height:14px;text-align:center}
 .ls-next{display:flex;gap:7px;align-items:flex-start;margin-top:12px;font-size:12.5px;line-height:1.45;color:var(--ink2)}
 .ls-next svg{flex:none;width:13px;height:13px;color:var(--teal);margin-top:2px}
 .grp .lbl{margin-bottom:4px}
@@ -1830,10 +1832,11 @@ const B={
     const G=d.groups||[],tb=d.tubes.length,tbTxt=tb?`${tb} ${plural(tb,'пробирка','пробирки','пробирок')}`:'',fastTxt=d.fasting?'натощак с 22:00':'можно не натощак',pk=d.pick;
     const zachem=G.length?`<div class="fsec rise" style="--i:2"><span class="lbl">Зачем</span><div class="drawW">${G.map(g=>`<div><b>${esc(g.name)}</b><span>${esc(g.sh)}</span><em>${g.n}</em></div>`).join('')}</div></div>`:'';
     const sostav=`<div class="plist">${G.map(g=>`<div class="grp"><div class="lbl">${esc(g.name)}</div>${g.why?`<p class="gwhy">${esc(g.why)}</p>`:''}${d.markers.filter(m=>m.group===g.name).map(m=>`<div class="trow"><div><div class="nm">${esc(m.name)}</div>${m.purpose?`<div class="why">${esc(m.purpose)}</div>`:''}</div><span class="iv">${esc(m.iv||'')}</span></div>`).join('')}</div>`).join('')}</div>${d.shifted.length?`<p class="gvNote">Ради одного забора сдвинуто по срокам: ${d.shifted.length>4?d.shifted.length+' '+plural(d.shifted.length,'анализ','анализа','анализов'):d.shifted.map(x=>esc(x.name)).join(', ')}.</p>`:''}`;
-    const lab=(d.labs&&d.labs.length&&pk)?`<div class="labSum"><div class="ls-top"><div><b>${fmt(pk.price_rub)} ₽</b><span>${esc(pk.name)}${pk.cheapest?' · дешевле всего':''}</span></div><div class="ls-r">${tbTxt?`<span>${tbTxt}</span>`:''}<span>${fastTxt}</span></div></div>
+    const lab=(d.labs&&d.labs.length&&pk)?`<div class="labSum"><div class="ls-top"><div><b>${fmt(pk.price_rub)} ₽</b><span>${esc(pk.name)}${pk.cheapest?' · дешевле всего':''}</span></div><div class="ls-r">${tbTxt?`<span>${tbTxt}</span>`:''}<span>${fastTxt}</span>${pk.draw_fee_rub?`<span>в т. ч. забор ${fmt(pk.draw_fee_rub)} ₽</span>`:''}</div></div>
       <div class="ls-labs">${d.labs.map(l=>`<button class="lchip press${l.key===pk.key?' on':''}" data-a="lab" data-k="${esc(l.key)}">${esc(l.name)} <em>${fmt(l.price_rub)} ₽</em></button>`).join('')}</div>
       <p class="ls-note">${pk.covered} из ${pk.n} ${plural(pk.n,'анализа','анализов','анализов')} · прайс от ${pk.parsed_at?shortDate(pk.parsed_at.slice(0,10)):'—'} · тап по лабе — пересчитать.${(()=>{const n=pk.breakdown.reduce((a,b)=>a+(b.extra?b.extra.length:0),0);return n?` В комплексы входят ещё ${n} ${plural(n,'показатель','показателя','показателей')} — про запас.`:''})()}</p>
       ${pk.missing.length?`<p class="ls-miss">${esc(pk.name)} не делает: ${pk.missing.map(esc).join(', ')}.</p>`:''}
+      ${pk.verified===false?`<p class="ls-note ls-check">Цены собраны автоматически${pk.collected_at?' '+shortDate(pk.collected_at.slice(0,10)):''} — проверьте на сайте лаборатории перед оплатой.</p>`:''}
       ${d.export_text?`<button class="btnP press" style="margin-top:14px" data-a="copydraw">Скопировать список для лаборатории</button>`:''}</div>`:'';
     return {html:`${top('Сдача · '+shortDate(d.date))}
     <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${d.n}</b><span>${plural(d.n,'анализ','анализа','анализов')}${d.price_rub?' · '+fmt(d.price_rub)+' ₽':''}</span></div><p class="fsub">${dateFmt(d.date)}${d.lab_name?' · '+esc(d.lab_name):''} · ${fastTxt}</p></div>
