@@ -1260,6 +1260,84 @@ def _marker_group(source_type: str, code: str) -> str:
     return "По показаниям"
 
 
+_MONTH_PREP = ["январе", "феврале", "марте", "апреле", "мае", "июне",
+               "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"]
+_MONTH_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня",
+              "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+_GROUP_ORDER = ["Панель PhenoAge", "Назначил врач", "Контроль добавки", "Плановый мониторинг", "По показаниям"]
+
+
+def _iv_label(interval_days, one_time: bool) -> str:
+    """Срок повтора анализа для строки «Состав» (макет v5): «90 дн», «6 мес», «1 год», «однократно»."""
+    if one_time:
+        return "однократно"
+    if not interval_days:
+        return ""
+    d = int(interval_days)
+    if d % 365 == 0:
+        y = d // 365
+        return "1 год" if y == 1 else f"{y} {'года' if 2 <= y <= 4 else 'лет'}"
+    if d >= 180 and d % 30 == 0:
+        return f"{d // 30} мес"
+    return f"{d} дн"
+
+
+def _marker_reason(code: str, why: str) -> str:
+    """Причина назначения из поля why движка («purpose — reason»); у планового — пусто."""
+    from app.lab_catalog import LAB_CATALOG
+    purpose = (LAB_CATALOG.get(code) or {}).get("purpose") or ""
+    if purpose and why.startswith(purpose + " — "):
+        return why[len(purpose) + 3:]
+    return "" if why == purpose else why
+
+
+def _draw_groups(markers: list[dict], panel_date: str) -> list[dict]:
+    """Блок «Зачем» и группы в «Составе» (макет v5): по КТО назначил, у группы —
+    короткий повод (sh) и фраза «зачем» (why); порядок фиксированный."""
+    from datetime import date as _date
+    pd = _date.fromisoformat(panel_date)
+    by: dict[str, list[dict]] = {}
+    for m in markers:
+        by.setdefault(m["group"], []).append(m)
+    out = []
+    for name in sorted(by, key=lambda g: _GROUP_ORDER.index(g) if g in _GROUP_ORDER else 99):
+        ms = by[name]
+        dues = [m["due"] for m in ms if m.get("due")]
+        earliest = _date.fromisoformat(min(dues)) if dues else None
+        ivs = sorted({m["iv"] for m in ms if m.get("iv") and m["iv"] != "однократно"})
+        reasons = []
+        for m in ms:
+            r = m.get("reason")
+            if r and r not in reasons:
+                reasons.append(r)
+        if name == "Панель PhenoAge":
+            due_txt = "пришёл срок" if earliest and earliest <= pd else "по графику"
+            sh = f"{due_txt} · раз в {ivs[0]}" if len(ivs) == 1 else due_txt
+            why = "все девять сдаются одним забором — без этого биовозраст не пересчитать"
+        elif name == "Плановый мониторинг":
+            old = earliest and (pd - earliest).days >= 45
+            sh = f"срок был в {_MONTH_PREP[earliest.month - 1]} {earliest.year}" if old else "по графику"
+            why = "плановые проверки по расписанию каталога"
+        elif name in ("Назначил врач", "Контроль добавки"):
+            sh = "; ".join(reasons[:2])[:70] if reasons else "по назначению"
+            why = "; ".join(reasons)[:220] if reasons else ""
+        else:
+            sh, why = "по показаниям", ""
+        out.append({"name": name, "sh": sh, "why": why, "n": len(ms)})
+    return out
+
+
+def _next_note(panels: list[dict], idx: int) -> str:
+    """Строка внизу шторки «Сдача» (макет v5): что дальше по плану."""
+    from datetime import date as _date
+    if idx + 1 < len(panels):
+        d = _date.fromisoformat(panels[idx + 1]["date"])
+        when = f"{d.day} {_MONTH_GEN[d.month - 1]}"
+        return (f"Больше ничего не нужно. Следующая плановая сдача — не раньше {when}." if idx == 0
+                else f"Следующая — {when}.")
+    return "После неё в плане на ближайшие полгода ничего нет."
+
+
 def draw_due(plan: dict, today_iso: str) -> bool:
     """Ближайшая панель сдачи наступила (дата <= сегодня): движок ставит просроченное
     на «сегодня», поэтому точка горит, пока есть что сдавать сегодня."""
@@ -1296,14 +1374,29 @@ def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict],
     p = panels[panel] if 0 <= panel < len(panels) else (panels[0] if panels else None)
     if p:
         pick = p.get("pick") or {}  # цены лаб (этап 1 плана docs/PRICES_PLAN_QWEN.md)
+        from app.lab_catalog import LAB_CATALOG
+        markers_out = []
+        for m in p["markers"]:
+            code = m.get("code") or ""
+            entry = LAB_CATALOG.get(code) or {}
+            why = m.get("why") or ""
+            markers_out.append({
+                "name": m["name"], "why": why, "category": m.get("category"),
+                "group": _marker_group(m.get("source_type") or "", code),
+                "fasting": m.get("fasting_required"), "source": m.get("source_type"),
+                "reason": _marker_reason(code, why),
+                "purpose": entry.get("purpose") or "",
+                "iv": _iv_label(entry.get("default_interval_days"), bool(entry.get("one_time"))),
+                "due": m.get("natural_due_date"),
+            })
         next_draw = {
             "date": p["date"], "n": p["n_markers"], "fasting": p["fasting_required"], "tubes": p["tube_types"],
             "price_rub": pick.get("price_rub") or p.get("total_price_rub"),
             "lab_name": pick.get("name"), "labs": p.get("labs") or [], "pick": pick or None,
             "export_text": p.get("export_text"),
-            "markers": [{"name": m["name"], "why": m.get("why") or "", "category": m.get("category"),
-                         "group": _marker_group(m.get("source_type") or "", m.get("code") or ""),
-                         "fasting": m.get("fasting_required"), "source": m.get("source_type")} for m in p["markers"]],
+            "markers": markers_out,
+            "groups": _draw_groups(markers_out, p["date"]),
+            "next_note": _next_note(panels, panels.index(p)),
             "shifted": p.get("shifted") or [],
         }
     return {

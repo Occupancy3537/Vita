@@ -1340,3 +1340,54 @@ def test_draw_due_false_when_panel_in_future_or_no_panels():
     assert vita.draw_due({"panels": [{"date": "2026-10-23"}]}, "2026-09-30") is False
     assert vita.draw_due({"panels": []}, "2026-09-30") is False
     assert vita.draw_due({}, "2026-09-30") is False
+
+
+# ─────── шторка «Сдача» по макету v5 (2026-09-30) ───────
+
+def test_iv_label_formats():
+    assert vita._iv_label(90, False) == "90 дн"
+    assert vita._iv_label(180, False) == "6 мес"
+    assert vita._iv_label(365, False) == "1 год"
+    assert vita._iv_label(730, False) == "2 года"
+    assert vita._iv_label(None, False) == ""
+    assert vita._iv_label(365, True) == "однократно"
+
+
+def test_marker_reason_strips_catalog_purpose():
+    from app.lab_catalog import LAB_CATALOG
+    purpose = LAB_CATALOG["M035"]["purpose"]
+    assert vita._marker_reason("M035", f"{purpose} — онемение в руке") == "онемение в руке"
+    assert vita._marker_reason("M035", purpose) == ""
+
+
+def test_draw_groups_have_reason_count_and_fixed_order():
+    ms = [
+        {"group": "Плановый мониторинг", "due": "2020-06-17", "iv": "1 год", "reason": ""},
+        {"group": "Панель PhenoAge", "due": "2024-11-14", "iv": "6 мес", "reason": ""},
+        {"group": "Панель PhenoAge", "due": "2027-02-02", "iv": "6 мес", "reason": ""},
+        {"group": "Назначил врач", "due": "2026-09-30", "iv": "", "reason": "онемение в руке"},
+    ]
+    g = vita._draw_groups(ms, "2026-09-30")
+    assert [x["name"] for x in g] == ["Панель PhenoAge", "Назначил врач", "Плановый мониторинг"]
+    assert g[0]["sh"] == "пришёл срок · раз в 6 мес" and g[0]["n"] == 2
+    assert g[1]["sh"] == "онемение в руке"
+    assert g[2]["sh"] == "срок был в июне 2020"
+
+
+def test_next_note_first_middle_last():
+    ps = [{"date": "2026-10-12"}, {"date": "2026-12-15"}, {"date": "2027-02-10"}]
+    assert vita._next_note(ps, 0) == "Больше ничего не нужно. Следующая плановая сдача — не раньше 15 декабря."
+    assert vita._next_note(ps, 1) == "Следующая — 10 февраля."
+    assert "ничего нет" in vita._next_note(ps, 2)
+
+
+def test_shape_doctor_next_draw_carries_groups_and_note():
+    plan = {"panels": [
+        {"date": "2026-10-12", "n_markers": 1, "fasting_required": False, "tube_types": [], "shifted": [],
+         "markers": [{"code": "M035", "name": "Витамин D", "why": "", "category": "Дефициты",
+                      "fasting_required": False, "source_type": "standing", "natural_due_date": "2026-10-12"}]},
+        {"date": "2026-12-15", "n_markers": 0, "markers": [], "fasting_required": False, "tube_types": []},
+    ], "conflicts": []}
+    nd = vita.shape_doctor([], [], [], plan)["next_draw"]
+    assert nd["groups"][0]["name"] == "Плановый мониторинг" and nd["markers"][0]["iv"] == "6 мес"
+    assert "15 декабря" in nd["next_note"]

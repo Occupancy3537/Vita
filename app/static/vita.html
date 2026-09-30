@@ -1393,6 +1393,8 @@ async function loadYesterday(){if(!yestLoaded){YEST=await fetchJSON('/vita/yeste
 /* ================= ВРАЧ и Я (сверка с макетом v7) — /vita/doctor, /vita/me, /vita/medpassport ================= */
 let DOC=null,ME=null,MEDP=null;
 let curLab='',curPanel=0;  /* выбранная лаба и вкладка дат («Сдачи») */
+let drawAcc=null;  /* какая секция шторки «Сдача» раскрыта (макет v5: по умолчанию все свёрнуты) */
+const inText=days=>days<=0?'сегодня':days>=60?'через '+String(Math.round(days/30.4*2)/2).replace('.',',')+' мес':'через '+days+' '+plural(days,'день','дня','дней');
 async function loadDoctor(force){if(DOC&&!force)return;DOC=await fetchJSON('/vita/doctor')}
 async function loadMe(force){if(ME&&!force)return;ME=await fetchJSON('/vita/me')}
 async function loadMedp(){if(!MEDP)MEDP=await fetchJSON('/vita/medpassport');return MEDP}
@@ -1435,9 +1437,9 @@ function renderDoctor(){if(!DOC)return;const c=DOC.consilium,n=(DOC.notes||[])[0
     +row(svg('tube'),f?'warm':'','Медпаспорт',f?`вне референса: ${esc(f.marker)} ${fmt(f.value,f.value%1?1:0)}`:'все маркеры в референсе',f?'<i class="rDot warm"></i>':'','medpass');
   $('#drawH').hidden=!d;$('#nextDraw').hidden=!d;
   if(d){const days=Math.round((new Date(d.date+'T00:00:00')-new Date(new Date().toDateString()))/864e5);
-    $('#nextDraw').innerHTML=`<div class="nd-k"><span>Следующая сдача</span><b>${days<=0?'сегодня':'через '+days+' '+plural(days,'день','дня','дней')}</b></div>
+    $('#nextDraw').innerHTML=`<div class="nd-k"><span>${curPanel===0?'Следующая сдача':'Сдача'}</span><b>${inText(days)}</b></div>
     <div class="nd-d">${dateFmt(d.date).replace(/^[^,]*, /,'')}</div>
-    <div class="nd-m"><b>${d.n} ${plural(d.n,'анализ','анализа','анализов')}</b>${d.price_rub?` · <b>${fmt(d.price_rub)} ₽</b>`:''}${d.lab_name?` · ${esc(d.lab_name)}`:''}${d.fasting?' · натощак':''}</div>
+    <div class="nd-m"><b>${d.n} ${plural(d.n,'анализ','анализа','анализов')}</b>${d.price_rub?` · <b>${fmt(d.price_rub)} ₽</b>`:''}${d.lab_name?` · ${esc(d.lab_name)}`:''} · ${d.fasting?'натощак':'не натощак'}</div>
     <button class="btnP press" data-a="draw">Что сдаём</button>`}
   $('#dates').innerHTML=(DOC.draws||[]).length>1?`<span>Сдачи:</span>`+DOC.draws.map((x,i)=>`<button class="dpill press${i===curPanel?' on':''}" data-a="drawp" data-k="${i}" aria-label="Сдача ${shortDate(x.date)}">${shortDate(x.date)}</button>`).join(''):'';
   $$('.rise',$('#s-plan')).forEach(e=>e.classList.add('in'));
@@ -1812,17 +1814,25 @@ const B={
     return {html:`${top('Заключение врача')}
     <div class="rise" style="--i:1;margin-top:18px">${ns.map(x=>`<div class="bcard teal" style="margin-top:10px"><span class="mc-ic">${svg('doc')}</span><span class="bbody"><span class="stw teal">${dateFmt(x.date)}${x.category?' · '+x.category:''}</span><b style="font-weight:400">${x.note}</b></span></div>`).join('')||'<p class="empty">Записей врача пока нет.</p>'}</div>`}},
   draw(){const d=DOC&&DOC.next_draw;if(!d)return {html:top('Сдача')};
-    /* группы — по КТО назначил (m.group с бэкенда), не по органам (Влад, 29.09) */
-    const GRANK={'Панель PhenoAge':0,'Назначил врач':1,'Контроль добавки':2,'Плановый мониторинг':3};
-    const groups={};d.markers.forEach(m=>{const g=m.group||m.category||'Прочее';(groups[g]=groups[g]||[]).push(m)});
-    const gKeys=Object.keys(groups).sort((a,b)=>(GRANK[a]??9)-(GRANK[b]??9)||a.localeCompare(b,'ru'));
+    /* макет v5: «Зачем» (сводка по группам) + три свёрнутые секции; группы — по КТО назначил (Влад, 29.09) */
+    const acc=(id,t,m,body)=>`<div class="accS${drawAcc===id?' open':''}" data-s="${id}"><button class="accH" data-a="acc" data-k="${id}" aria-expanded="${drawAcc===id}"><span class="accT"><b>${t}</b><small>${m}</small></span>${svg('chev','ic chev')}</button><div class="accB"><div>${body}</div></div></div>`;
+    const G=d.groups||[],tb=d.tubes.length,tbTxt=tb?`${tb} ${plural(tb,'пробирка','пробирки','пробирок')}`:'',fastTxt=d.fasting?'натощак с 22:00':'можно не натощак',pk=d.pick;
+    const zachem=G.length?`<div class="fsec rise" style="--i:2"><span class="lbl">Зачем</span><div class="drawW">${G.map(g=>`<div><b>${esc(g.name)}</b><span>${esc(g.sh)}</span><em>${g.n}</em></div>`).join('')}</div></div>`:'';
+    const sostav=`<div class="plist">${G.map(g=>`<div class="grp"><div class="lbl">${esc(g.name)}</div>${g.why?`<p class="gwhy">${esc(g.why)}</p>`:''}${d.markers.filter(m=>m.group===g.name).map(m=>`<div class="trow"><div><div class="nm">${esc(m.name)}</div>${m.purpose?`<div class="why">${esc(m.purpose)}</div>`:''}</div><span class="iv">${esc(m.iv||'')}</span></div>`).join('')}</div>`).join('')}</div>${d.shifted.length?`<p class="gvNote">Ради одного забора сдвинуто по срокам: ${d.shifted.length>4?d.shifted.length+' '+plural(d.shifted.length,'анализ','анализа','анализов'):d.shifted.map(x=>esc(x.name)).join(', ')}.</p>`:''}`;
+    const lab=(d.labs&&d.labs.length&&pk)?`<div class="labSum"><div class="ls-top"><div><b>${fmt(pk.price_rub)} ₽</b><span>${esc(pk.name)}${pk.cheapest?' · дешевле всего':''}</span></div><div class="ls-r">${tbTxt?`<span>${tbTxt}</span>`:''}<span>${fastTxt}</span></div></div>
+      <div class="ls-labs">${d.labs.map(l=>`<button class="lchip press${l.key===pk.key?' on':''}" data-a="lab" data-k="${esc(l.key)}">${esc(l.name)} <em>${fmt(l.price_rub)} ₽</em></button>`).join('')}</div>
+      <p class="ls-note">${pk.covered} из ${pk.n} ${plural(pk.n,'анализа','анализов','анализов')} · прайс от ${pk.parsed_at?shortDate(pk.parsed_at.slice(0,10)):'—'} · тап по лабе — пересчитать.${(()=>{const n=pk.breakdown.reduce((a,b)=>a+(b.extra?b.extra.length:0),0);return n?` В комплексы входят ещё ${n} ${plural(n,'показатель','показателя','показателей')} — про запас.`:''})()}</p>
+      ${pk.missing.length?`<p class="ls-miss">${esc(pk.name)} не делает: ${pk.missing.map(esc).join(', ')}.</p>`:''}
+      ${d.export_text?`<button class="btnP press" style="margin-top:14px" data-a="copydraw">Скопировать список для лаборатории</button>`:''}</div>`:'';
     return {html:`${top('Сдача · '+shortDate(d.date))}
-    <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${d.n}</b><span>${plural(d.n,'анализ','анализа','анализов')}${d.price_rub?' · '+fmt(d.price_rub)+' ₽':''}</span></div><p class="fsub">${dateFmt(d.date)}${d.fasting?' · натощак':''}${d.tubes.length?' · пробирки: '+d.tubes.length:''}</p></div>
-    ${(d.labs&&d.labs.length&&d.pick)?`<div class="fsec rise" style="--i:2"><span class="lbl">Лаборатория и цена</span><div class="labSum"><div class="ls-row"><span>${d.pick.covered} из ${d.pick.n} анализов</span><b>${fmt(d.pick.price_rub)} ₽</b></div><div class="ls-labs">${d.labs.map(l=>`<button class="lchip press${l.key===d.pick.key?' on':''}" data-a="lab" data-k="${esc(l.key)}" title="${l.cheapest?'дешевле всего':''}">${esc(l.name)}<em>${fmt(l.price_rub)} ₽</em></button>`).join('')}</div>${d.pick.missing.length?`<p class="ls-miss">${esc(d.pick.name)} не делает: ${d.pick.missing.map(esc).join(', ')}.</p>`:''}<p class="ls-note">Прайс от ${d.pick.parsed_at?shortDate(d.pick.parsed_at.slice(0,10)):'—'}${d.labs.length>1?` · дешевле всего: ${esc(d.pick.name)}`:''}. Тап по лабе — пересчитать.${(()=>{const n=d.pick.breakdown.reduce((s,b)=>s+(b.extra?b.extra.length:0),0);return n?` В комплексы входят ещё ${n} ${plural(n,'показатель','показателя','показателей')} — про запас.`:''})()}</p></div></div>`:''}
-    ${gKeys.map((g,i)=>`<div class="fsec rise" style="--i:${2+i}"><span class="lbl">${g}</span><div class="rows">${groups[g].map(m=>row(svg('tube'),'',m.name,m.why||'',m.fasting?'<span class="rV" style="font-size:12px">натощак</span>':'')).join('').replace(/<small>/g,'<small class="wrap">')}</div></div>`).join('')}
-    ${d.shifted.length?`<p class="gvNote rise" style="--i:8">Сдвинуто ради одного забора: ${d.shifted.map(x=>x.name).join(', ')}.</p>`:''}
-    ${d.export_text?`<button class="btnP press rise" style="--i:9" data-a="copydraw">Скопировать список для лаборатории</button>`:''}
-    <p class="disc rise" style="--i:10">${d.price_rub?'':'Цены по лабораториям пока не заведены — стоимость уточнится в лаборатории. '}Состав собирает оптимизатор: поводы врачей, консилиума, проверок и плановые панели.</p>`}},
+    <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${d.n}</b><span>${plural(d.n,'анализ','анализа','анализов')}${d.price_rub?' · '+fmt(d.price_rub)+' ₽':''}</span></div><p class="fsub">${dateFmt(d.date)}${d.lab_name?' · '+esc(d.lab_name):''} · ${fastTxt}</p></div>
+    ${zachem}
+    <div class="acc rise" style="--i:3">
+      ${acc('sostav','Состав',`${d.n} ${plural(d.n,'анализ','анализа','анализов')} по поводам`,sostav)}
+      ${lab?acc('lab','Лаборатория и цена',`${esc(pk.name)} · ${fmt(pk.price_rub)} ₽${tbTxt?' · '+tbTxt:''}`,lab):''}
+    </div>
+    ${d.next_note?`<p class="nd-n rise" style="--i:4">${svg('check')}${esc(d.next_note)}</p>`:''}
+    <p class="disc rise" style="--i:5">${d.price_rub?'':'Цены по лабораториям пока не заведены — стоимость уточнится в лаборатории. '}Состав собирает оптимизатор: поводы врачей, консилиума, проверок и плановые панели.</p>`}},
   medpass(mp){if(!mp)return {html:top('Медпаспорт')};const labs=mp.recent_labs||[],oor=labs.filter(l=>l.out_of_range);
     const lrow=l=>row(svg('tube'),l.out_of_range?'warm':'',l.marker,`${l.ref_min!=null&&l.ref_max!=null?'реф. '+l.ref_min+'–'+l.ref_max:l.ref_max!=null?'реф. до '+l.ref_max:l.ref_min!=null?'реф. от '+l.ref_min:''}${l.date?' · '+shortDate(l.date):''}`,`<span class="rV ${l.out_of_range?'warm':''}">${fmt(l.value,Math.abs(l.value)<10&&l.value%1?1:0)}${l.unit?' '+l.unit:''}</span>`);
     return {html:`${top('Медпаспорт')}
@@ -2035,6 +2045,7 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'micro':{haptic();const w=t.closest('.hmW'),on=!w.classList.contains('open');$$('.hmW',ovS).forEach(x=>x.classList.remove('open'));w.classList.toggle('open',on);break}
     case'foodyest':haptic();openSheet('foodYest',null,t);break;
     case'medpass':haptic();loadMedp().then(mp=>openSheet('medpass',mp,t)).catch(()=>toast('Не удалось загрузить медпаспорт'));break;
+    case'acc':{haptic();const sec=t.closest('.accS'),on=!sec.classList.contains('open');sec.classList.toggle('open',on);t.setAttribute('aria-expanded',on);drawAcc=on?t.dataset.k:null;break}
     case'lab':{haptic();const k=t.dataset.k;if(!k||k===curLab)break;
       fetchJSON('/vita/doctor?lab='+encodeURIComponent(k)+'&panel='+curPanel).then(doc=>{DOC=doc;curLab=k;renderDoctor();refreshSheet()}).catch(()=>toast('Не удалось пересчитать под лабу'));break}
     case'drawp':{haptic();const i=Math.max(0,+t.dataset.k||0);
