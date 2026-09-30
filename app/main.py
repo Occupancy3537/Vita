@@ -116,6 +116,7 @@ import app.outcomes_report as outcomes_report
 import app.err_dedup as err_dedup
 import app.lab_optimizer as lab_optimizer
 import app.lab_reminder as lab_reminder
+import app.redflag_followup as redflag_followup
 from app.biohacking_ingest import BiohackingPayload, process_ingest
 from app.write_path import process as process_source
 from app.vita import router as vita_router
@@ -183,6 +184,11 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # проверка «панель созревает через 3 дня», одна строка в дайджест на
     # панель (не на каждый маркер), молчит, если ничего не подходит под окно.
     ("LAB_REMINDER_ENABLED", lambda: lab_reminder.run_scheduler(), "lab-reminder-scheduler"),
+    # Follow-up по открытой сессии красного флага (бриф 2026-09-30): L2/L3 молчат
+    # 48 ч — один раз спросить «как сейчас?». Выключен по умолчанию; для включения
+    # задать RF_FOLLOWUP_ENABLED=1 И RF_FOLLOWUP_SINCE=<ISO> (нижняя граница
+    # opened_ts, никакого backfill старых сессий). См. app/redflag_followup.py.
+    ("RF_FOLLOWUP_ENABLED", lambda: redflag_followup.run_scheduler(), "redflag-followup-scheduler"),
     # «Научный контур» (2026-09-25): единственная цель VISION со статусом «ноль».
     ("RESEARCH_SCAN_ENABLED", lambda: research_scan.run_scheduler(), "research-scan-scheduler"),
     # 2026-09-21: Food diary_v5 — свой бот (vlad_health), свой polling-цикл,

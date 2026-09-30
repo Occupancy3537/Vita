@@ -164,7 +164,8 @@ TABLES_TO_CLEAN = [
     "chat_person", "notify_log", "source_message", "extraction", "fact", "episode", "problem", "intervention",
     "opinion", "disagreement", "recommendation", "expectation", "recommendation_verdict",
     "visit", "lab_result", "memory_note", "journal", "entity_index", "metric_coverage",
-    "rf_event", "rf_session", "dialog_turn", "agent_step",
+    "rf_event", "rf_session", "rf_followup",  # follow-up по красному флагу (0006, 2026-09-30)
+    "dialog_turn", "agent_step",
     "scheduler_run_log", "host_metrics",  # статус-страница (run_log/host_metrics)
     "llm_usage",  # учёт стоимости LLM вне доктора
     "issue_log",  # бэклог продуктовых находок (2026-09-23, Шаг 1 «петли самоулучшения»)
