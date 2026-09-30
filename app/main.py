@@ -409,7 +409,7 @@ def outcomes_quarterly(token: str = Query(default="")) -> dict:
 
 @app.get("/labs/plan")
 def labs_plan(token: str = Query(default=""), horizon_days: int = Query(default=180),
-              max_per_draw: int = Query(default=12), lab: str = Query(default="")) -> dict:
+              max_per_draw: int = Query(default=lab_optimizer.DEFAULT_MAX_PER_DRAW), lab: str = Query(default="")) -> dict:
     """Тикет «оптимизатор сдачи анализов» (2026-09-26, Часть 3.4) — план панелей
     на N дней вперёд (данные + API; витрина «План» — Vita v2, экран не здесь).
     Тот же DASHBOARD_TOKEN, что остальные /dashboard/* и /outcomes/* — НЕ в

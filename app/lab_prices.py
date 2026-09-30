@@ -254,7 +254,10 @@ def panel_offers(codes: list[str], items_by_lab: dict[str, list[LabItem]]) -> li
         })
     if not offers:
         return []
-    offers.sort(key=lambda o: (1 if o["missing"] else 0, o["price_rub"], o["key"]))
+    # сначала лаба с наименьшим числом дыр (полная — первая), потом дешевле, потом по ключу:
+    # у больших панелей с ОАК-связкой полных лаб может не быть, тогда «самая дешёвая» не должна
+    # побеждать лабу, закрывающую больше показателей
+    offers.sort(key=lambda o: (len(o["missing"]), o["price_rub"], o["key"]))
     offers[0]["cheapest"] = True
     return offers
 

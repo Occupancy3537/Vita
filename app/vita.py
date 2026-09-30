@@ -1275,6 +1275,11 @@ _MONTH_GEN = ["января", "февраля", "марта", "апреля", "�
 _GROUP_ORDER = ["Панель PhenoAge", "Назначил врач", "Контроль добавки", "Плановый мониторинг", "По показаниям"]
 
 
+def _bundles() -> list[dict]:
+    from app.lab_catalog import CLINICAL_BUNDLES
+    return CLINICAL_BUNDLES
+
+
 def _iv_label(interval_days, one_time: bool) -> str:
     """Срок повтора анализа для строки «Состав» (макет v5): «90 дн», «6 мес», «1 год», «однократно»."""
     if one_time:
@@ -1384,7 +1389,9 @@ def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict],
         pick = p.get("pick") or {}  # цены лаб (этап 1 плана docs/PRICES_PLAN_QWEN.md)
         from app.lab_catalog import LAB_CATALOG
         markers_out = []
-        for m in p["markers"]:
+        cbc_codes = set(next((b["codes"] for b in _bundles() if b["key"] == "cbc"), []))
+        cbc_rows = [m for m in p["markers"] if m.get("code") in cbc_codes]
+        for m in [m for m in p["markers"] if m.get("code") not in cbc_codes]:
             code = m.get("code") or ""
             entry = LAB_CATALOG.get(code) or {}
             why = m.get("why") or ""
@@ -1397,8 +1404,18 @@ def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict],
                 "iv": _iv_label(entry.get("default_interval_days"), bool(entry.get("one_time"))),
                 "due": m.get("natural_due_date"),
             })
+        if cbc_rows:  # ОАК — один анализ (одна пробирка, одна позиция прайса), а не N строк
+            first = min(cbc_rows, key=lambda r: r.get("natural_due_date") or "")
+            markers_out.append({
+                "name": "Общий анализ крови — остальные показатели" if len(cbc_rows) < 20 else "Общий анализ крови",
+                "why": f"{len(cbc_rows)} показателей одним анализом", "category": "ОАК",
+                "group": _marker_group(first.get("source_type") or "", first.get("code") or ""),
+                "fasting": False, "source": first.get("source_type"), "reason": "",
+                "purpose": f"Эритроциты, гемоглобин, тромбоциты, лейкоцитарная формула — {len(cbc_rows)} показателей одной пробиркой",
+                "iv": _iv_label(180, False), "due": first.get("natural_due_date"),
+            })
         next_draw = {
-            "date": p["date"], "n": p["n_markers"], "fasting": p["fasting_required"], "tubes": p["tube_types"],
+            "date": p["date"], "n": len(markers_out), "fasting": p["fasting_required"], "tubes": p["tube_types"],
             "price_rub": pick.get("price_rub") or p.get("total_price_rub"),
             "lab_name": pick.get("name"), "labs": p.get("labs") or [], "pick": pick or None,
             "export_text": p.get("export_text"),

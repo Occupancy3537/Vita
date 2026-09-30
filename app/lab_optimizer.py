@@ -42,6 +42,7 @@ from psycopg import sql
 from app.db import schema
 from app.lab_catalog import (
     INTERVENTION_MONITOR_RULES,
+    CLINICAL_BUNDLES,
     LAB_CATALOG,
     PHENOAGE_PANEL_MARKERS,
     find_markers_in_text,
@@ -51,7 +52,7 @@ from app.lab_catalog import (
 logger = logging.getLogger(__name__)
 
 GROUP_WINDOW_DAYS = 14  # Часть 2.5 — «через неделю» как пример, окно шире для реальной пользы
-DEFAULT_MAX_PER_DRAW = 12  # Часть 2.4
+DEFAULT_MAX_PER_DRAW = 20  # Часть 2.4; было 12 — 2026-09-30 поднят вместе с клиническими связками (связка не режется лимитом)
 OVERFLOW_PUSH_DAYS = 30  # «панель+2»: пауза перед следующим большим забором, не сразу следующий слот
 _RU_MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
 
@@ -215,18 +216,39 @@ def _build_panels(due_items: list[DueItem], today: date, horizon_days: int,
     urgent = [it for it in items if it.urgent]
     normal = [it for it in items if not it.urgent]
 
-    # Панель PhenoAge АТОМАРНА (правило одного дня, Влад 2026-09-29): формула
-    # Levine честна только по крови одного забора, «дособирать» маркеры с
-    # разных дат бессмысленно. Все 9 стоящих PhenoAge-маркеров едут одним
-    # забором с самым ранним сроком среди них (псевдо-элемент разворачивается
-    # в состав группы ниже) и никогда не подрезаются лимитом на забор.
+    # Атомарные единицы забора (правило одного дня для PhenoAge, Влад 2026-09-29;
+    # то же для клинических связок, 2026-09-30): члены едут ОДНИМ забором с самым
+    # ранним сроком среди них (псевдо-элемент «__ключ__» разворачивается в состав
+    # группы ниже) и никогда не режутся лимитом по одному — при нехватке места
+    # уезжает вся единица целиком. Связка тянет только тех, чей срок близок к
+    # самому раннему (окно = max(окно группы, полинтервала члена)), чтобы не
+    # сдавать рано то, что сдавали недавно.
     pheno_set = frozenset(PHENOAGE_PANEL_MARKERS)
-    pheno_unit = [it for it in normal if it.code in pheno_set]
-    if pheno_unit:
-        normal = [it for it in normal if it.code not in pheno_set]
-        normal.append(DueItem("__phenoage__", min(it.due_date for it in pheno_unit),
-                              "standing", None, "панель PhenoAge одним забором"))
-        normal.sort(key=lambda it: (it.due_date, it.code))
+    units: dict[str, list[DueItem]] = {}
+    unit_meta: dict[str, dict] = {}
+    unit_defs = [("phenoage", "PhenoAge", pheno_set, True, False)] + [
+        (b["key"], b["name"], frozenset(b["codes"]), False, bool(b.get("weight_one"))) for b in CLINICAL_BUNDLES]
+    for key, uname, codes, is_pheno, w_one in unit_defs:
+        members = [it for it in normal if it.code in codes]
+        if not members:
+            continue
+        if not is_pheno and not w_one:
+            # сроки сравниваем «эффективные» (просроченное = сегодня): иначе анализ, просроченный
+            # с 2020 года, и сегодняшний «далеки» на годы и связка рвётся
+            eff = lambda it: max(it.due_date, today)  # noqa: E731
+            earliest = min(eff(it) for it in members)
+            members = [it for it in members if eff(it) <= earliest + timedelta(days=max(
+                group_window_days, int((LAB_CATALOG.get(it.code, {}).get("default_interval_days") or 180) * 0.5)))]
+        if not is_pheno and len(members) < 2:
+            continue
+        member_ids = {id(it) for it in members}
+        normal = [it for it in normal if id(it) not in member_ids]
+        pseudo = DueItem(f"__{key}__", min(it.due_date for it in members), "standing", None,
+                         f"связка: {uname}")
+        units[pseudo.code] = members
+        unit_meta[pseudo.code] = {"rank": 0 if is_pheno else 2, "weight_one": w_one, "name": uname}
+        normal.append(pseudo)
+    normal.sort(key=lambda it: (it.due_date, it.code))
 
     for it in urgent:
         raw_panels.append((max(it.due_date, today), [it]))
@@ -264,15 +286,40 @@ def _build_panels(due_items: list[DueItem], today: date, horizon_days: int,
         remaining = rest
         panel_date = anchor_effective
 
-        if "__phenoage__" in {it.code for it in group}:
-            group = [it for it in group if it.code != "__phenoage__"] + pheno_unit
-        if len(group) > max_per_draw:
-            # подрезка не выкидывает PhenoAge-маркеры (один забор — не договорённость)
-            group.sort(key=lambda it: (it.code not in pheno_set, it.due_date, it.code))
-            overflow = group[max_per_draw:]
-            group = group[:max_per_draw]
+        # единицы разворачиваем в состав; подрезка лимитом — по ЕДИНИЦАМ (вес: связка ОАК = 1),
+        # приоритет: PhenoAge > назначенное врачом > связки > одиночки; влезшие берём
+        # по порядку, не влезшие уезжают на +30 дней ЦЕЛИКОМ
+        entries = []
+        for it in group:
+            if it.code in units:
+                ms = units[it.code]
+                meta = unit_meta[it.code]
+                weight = 1 if meta["weight_one"] else len(ms)
+                rank = meta["rank"]
+                if rank != 0 and any(m.source_type in ("manual", "recommendation") for m in ms):
+                    rank = 1
+                entries.append((rank, min(m.due_date for m in ms), it.code, weight, ms, it))
+            else:
+                rank = 1 if it.source_type in ("manual", "recommendation") else 3
+                entries.append((rank, it.due_date, it.code, 1, [it], it))
+        entries.sort(key=lambda e: (e[0], e[1], e[2]))
+        kept, used, deferred = [], 0, []
+        for e in entries:
+            if not kept or used + e[3] <= max_per_draw:
+                kept.append(e)
+                used += e[3]
+            else:
+                deferred.append(e)
+        group = [m for e in kept for m in e[4]]
+        if deferred:
             push_date = panel_date + timedelta(days=OVERFLOW_PUSH_DAYS)
-            remaining.extend(DueItem(it.code, push_date, it.source_type, it.source_id, it.reason) for it in overflow)
+            for e in deferred:
+                if e[2] in units:
+                    units[e[2]] = [DueItem(m.code, push_date, m.source_type, m.source_id, m.reason) for m in e[4]]
+                    remaining.append(DueItem(e[2], push_date, "standing", None, e[5].reason))
+                else:
+                    it = e[4][0]
+                    remaining.append(DueItem(it.code, push_date, it.source_type, it.source_id, it.reason))
             remaining.sort(key=lambda it: (it.due_date, it.code))
 
         raw_panels.append((panel_date, group))

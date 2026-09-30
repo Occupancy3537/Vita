@@ -73,7 +73,7 @@ def test_build_panels_short_interval_marker_not_pulled_early():
 
 
 def test_build_panels_respects_max_per_draw_cap_with_overflow_push():
-    codes = [f"M{i:03d}" for i in range(40, 40 + 15)]  # 15 markers, все ОАК-подобные
+    codes = [f"T{i:03d}" for i in range(15)]  # 15 одиночек вне связок (ОАК-связка считается за 1 единицу — см. test_bundles.py)
     items = [_di(c, TODAY - timedelta(days=1)) for c in codes]
     panels, _, _ = opt._build_panels(items, TODAY, horizon_days=365, max_per_draw=12, group_window_days=14)
     assert panels[0]["n_markers"] == 12
