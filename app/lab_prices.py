@@ -156,6 +156,13 @@ def _ru_money(v: float) -> str:
     return f"{v:,.0f}".replace(",", " ")
 
 
+# Цены собираются еженедельным скрейпом автоматически (scripts/lab_scrape) и
+# НЕ проверяются человеком перед каждым использованием — честная метка в оффере
+# и в экспорте. Сами строки прайса в БД несут verified-аналог в parsed_at и в
+# исходном JSON (verified=false + verify_note); в БД поле не хранится — константа.
+PRICES_VERIFIED = False
+
+
 def build_export_text(panel: dict, pick: dict) -> str:
     """Список ЗАКУПКИ для выбранной лаборатории: какие ПОЗИЦИИ прайса заказать
     (код лабы + название + цена + что закрывает), чтобы итог сошёлся с ценой
@@ -184,6 +191,10 @@ def build_export_text(panel: dict, pick: dict) -> str:
     for m in pick.get("missing") or []:
         lines.append(f"«{m}» — {pick.get('name', 'лаборатория')} не делает, сдать в другой лаборатории.")
     lines.append(f"Итого: {_ru_money(pick.get('price_rub') or 0)} ₽.")
+    d_iso = str(pick.get("parsed_at") or "")[:10]
+    if d_iso:
+        lines.append(f"Цены собраны автоматически {d_iso[8:10]}.{d_iso[5:7]} — "
+                     "проверьте на сайте лаборатории перед оплатой.")
     return "\n".join(lines)
 
 
@@ -225,6 +236,8 @@ def panel_offers(codes: list[str], items_by_lab: dict[str, list[LabItem]]) -> li
             "missing": _missing_names(sol["missing"]),
             "breakdown": breakdown,
             "parsed_at": sol["parsed_at"].isoformat() if sol["parsed_at"] else None,
+            "verified": PRICES_VERIFIED,
+            "collected_at": sol["parsed_at"].isoformat() if sol["parsed_at"] else None,
             "cheapest": False,
         })
     if not offers:
