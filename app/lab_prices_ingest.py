@@ -178,6 +178,20 @@ def _report(cur) -> None:
         print(f"  [{lab}] {ext} «{name}» → {hint}")
     for lab, n in sorted(by_lab.items()):
         print(f"итог [{lab}]: незмапленных single — {n}")
+    # Ключи маппинга, для которых в текущем прайсе нет позиции: тихая потеря
+    # покрытия (лаба сменила код/название или убрала позицию) — так же, как
+    # «незмапленные», это очередь ручной приёмки, автоматически ничего не правим.
+    cur.execute(sql.SQL("SELECT lab_key, external_code FROM {t}").format(
+        t=sql.Identifier(schema(), "lab_item")))
+    present = {(lab, ext) for lab, ext in cur.fetchall()}
+    orphans = sorted(set(COVERS) - present)
+    if orphans:
+        by: dict[str, list[str]] = {}
+        for lab, ext in orphans:
+            by.setdefault(lab, []).append(ext)
+        print(f"ключи маппинга без позиции в прайсе: {len(orphans)}")
+        for lab, exts in sorted(by.items()):
+            print(f"  [{lab}] {', '.join(exts[:20])}{' …' if len(exts) > 20 else ''}")
 
 
 def main(argv: list[str]) -> int:
