@@ -121,14 +121,14 @@ def test_not_orderable_markers_do_not_make_holes():
     они не должны превращать ВСЕ лабы в «с дыркой» и ломать правило «полные
     вперёд». Панель: ОАК-группа + оба легаси-кода; оффер = 12 из 12, missing пуст."""
     oak = ["M039", "M043", "M049", "M062"]
-    panel = oak + sorted(NOT_SEPARATELY_ORDERABLE)  # 6 маркеров, из них 2 не заказные
+    panel = oak + sorted(NOT_SEPARATELY_ORDERABLE)  # ОАК-группа + все не заказные отдельно
     items_by_lab = {
         "gemotest": [_it("gemotest", "1.1", "ОАК", 610, oak)],
         "invitro": [_it("invitro", "2852", "ОАК без диффа", 255, ["M039", "M043", "M049"])],
     }
     offers = panel_offers(panel, items_by_lab)
     assert [o["key"] for o in offers] == ["gemotest", "invitro"]  # полная лаба первая
-    assert offers[0]["covered"] == 6 and offers[0]["n"] == 6
+    assert offers[0]["covered"] == len(panel) and offers[0]["n"] == len(panel)
     assert offers[0]["missing"] == []
     # у Инвитро реальная дыра (нет M062), легаси-коды в missing не попадают
     assert offers[1]["missing"] == ["Лимфоциты %"]
@@ -228,3 +228,14 @@ def test_map_codes_exist_in_catalog():
 def test_map_codes_are_unique_per_position():
     for key, codes in COVERS.items():
         assert len(codes) == len(set(codes)), f"{key}: дубли кодов внутри позиции"
+
+
+def test_byproduct_cbc_and_calculated_markers_are_not_holes():
+    """Живая жалоба Влада: PDW/MPV/PCT/P-LCR/незрелые гранулоциты и расчётный не-ЛПВП красным
+    «не делает» у всех лаб. Они не продаются отдельно — дырой лабы не считаются."""
+    for code in ("M050", "M051", "M052", "M053", "M054", "M055", "M056", "M057", "M014"):
+        assert code in NOT_SEPARATELY_ORDERABLE
+    items_by_lab = {"gemotest": [_it("gemotest", "1.1", "ОАК", 610, ["M039", "M043"])]}
+    offers = panel_offers(["M039", "M043", "M051", "M052", "M056", "M014"], items_by_lab)
+    assert offers[0]["missing"] == []
+    assert offers[0]["covered"] == offers[0]["n"] == 6
