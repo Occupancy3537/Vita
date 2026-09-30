@@ -15,7 +15,7 @@ import json
 import logging
 import re
 import statistics
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Optional
 
 from psycopg import sql
@@ -1029,6 +1029,58 @@ def _day_met_and_at_risk(day_iso: str, row: dict, meals: list[dict], targets: li
     return met, at_risk, True
 
 
+TRAVEL_KEY = "travel"
+TRAVEL_MAX_DAYS = 60
+
+
+def read_travel_days(cur) -> set:
+    cur.execute(
+        sql.SQL("SELECT date FROM {t} WHERE field_key = %s AND value_bool IS TRUE")
+        .format(t=sql.Identifier(schema(), "vita_manual_mark")),
+        (TRAVEL_KEY,),
+    )
+    return {d.isoformat() for (d,) in cur.fetchall()}
+
+
+def write_travel_day(cur, day, value: bool) -> None:
+    cur.execute(
+        sql.SQL(
+            "INSERT INTO {t} (date, field_key, value_bool) VALUES (%s, %s, %s) "
+            "ON CONFLICT (date, field_key) DO UPDATE SET value_bool = EXCLUDED.value_bool, ts_recorded = now()"
+        ).format(t=sql.Identifier(schema(), "vita_manual_mark")),
+        (day.isoformat(), TRAVEL_KEY, value),
+    )
+
+
+def start_travel(cur, today, days: int) -> None:
+    """Помечает today..today+days-1 днями поездки. Идемпотентно (upsert)."""
+    if not 1 <= days <= TRAVEL_MAX_DAYS:
+        raise ValueError(f"days must be 1..{TRAVEL_MAX_DAYS}")
+    for i in range(days):
+        write_travel_day(cur, today + timedelta(days=i), True)
+
+
+def end_travel(cur, today) -> None:
+    """Завершает поездку: сегодняшний и будущие дни снимаются, прошлые остаются
+    (уже прожитые дни поездки не переписываем)."""
+    cur.execute(
+        sql.SQL("DELETE FROM {t} WHERE field_key = %s AND date >= %s")
+        .format(t=sql.Identifier(schema(), "vita_manual_mark")),
+        (TRAVEL_KEY, today.isoformat()),
+    )
+
+
+def travel_state(travel_days: set, today_iso: str) -> dict:
+    """{active, until, days_left}: until — последний день непрерывной цепочки от сегодня."""
+    if today_iso not in travel_days:
+        return {"active": False, "until": None, "days_left": 0}
+    d = date.fromisoformat(today_iso)
+    n = 0
+    while (d + timedelta(days=n + 1)).isoformat() in travel_days:
+        n += 1
+    return {"active": True, "until": (d + timedelta(days=n)).isoformat(), "days_left": n + 1}
+
+
 def _fetch_streak_inputs(cur):
     """rows/meals/targets на ВСЮ историю (не 3-дневное окно get_today_dashboard —
     тому окну хватает для текущего бюджета дня, сериям нужны месяцы). Тот же
@@ -1046,7 +1098,12 @@ def _fetch_streak_inputs(cur):
     return rows, meals, targets
 
 
-def build_streaks(rows: list[dict], meals: list[dict], targets: list[dict], today_iso: str) -> list[dict]:
+def build_streaks(rows: list[dict], meals: list[dict], targets: list[dict], today_iso: str,
+                  travel_days: Optional[set] = None) -> list[dict]:
+    """travel_days — ISO-даты режима поездки: серии ПИТАНИЯ на эти дни на паузе
+    (нет дневника — не провал и не выполнение, заморозку не тратят); сон и шаги
+    идут как обычно (часы с собой)."""
+    travel_days = travel_days or set()
     days = sorted(r["Дата"] for r in rows if r.get("Дата") and r["Дата"] <= today_iso)
     rows_by_date = {r["Дата"]: r for r in rows}
 
@@ -1058,7 +1115,10 @@ def build_streaks(rows: list[dict], meals: list[dict], targets: list[dict], toda
     for crit in _STREAK_CRITERIA:
         series = []
         for d in days:
-            met, at_risk, has_data = _day_met_and_at_risk(d, rows_by_date[d], meals, targets, crit["key"])
+            if d in travel_days and crit["key"] != "sleep_zone":
+                met, at_risk, has_data = None, False, False
+            else:
+                met, at_risk, has_data = _day_met_and_at_risk(d, rows_by_date[d], meals, targets, crit["key"])
             series.append({"date": d, "met": met, "at_risk": at_risk, "has_data": has_data})
             if has_data and met is False:
                 all_gaps.append((d, crit["key"]))
@@ -1174,7 +1234,9 @@ def build_today(cur) -> dict:
     chip_norm = read_chip_norm(cur)
 
     rows, meals, targets = _fetch_streak_inputs(cur)
-    streak_data = build_streaks(rows, meals, targets, today.get("date") or timeutil.now_local().date().isoformat())
+    today_iso = today.get("date") or timeutil.now_local().date().isoformat()
+    travel_days = read_travel_days(cur)
+    streak_data = build_streaks(rows, meals, targets, today_iso, travel_days)
 
     return {
         "date": today.get("date"),
@@ -1197,6 +1259,7 @@ def build_today(cur) -> dict:
         "nudge": nudge,
         "streaks": streak_data["streaks"],
         "freezes_available": streak_data["freezes_available"],
+        "travel": travel_state(travel_days, today_iso),
         "assignments": build_assignments(cur, today, state),
         # «Проверки», этап 2 (2026-09-28): слот «Решить» (этап 1 оставил его
         # пустым — см. app/static/vita.html до этого коммита) + строка
@@ -1529,7 +1592,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.vita_auth import COOKIE_NAME, check_password, create_session_token, require_session, verify_session_token
 
@@ -1632,6 +1695,33 @@ def vita_manual_mark_endpoint(req: VitaManualMarkRequest, _: None = Depends(requ
 # =====================================================================
 # Vita v2, этап 2 (2026-09-28) — «Проверки»: агрегатор app/checks.py
 # =====================================================================
+
+class VitaTravelRequest(BaseModel):
+    days: int = Field(ge=1, le=TRAVEL_MAX_DAYS)
+
+
+@router.post("/vita/travel")
+def vita_travel_start(req: VitaTravelRequest, _: None = Depends(require_session)) -> dict:
+    """Режим поездки: серии питания на паузе на N дней (сегодня включительно)."""
+    today = timeutil.today()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            start_travel(cur, today, req.days)
+            state = travel_state(read_travel_days(cur), today.isoformat())
+        conn.commit()
+    return {"ok": True, "travel": state}
+
+
+@router.post("/vita/travel/end")
+def vita_travel_end(_: None = Depends(require_session)) -> dict:
+    today = timeutil.today()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            end_travel(cur, today)
+            state = travel_state(read_travel_days(cur), today.isoformat())
+        conn.commit()
+    return {"ok": True, "travel": state}
+
 
 @router.get("/vita/checks")
 def vita_checks_endpoint(mode: Optional[str] = None, _: None = Depends(require_session)) -> dict:

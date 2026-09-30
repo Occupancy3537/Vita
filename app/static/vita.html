@@ -396,8 +396,18 @@ svg{display:block}
 .rxN{text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink2)}
 .rxN.ok{color:var(--green);font-weight:600}
 /* серии: пауза при отсутствии данных, заморозки, режим поездки */
-.travel{font-size:11.5px;color:var(--accent-ink);font-weight:500}
-.travel.on{color:var(--amber)}
+.tripBtn{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--line);color:var(--ink2);margin-right:-4px;flex:none}
+.tripBtn svg{width:19px;height:19px}
+.tripBtn.on{background:var(--amber-soft);border-color:transparent;color:var(--amber)}
+.tripBox{margin-top:16px;border-radius:20px;background:var(--card);box-shadow:var(--card-sh);padding:14px 16px}
+.tripBox.on{background:var(--amber-soft);box-shadow:none}
+.tripBox b{display:block;font-size:14px;font-weight:600;color:var(--ink)}
+.tripBox small{display:block;margin-top:3px;font-size:12.5px;line-height:1.4;color:var(--muted)}
+.tripBox .tripAct{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.tripBox .tripAct button{min-height:36px;padding:0 14px;border-radius:18px;background:var(--line-soft);font-size:13px;font-weight:600;color:var(--accent-ink)}
+.tripBox.on .tripAct button{background:transparent;box-shadow:inset 0 0 0 1px var(--amber);color:var(--amber)}
+.stTrip{display:inline-grid;place-items:center;margin-left:2px;color:var(--amber)}
+.stTrip svg{width:13px;height:13px}
 .stk .fz{position:absolute;top:12px;right:12px;display:flex;gap:2px;color:var(--accent-ink)}
 .stk .fz svg{width:11px;height:11px}
 .stk.pause{opacity:.72}
@@ -1383,11 +1393,14 @@ const I={
   hint:'<path d="M9.5 18.5h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.4 1.1 2.2v.5h5V16c0-.8.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/>',
   cheese:'<path d="M3 17l9-10 9 5v5H3z"/><circle cx="9" cy="14.5" r="1"/><circle cx="15" cy="15" r="1.2"/>',
   beef:'<path d="M5 13c-1.5-4.5 2-9 7-9s8.5 3.5 7.5 8-5.5 7-9.5 6.5S6 16 5 13z"/><circle cx="14" cy="10" r="1.8"/>',
+  car:'<path d="M3.5 15.5v-3l1.7-4.4A2 2 0 0 1 7 6.8h10a2 2 0 0 1 1.8 1.3l1.7 4.4v3"/><path d="M3.5 15.5h17M5 12.2h14"/><circle cx="7.5" cy="17.6" r="1.6"/><circle cx="16.5" cy="17.6" r="1.6"/>',
   dots:'<circle cx="8" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16" cy="12" r="1"/>',
 };
 const svg=(k,cls='ic')=>`<svg class="${cls}" viewBox="0 0 24 24">${I[k]||I.dots}</svg>`;
 const row=(ic,tone,t,sm,right,a,k)=>`<${a?'button':'div'} class="row${a?' press':''}"${a?` data-a="${a}"`:''}${k?` data-k="${k}"`:''}><span class="rIc ${tone||''}">${ic}</span><span class="rT"><b>${t}</b>${sm?`<small>${sm}</small>`:''}</span>${right||''}${a?svg('right','ic rGo'):''}</${a?'button':'div'}>`;
-const top=(name,i=0)=>`<div class="ov-top rise" style="--i:${i}"><button class="back press" data-a="close" aria-label="Назад">${svg('back')}</button><span class="lbl">${name}</span><span style="width:36px"></span></div>`;
+const top=(name,i=0,right='<span style="width:36px"></span>')=>`<div class="ov-top rise" style="--i:${i}"><button class="back press" data-a="close" aria-label="Назад">${svg('back')}</button><span class="lbl">${name}</span>${right}</div>`;
+let TRIP_PICK=false;
+const tripUntil=iso=>{const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('ru-RU',{day:'numeric',month:'long'})};
 
 /* ================= ДАННЫЕ: живые /vita/today + /vita/rhythm + /vita/yesterday ================= */
 let TODAY=null, RHYTHM=null, YEST=null, yestLoaded=false;
@@ -1577,7 +1590,7 @@ function renderToday(){
   pill.hidden=streaks.length===0;
   pill.classList.toggle('risk',st2.includes('r'));
   pill.setAttribute('aria-label',`Серии: ${st2.filter(x=>x!=='p').length} из ${streaks.length} живы`);
-  pill.innerHTML=`${svg('flame')}<span class="sd">${st2.map((c,i)=>`<i class="${c}" style="--k:${i}"></i>`).join('')}</span>`;
+  pill.innerHTML=`${svg('flame')}<span class="sd">${st2.map((c,i)=>`<i class="${c}" style="--k:${i}"></i>`).join('')}</span>${(TODAY.travel||{}).active?`<span class="stTrip" title="Режим поездки">${svg('car')}</span>`:''}`;
   $$('.rise',$('#s-today')).forEach(e=>e.classList.add('in'));
   requestAnimationFrame(sizeBg);
   refreshSheet();
@@ -1668,10 +1681,13 @@ const B={
     <div class="ov-hero rise" style="--i:1"><div class="lbl">${TODAY.state.closed?'Как закрылся день':'Чем закончится день'}</div><div class="big">${score!=null?score:'—'}<small>${ahead!=null&&ahead>score?`→ можно ${ahead} · оценочно`:'из 100'}</small></div>
       <p class="ov-sub" style="color:var(--accent-ink)">${TODAY.state.closed?'Сутки закрыты — цифра больше не меняется.':'Если ничего не менять — так и закроется.'} ${ahead!=null&&ahead>score?'Прогноз «можно» — оценочный, ещё не откалиброван на достаточной истории.':''}</p></div>
     <div class="rise" style="--i:2;margin-top:18px">${rows.length?rows.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${esc(r.label)}${r.detail?`<small>${esc(r.detail)}</small>`:''}</span></div>`).join(''):'<p class="empty">Пока недостаточно данных за сегодня.</p>'}</div>`}},
-  streaks(){const streaks=TODAY.streaks||[],alive=streaks.filter(s=>s.status!=='paused').length,fz=TODAY.freezes_available;
-    return {html:`${top('Серии')}
+  streaks(){const streaks=TODAY.streaks||[],tr=TODAY.travel||{active:false},alive=streaks.filter(s=>s.status!=='paused'||(tr.active&&s.key!=='sleep_zone')).length,fz=TODAY.freezes_available;
+    const tbtn=`<button class="tripBtn press${tr.active?' on':''}" data-a="tripbtn" aria-pressed="${tr.active}" aria-label="Режим поездки">${svg('car')}</button>`;
+    const tbox=tr.active?`<div class="tripBox on rise" style="--i:1"><b>В поездке до ${tripUntil(tr.until)}</b><small>Серии питания на паузе и не сгорают. Сон и шаги считаются как обычно.</small><div class="tripAct"><button data-a="tripend">Завершить поездку</button></div></div>`
+      :TRIP_PICK?`<div class="tripBox rise" style="--i:1"><b>Режим поездки</b><small>Питание на паузе — серии не сгорят, заморозки не тратятся. Сон и шаги как обычно.</small><div class="tripAct">${[3,7,14].map(n=>`<button data-a="tripgo" data-k="${n}">${n} ${plural(n,'день','дня','дней')}</button>`).join('')}</div></div>`:'';
+    return {html:`${top('Серии',0,tbtn)}${tbox}
     <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${alive}</b><span>из ${streaks.length} серий живы</span></div><p class="fsub">${fz} ${fz===1?'заморозка':fz>=2&&fz<=4?'заморозки':'заморозок'} в запасе — срыв не всегда обнулит серию</p></div>
-    <div class="stList rise" style="--i:2">${streaks.map(s=>{const p=s.status==='paused',r=s.status==='at_risk',cap=p?'на паузе — нет данных':r?'под угрозой сегодня':s.count>=s.record?'рекорд — держи':(s.next_milestone?`ещё ${s.next_milestone-s.count} до ${s.next_milestone} · рекорд ${s.record}`:`рекорд ${s.record}`);
+    <div class="stList rise" style="--i:2">${streaks.map(s=>{const p=s.status==='paused',r=s.status==='at_risk',cap=p?(tr.active&&s.key!=='sleep_zone'?'на паузе — ты в поездке':'на паузе — нет данных'):r?'под угрозой сегодня':s.count>=s.record?'рекорд — держи':(s.next_milestone?`ещё ${s.next_milestone-s.count} до ${s.next_milestone} · рекорд ${s.record}`:`рекорд ${s.record}`);
       const strip=(s.days||[]).map(d=>`<i class="${{y:'y',f:'f',x:'',p:'p',t:'t',r:'t'}[d.c]}" title="${d.date}">${d.c==='f'?svg('snow'):''}</i>`).join('');
       return `<div class="stR2${p?' pause':''}${r?' risk':''}"><div class="stR2h"><span class="rIc ${p?'':r?'amber':'teal'}">${svg(STREAK_IC[s.key]||'flame')}</span><span class="rT"><b>${esc(s.label)}</b><small>${cap}</small></span><span class="stN">${s.count}</span></div>${strip?`<div class="strip">${strip}</div>`:''}</div>`}).join('')||'<p class="empty">Пока нет ни одной серии в истории.</p>'}</div>
     <div class="stLeg rise" style="--i:3"><span><i style="background:var(--accent)"></i>выполнено</span><span><i style="background:color-mix(in srgb,var(--accent) 30%,transparent)"></i>заморозка</span><span><i style="box-shadow:inset 0 0 0 1.2px var(--faint)"></i>пауза</span><span><i style="box-shadow:inset 0 0 0 1.5px var(--accent)"></i>сегодня</span></div>
@@ -1925,7 +1941,8 @@ function closeSheet(opt={}){if(!ov.classList.contains('open'))return;haptic();
     }
   }
   settle(()=>{if(ov.classList.contains('open'))return;ov.classList.remove('show');morph.style.cssText='';ov.style.cssText='';ovAnims.forEach(x=>x.cancel());ovAnims=[];appEl.classList.remove('morphing');sheetInert(false);if(sheetReturn&&sheetReturn.isConnected){try{sheetReturn.focus({preventScroll:true})}catch(e){}}})}
-function refreshSheet(){if(!['today','index','draw'].includes(sheetKey))return;
+async function tripSet(days,msg){try{await postJSON(days?'/vita/travel':'/vita/travel/end',days?{days}:{});TRIP_PICK=false;await loadToday();renderToday();refreshSheet();toast(msg)}catch(e){toast('Не получилось — попробуй ещё раз')}}
+function refreshSheet(){if(!['today','index','draw','streaks'].includes(sheetKey))return;
   ovS.innerHTML=B[sheetKey]().html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}
 let drag=null,dragged=false;
 const dStart=(y)=>{if(!ov.classList.contains('open')||ovS.scrollTop>0||ovAnims.some(a=>a.playState==='running'))return;drag={y,t:performance.now(),dy:0,on:false}};
@@ -2047,7 +2064,10 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'chip':haptic();fetchJSON('/vita/topic/'+k).then(detail=>openSheet('segment',{k,detail},t));break;
     case'verdict':{const v=verdictWord();if(v.k==='none'&&TODAY.state.no_watch)toast('Часы не видели тебя с утра — как только появятся данные, индекс посчитается.');else openSheet(v.k==='week'?'week':'today',null,t);break}
     case'index':openSheet('index',null,t);break;
-    case'streaks':openSheet('streaks',null,t);break;
+    case'streaks':TRIP_PICK=false;openSheet('streaks',null,t);break;
+    case'tripbtn':haptic();if((TODAY.travel||{}).active){tripSet(null,'Режим поездки выключен')}else{TRIP_PICK=!TRIP_PICK;refreshSheet()}break;
+    case'tripgo':haptic();tripSet(+k,'Режим поездки включён: питание на паузе, сон и шаги как обычно');break;
+    case'tripend':haptic();tripSet(null,'Режим поездки выключен');break;
     case'recovery':fetchJSON('/vita/topic/recovery').then(detail=>openSheet('segment',{k:'recovery',detail},t));break;
     case'dayback':haptic();loadYesterday().then(snap=>{openSheet('yesterday',snap,t)});break;
     case'close':closeSheet();break;

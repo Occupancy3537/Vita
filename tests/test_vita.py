@@ -1405,3 +1405,58 @@ def test_shape_food_topic_carries_upper_limit_for_red_cells():
                            "note": None}], "sources": {}}
     out = vita.shape_food_topic(weekly, {"meals": [], "protein": 0, "kcal": 0}, [])
     assert out["micro_heatmap"][0]["upper_pct"] == 300
+
+
+# ─────── режим поездки (2026-09-30): серии питания на паузе, сон как обычно ───────
+
+def test_travel_pauses_food_streak_without_burning_freeze_or_breaking():
+    days = [f"2026-09-{d:02d}" for d in range(1, 11)]
+    rows = [_trend_row(d) for d in days]
+    meals = [{"Date": f"{d}T08:00", "Натрий": ("9000" if d in days[-4:-1] else "500")} for d in days[:-1]]
+    trip = set(days[-4:])  # три «провала» солью внутри поездки + сегодня
+    with_trip = vita.build_streaks(rows, meals, _SODIUM_TARGET, days[-1], trip)
+    na = next(s for s in with_trip["streaks"] if s["key"] == "Натрий")
+    assert na["count"] == 6 and na["status"] == "paused"
+    assert all(d["c"] == "p" for d in na["days"] if d["date"] in trip)
+    assert with_trip["freezes_available"] == vita.STREAK_FREEZE_POOL  # провалы в поездке заморозок не тратят
+    no_trip = vita.build_streaks(rows, meals, _SODIUM_TARGET, days[-1])
+    assert next(s for s in no_trip["streaks"] if s["key"] == "Натрий")["count"] != 6
+
+
+def test_travel_does_not_touch_sleep_streak():
+    days = [f"2026-09-{d:02d}" for d in range(1, 8)]
+    rows = [_trend_row(d) for d in days]
+    res = vita.build_streaks(rows, [], [], days[-1], set(days))
+    s = next(x for x in res["streaks"] if x["key"] == "sleep_zone")
+    assert s["count"] == 7
+
+
+def test_travel_state_chain_from_today():
+    st = vita.travel_state({"2026-09-30", "2026-10-01", "2026-10-02", "2026-10-05"}, "2026-09-30")
+    assert st == {"active": True, "until": "2026-10-02", "days_left": 3}
+    assert vita.travel_state({"2026-10-01"}, "2026-09-30") == {"active": False, "until": None, "days_left": 0}
+
+
+def test_start_and_end_travel_roundtrip_keeps_past_days():
+    today = date(2026, 9, 30)
+    with get_conn() as conn, conn.cursor() as cur:
+        vita.write_travel_day(cur, date(2026, 9, 29), True)
+        vita.start_travel(cur, today, 3)
+        assert vita.travel_state(vita.read_travel_days(cur), "2026-09-30")["until"] == "2026-10-02"
+        vita.end_travel(cur, today)
+        left = vita.read_travel_days(cur)
+    assert "2026-09-29" in left and "2026-09-30" not in left and "2026-10-01" not in left
+
+
+def test_vita_travel_endpoints_401_and_validation():
+    assert client.post("/vita/travel", json={"days": 3}).status_code == 401
+    assert client.post("/vita/travel/end").status_code == 401
+    assert client.post("/vita/travel", cookies=_cookie(), json={"days": 0}).status_code == 422
+    assert client.post("/vita/travel", cookies=_cookie(), json={"days": 999}).status_code == 422
+
+
+def test_vita_travel_endpoint_start_then_end():
+    r = client.post("/vita/travel", cookies=_cookie(), json={"days": 7})
+    assert r.status_code == 200 and r.json()["travel"]["active"] and r.json()["travel"]["days_left"] == 7
+    r = client.post("/vita/travel/end", cookies=_cookie())
+    assert r.status_code == 200 and r.json()["travel"]["active"] is False
