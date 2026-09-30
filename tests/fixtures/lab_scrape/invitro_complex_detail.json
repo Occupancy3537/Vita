@@ -1,0 +1,20 @@
+{
+ "code": "ОБС266",
+ "title": "Женское здоровье 18-45: базовое обследование",
+ "price": 4690,
+ "deadline": 2,
+ "tests": [
+  {
+   "code": "9",
+   "title": "АсАТ (АСТ, аспартатаминотрансфераза, AST, SGOT, Aspartate aminotransferase)"
+  },
+  {
+   "code": "13",
+   "title": "Билирубин общий (Bilirubin total)"
+  },
+  {
+   "code": "8",
+   "title": "АлАТ (АЛТ, Аланинаминотрансфераза, аланинтрансаминаза, SGPT, Alanine aminotransferase)"
+  }
+ ]
+}

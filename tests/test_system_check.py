@@ -245,3 +245,30 @@ def test_run_once_sends_critical_when_problems(monkeypatch):
     monkeypatch.setattr(system_check.notify, "notify", lambda *a, **kw: calls.append((a, kw)))
     system_check.run_once()
     assert calls == [(("system_check", "critical", "тест"), {"parse_mode": "HTML"})]
+
+
+def test_lab_prices_freshness_alerts_after_10_days():
+    """Сторож: max(parsed_at) старше 10 дней → problem; свежие → тишина."""
+    from datetime import datetime, timedelta, timezone
+
+    class _Cur:
+        def __init__(self, parsed_at):
+            self._p = parsed_at
+        def execute(self, q, p=None):
+            pass
+        def fetchone(self):
+            return (self._p,)
+
+    fresh = datetime.now(timezone.utc) - timedelta(days=3)
+    problems = []
+    system_check._check_lab_prices_freshness(_Cur(fresh), problems)
+    assert problems == []
+
+    stale = datetime.now(timezone.utc) - timedelta(days=12)
+    problems = []
+    system_check._check_lab_prices_freshness(_Cur(stale), problems)
+    assert len(problems) == 1 and "не обновлялись 12 дн" in problems[0]
+
+    problems = []
+    system_check._check_lab_prices_freshness(_Cur(None), problems)
+    assert len(problems) == 1 and "пуста" in problems[0]

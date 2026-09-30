@@ -192,6 +192,25 @@ _NUTRIENT_NUMERIC_COLS = [
 ]
 
 
+def _check_lab_prices_freshness(cur, problems: list) -> None:
+    """Сторож скрейпера цен (2026-09-30): card.lab_item обновляется еженедельным
+    scripts/lab_scrape; если max(parsed_at) старше 10 дней — еженедельный сбор
+    перестал отрабатывать (крон/ворота качества/сеть). Без этого сторожа
+    молчание скрапера = цены «прайс от трёхнедельной давности» без всякого
+    сигнала. Дни считаются по UTC-датам (сбор идёт ночью)."""
+    cur.execute("SELECT max(parsed_at) FROM card.lab_item")
+    row = cur.fetchone()
+    if row is None or row[0] is None:
+        problems.append("🔴 card.lab_item пуста — цены лабораторий не загружены (seed не запускался?)")
+        return
+    age_days = (datetime.now(tz=row[0].tzinfo) - row[0]).total_seconds() / 86400
+    if age_days > 10:
+        problems.append(
+            f"🔴 Цены лабораторий не обновлялись {int(age_days)} дн (последний сбор "
+            f"{row[0]:%d.%m}) — еженедельный скрейп не отработал; лог: "
+            f"/home/openclaw/lab_prices/scrape.log")
+
+
 def _check_numeric_garbage(cur, problems: list, notes: list) -> None:
     """Ловит именно тот класс бага, что нашёлся живой проверкой в MicroClimate
     (temperature="26,4" — запятая-десятичная, float() падает молча внутри
@@ -307,6 +326,7 @@ def build_message() -> dict:
         _check_gaps(cur, problems, notes)
         _check_pg_status(cur, problems)
         _check_numeric_garbage(cur, problems, notes)
+        _check_lab_prices_freshness(cur, problems)
         _check_anomaly_freshness(cur, problems, notes)
         _check_garmin_ingest_failures(cur, problems, notes)
     _check_load_gate(today_cache, problems, notes)

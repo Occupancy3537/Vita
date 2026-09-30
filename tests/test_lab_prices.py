@@ -162,7 +162,9 @@ def test_export_text_is_shopping_list():
     assert "закрывает: Витамин D (25-OH), Ферритин" in t
     assert "2. 3.11 Креатинин (венозная кровь) — 280 ₽" in t
     assert "«Гомоцистеин» — Гемотест не делает" in t
-    assert t.strip().endswith("Итого: 1 800 ₽.")
+    assert "Итого: 1 800 ₽." in t
+    assert t.strip().endswith(
+        "Цены собраны автоматически 29.09 — проверьте на сайте лаборатории перед оплатой.")
 
 
 def test_export_text_note_passthrough():

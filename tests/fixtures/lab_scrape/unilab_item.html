@@ -1,0 +1,1168 @@
+
+
+
+
+<!DOCTYPE html>
+<html
+	lang="ru"
+	
+>
+<head>
+
+
+<style>
+        /* -------------------------------------------------
+           Обычное тело страницы – теперь может прокручиваться
+        --------------------------------------------------- */
+        body {
+            margin: 0;
+            /* убрали height:100vh и overflow:hidden */
+            overflow-y: auto;               /* показывать полосу при необходимости */
+            background: #001;               /* тёмный фон */
+            font-family: sans-serif;
+        }
+
+        /* -------------------------------------------------
+           Слой со снегом – фиксируем над всем контентом,
+           но не влияем на высоту страницы.
+        --------------------------------------------------- */
+        .snow-layer {
+            position: fixed;                /* всегда привязан к окну */
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;           /* клики «пройдут сквозь» слой */
+            overflow: hidden;               /* снежинки не «вываливаются» за пределы окна */
+            z-index: 9999;                  /* над всем остальным */
+        }
+
+        .snowflake {
+            position: absolute;
+            top: -50px;
+            color: #a0d8ff;                 /* бледно‑голубой */
+            user-select: none;
+            font-size: 1em;
+            opacity: 0.85;
+        }
+
+        @keyframes fall {
+            0%   { transform: translateY(0) rotate(0deg); }
+            100% { transform: translateY(100vh) rotate(360deg); }
+        }
+
+        /* -------------------------------------------------
+           Пример «длинного» контента, чтобы увидеть скролл
+        --------------------------------------------------- */
+        .content {
+            padding: 2rem;
+            max-width: 800px;
+            margin: 0 auto;
+            color: #fff;
+        }
+    </style>
+
+
+	
+        <!-- Google tag (gtag.js) -->
+        <script async src="https://www.googletagmanager.com/gtag/js?id=UA-55025850-1"></script>
+        <script>
+            window.dataLayer = window.dataLayer || []
+
+            function gtag(){
+                dataLayer.push(arguments)
+            }
+
+            gtag('js', new Date())
+            gtag('config', 'UA-55025850-1')
+        </script>
+    
+
+	<title>
+	
+		
+			25 (ОН) Витамин D, цена анализа во Владивостоке | Юнилаб
+		
+	
+</title>
+
+	<link rel="icon" href="/static/img/favicon.ccf770619d05.ico" sizes="any"><!-- 32×32 -->
+	<link rel="icon" href="/static/img/favicon.98f591f4fc94.svg" type="image/svg+xml">
+	<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.5f191a55917c.png"><!-- 180×180 -->
+	<link rel="manifest" href="/static/manifest.8bb95b55dd45.json" type="application/manifest+json">
+
+	<!-- <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3" crossorigin=                                                aria-controls="439"
+                                            >
+                                                Дыхательные тесты
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/162/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#162"
+                                                aria-expanded="false"
+                                                aria-controls="162"
+                                            >
+                                                Изосерология
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/16/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#16"
+                                                aria-expanded="false"
+                                                aria-controls="16"
+                                            >
+                                                Иммуноаллергология
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/87/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#87"
+                                                aria-expanded="false"
+                                                aria-controls="87"
+                                            >
+                                                Исследование кала
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/171/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#171"
+                                                aria-expanded="false"
+                                                aria-controls="171"
+                                            >
+                                                Исследования мочи
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/167/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#167"
+                                                aria-expanded="false"
+                                                aria-controls="167"
+                                            >
+                                                Коагуляция
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/26/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#26"
+                                                aria-expanded="false"
+                                                aria-controls="26"
+                                            >
+                                                Маркеры аутоиммунных заболеваний
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/306/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#306"
+                                                aria-expanded="false"
+                                                aria-controls="306"
+                                            >
+                                                Масс-спектрометрия микробных маркеров
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/36/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#36"
+                                                aria-expanded="false"
+                                                aria-controls="36"
+                                            >
+                                                Молекулярно-генетические исследования
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/21/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#21"
+                                                aria-expanded="false"
+                                                aria-controls="21"
+                                            >
+                                                Онкомаркеры
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/61/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#61"
+                                                aria-expanded="false"
+                                                aria-controls="61"
+                                            >
+                                                Пренатальная диагностика
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/46/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#46"
+                                                aria-expanded="false"
+                                                aria-controls="46"
+                                            >
+                                                ПЦР - диагностика инфекционных заболеваний
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/18/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#18"
+                                                aria-expanded="false"
+                                                aria-controls="18"
+                                            >
+                                                Серологическая диагностика инфекционных заболеваний
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/31/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#31"
+                                                aria-expanded="false"
+                                                aria-controls="31"
+                                            >
+                                                Установление отцовства
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                        <div class="service-categories__item">
+                                            <a
+                                                class="accordion-button collapsed service-categories__item-title grey-hover"
+                                                href="/services/analyses/vladivostok/40/"
+                                                role="button"
+                                                data-bs-toggle=""
+                                                data-bs-target="#40"
+                                                aria-expanded="false"
+                                                aria-controls="40"
+                                            >
+                                                Цитологические исследования
+                                            </a>
+                                            
+                                            
+                                        </div>
+                                    
+                                </div> 
+                                </div>
+                            
+                        </div>  
+
+                    
+
+                    
+
+	<div class="col service-analysis">
+		<div class="service-analysis__header">
+			
+				
+			
+			<div class="service-analysis__code">
+				<span>Код исследования: 849</span>
+				
+					<span>/</span>
+					<span class="column-number ">A09.05.221</span>
+				
+			</div>
+			<h1 class="service-analysis__title">25 (ОН) Витамин D</h1>
+
+		</div>
+		
+			
+			<ul class="nav nav-tabs service-analysis__tab-list" role="tablist">
+				<li class="nav-item active">
+					<button class="nav-btn btn-reset" data-path="desc" aria-selected="true" role="tab">Описание</button>
+				</li>
+				
+				
+					<li class="nav-item">
+						<button class="nav-btn btn-reset" data-path="preparation" role="tab">Подготовка</button>
+					</li>
+				
+				
+					<li class="nav-item">
+						<button class="nav-btn btn-reset" data-path="indications" role="tab">Показания</button>
+					</li>
+				
+				
+					<li class="nav-item">
+						<button class="nav-btn btn-reset" data-path="interpretation" role="tab">
+							
+							
+								Интерпретация
+							
+						</button>
+					</li>
+				
+				
+				
+					<li class="nav-item">
+						<button class="nav-btn btn-reset" data-path="belong_complex" role="tab">Входит в комплекс</button>
+					</li>
+				
+				
+			</ul>
+			<div class="row service-analysis__content">
+				
+					<div class="col-xl-8 tab-content tab-content--active" data-target="desc">
+						<p><p><em>Исследование концентрации 25 (ОН) Витамина D, позволяющее выявить его дефицит или избыток.</em> Может назначаться в рамках общей диагностики авитаминоза.</p><p><strong>25-OH Витамин D </strong>– основная форма витамина D, которая синтезируется в печени и циркулирует в кровотоке в течение 2–3 недель. Именно уровень 25(OH)D в крови отражает статус витамина D в организме.</p><p><strong>Витамин D</strong> – биологически активное вещество, которое способствует усвоению кальция, фосфора и некоторых других минералов. Он помогает сохранить кости прочными, поддерживает иммунную систему, участвует в регуляции обмена веществ, защищая от сахарного диабета и ожирения, а женщинам позволяет избежать возможных осложнений при беременности.</p><p>Витамин D – обычно используемый собирательный термин для группы близких по структуре родственных стероидов. На данное время известно 6 витаминов группы D: D1, D2, D3, D4, D5 и D6. Для физиологии человека наиболее важными являются D2 (эргокальциферол), поступающий в организм с растительной пищей (грибы, авакадо), и D3 (холекальциферол), который образуется в коже из холестерина под влиянием ультрафиолета солнечных лучей и содержится в пище животного происхождения (печень, дрожжи, жирномолочные продукты, желток яиц).</p><p>Синтезированный и поступивший витамин D транспортируется в связанном с белками состоянии в печень, где превращается в 25-гидроксивитамин D (25(OH)D), который является главным циркулирующим метаболитом витамина D и имеет довольно продолжительный период полураспада в крови – до 3 недель. Небольшая часть 25(OH)D в дальнейшем гидроксилируется в почках под контролем паратгормона и уровня ионизированного кальция до биологически активной формы 1,25-дигидроксивитамина D (1,25(OH)2 Vit D) с периодом полураспада около 4 часов. Дальнейшее гидроксилирование и метаболические превращения витамина D приводят к образованию водорастворимых соединений, которые легко выводятся.</p><p>Концентрация витамина 25(OH)D в сыворотке считается самым надёжным показателем полного (экзо- и эндогенного) витамин D-зависимого статуса, поэтому данный показатель может быть использован для определения обеспеченности организма витамином D.</p><p>Как дефицит, так и избыток витамина D в организме могут негативно сказаться на состоянии здоровья. Клинически определение 25-OH-Vit D применяется для диагностики и контроля лечения:</p><p>1. <strong>Дефицита витамина D</strong>, который наблюдается при остеопорозе, рахите, остеомаляции, почечной остеодистрофии, нарушении обмена кальция при беременности, неонатальной гипокальциемии и гипопаратиреоза. Также в последнее время считается актуальной проблема субклинического дефицита витамина D. К симптомам дефицита можно отнести частые простуды; постоянное ощущение слабости; снижение выносливости, чувство усталости даже после небольшой нагрузки; ломкость и выпадение волос; ломкость и расслоение ногтей; повышенная хрупкость костей, частые переломы; частые заболевания зубов и дёсен (кариес, пародонтит); боли в суставах и костях; судороги в мышцах; замедленная регенерация тканей: долгое заживление царапин и небольших ранок; тревожность, бессонница, подавленное настроение, снижение памяти и внимания.</p><p>2. <strong>Избытка витамина D</strong>. В отличие от других витаминов, витамин D может быть токсичен в больших дозах. Витамин D интоксикации – почти исключительно ятрогенные заболевания в результате чрезмерного потребления его препаратов. Избыток витамина D вызывает гиперкальциемию, отложение почечных камней, отложение кальция в мягких тканях, нарушение функции почек и повреждение головного мозга. Избыток витамина D может проявляться следующими симптомами: повышенной утомляемостью; болью в животе; головокружениями и спутанностью сознания; расстройством пищеварения (в том числе синдром раздражённого кишечника); потерей костной массы; повреждением почек и нарушением их функции.</p><p>Следует помнить, уровень витамина D может варьировать в зависимости от возраста (у пожилых людей чаще наблюдается снижение), сезона (выше в конце лета, ниже зимой), характера принимаемой пищи, этнической и географической популяции, наблюдается снижение содержания в крови витамина D при беременности.</p></p>
+					</div>
+					<div class="col-xl-8 tab-content analysis-constituent" data-target="constituent">
+						<ul class="analysis-constituent__list">
+							
+						</ul>
+					</div>
+					<div class="col-xl-8 tab-content" data-target="preparation">
+						<ol style="list-style: auto; list-style-type: none"><li>Венозная кровь</li>
+<ol style="list-style: auto; list-style-type: disc"><li>Воздержаться от курения за 1-2 часа до исследования.</li>
+<li>Детям в возрасте до 1 года не принимать пищу в течение 30-40 минут до исследования.</li>
+<li>Детям в возрасте от 1 до 5 лет не принимать пищу в течение 2-3 часов до исследования.</li>
+<li>Исключить алкоголь за 24 часа до исследования.</li>
+<li>Исключить физическое и эмоциональное перенапряжение в течение 24 часов до исследования.</li>
+<li>Необходимо не принимать пищу в течение 8-14 часов до исследования (воду пить можно).</li>
+</ol></ol>
+					</div>
+					<div class="col-xl-8 tab-content" data-target="indications">
+						<p><p>1. Симптомы гипо- или авитаминоза</p><p>2. Симптомы гипервитаминоза (острого, хронического)</p><p>3. Наличие заболеваний, снижающих всасывание питательных веществ (колит, глютеновая болезнь, болезнь Крона)</p><p>4. Гипокальциемия</p><p>5. Гипофосфатемия</p><p>6. Гипокальциурия</p><p>7. Снижение минерализации костей</p><p>8. Приём препаратов и БАДов, содержащих витамин D</p><p>9. Соблюдение диеты</p></p>
+					</div>
+					<div class="col-xl-8 tab-content" data-target="interpretation">
+						<p><p><strong><em>Результат исследования должен оценивать лечащий врач, учитывая дополнительные клинические, инструментальные и лабораторные данные.</em></strong></p><p><strong>Повышение показателя: </strong></p><p>1. Интоксикация препаратами витамина D;</p><p>2. Интенсивная эскпозиция к солнечному свету;</p><p>3. Приём этидроната динатрия (перорально).</p><p><strong>Снижение показателя:</strong></p><p>1. Нарушение питания;</p><p>2. Недостаточное пребывание на солнце;</p><p>3. Нарушение всасывания витамина D в желудочно-кишечном тракте (синдром мальабсорбции, стеаторея, целиакия, язвенный колит и др.);</p><p>4. Хронические заболевания печени, вызывающие нарушения обмена витамина D;</p><p>5. Хронические заболевания почек (нефротический синдром, повышенная потеря жидкости и белка);</p><p>6. Беременность;</p><p>7. Хронический дефицит магния, вызывающий нехватку кальция и, как следствие, снижение уровня витамина D;</p><p>8. Приём некоторых лекарственных средств (например, гидроксида алюминия, этидроната динатрия (внутривенно), антибиотиков группы рифамицина, противосудорожных средств, глюкокортикостероидов и др.).</p></p>
+					</div>
+					<div class="col-xl-8 tab-content" data-target="belong_complex">
+						<ul class="analysis-constituent__list">
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/348/56395/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">2089</span>
+                    <h3 class="analysis-constituent__item">Анализ на содержание микроэлементов и витаминов</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/344/60310/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6083</span>
+                    <h3 class="analysis-constituent__item">Детский профиль (от 3 до 18 лет)</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/364/56872/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6015</span>
+                    <h3 class="analysis-constituent__item">Диета без мяса: оценка достаточности поступления в организм белков, витаминов и минералов</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/363/60313/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6096</span>
+                    <h3 class="analysis-constituent__item">Для косметолога</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/344/60309/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6089</span>
+                    <h3 class="analysis-constituent__item">Для тех, кто в офисе</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/344/55831/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6007</span>
+                    <h3 class="analysis-constituent__item">Комплекс для кормящих мам</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/363/55804/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6021</span>
+                    <h3 class="analysis-constituent__item">Красота изнутри: для кожи, волос и ногтей</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/344/60315/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6094</span>
+                    <h3 class="analysis-constituent__item">Курс на молодость. Комплекс для женщин.</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/344/60316/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6095</span>
+                    <h3 class="analysis-constituent__item">Курс на молодость. Комплекс для мужчин.</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/362/57038/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">2047</span>
+                    <h3 class="analysis-constituent__item">Маркеры метаболизма костной ткани</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/365/58398/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6030</span>
+                    <h3 class="analysis-constituent__item">Обследование после вирусной инфекции (COVID-19, грипп, ОРВИ) </h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/355/60314/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6090</span>
+                    <h3 class="analysis-constituent__item">Хроническая усталость</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/345/60319/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6097</span>
+                    <h3 class="analysis-constituent__item">Энергия похода. Базовый</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/345/60301/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">6098</span>
+                    <h3 class="analysis-constituent__item">Энергия похода. Профи</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/344/59016/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">3830</span>
+                    <h3 class="analysis-constituent__item">ЮНИ-15: важнейшие показатели здоровья</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+							
+
+
+
+    
+    <li class="service-item analysis-constituent__item">
+            <a  href="/services/complex/vladivostok/344/59135/"  class="service-item__link w-100">
+                <div class="service-item__link-wrapper">
+                    <span class="column-number">3860</span>
+                    <h3 class="analysis-constituent__item">ЮНИ-20: важнейшие показатели здоровья</h3>
+                </div>
+            </a>
+    </li>
+    
+
+						
+						</ul>
+					</div>
+				<div class="col-xl-8 tab-content addresses" data-target="addresses">
+					
+
+<ul class='addresses-list'>
+  
+</ul>
+
+  <div class="addresses-list__no-online-record">
+    Для получения консультации об оказании услуги и записи, позвоните в Контактный центр
+  </div>
+
+
+				</div>
+				
+				<div class="col-xl-8 tab-content" data-target="restrictions">
+					<p></p>
+				</div>
+				<div class="col service-analysis__card-price-col">
+					
+
+<div class="service-analysis__card-price card-price shadow-1">
+	<div class="card-price__header mb-4">
+		<div class="card-price__header-title mb-1 fs14">Стоимость</div>
+		<div class="title-500-25">2 200 руб</div>
+	</div>
+
+  
+    <div class="card-price__body fs14">
+      <p class="grey-color pb-2 mb-0">Дополнительно оплачивается:</p>
+
+      <ul class="card-price__disposables-list">
+        
+          
+            <ul class="card-price__group-list ms-3">
+              
+                <li class="card-price__item d-flex justify-content-between">
+                  <span class="card-price__item-title">Взятие крови</span>
+                  <span class="card-price__item-value">
+                    +300 руб
+                  </span>
+                </li>
+              
+            </ul>
+          
+        
+      </ul>
+    </div>
+  
+
+	
+		<div class="card-price__item fs14 pt-4">
+			<span class="card-price__item-title grey-color">Срок выполнения:</span>
+			<span class="card-price__item-value">
+        до  3 раб. дн.
+      </span>
+		</div>
+	
+
+	<div class="card-price__footer">
+    
+
+<div
+  
+	class="item-actions"
+  
+>
+  
+    <button
+      class="btn__to-cart btn btn-outline"
+      type="button"
+      data-url-add-cart="/cart/add/55677/"
+      data-ym-goal="bascet1"
+    >
+      <span class="loader-spinner loader-spinner_none"></span>
+      <span class="btn__title">В корзину</span>
+    </button>
+  
+
+  
+</div>
+
+
+		<div>
+			
+				
+					<a href="/vazhno-i-polezno/Kak-sdat-analyz/" class="card-price__rules link-underline">Правила
+						сдачи анализов</a>
+				
+			
+
+			<br>
+			
+				<div class="card-prise__example-result">
+					<a href="/media/simple_result_pdf/1ce2f8cb-e9b1-11e2-b469-0024e82f6301/849/849.pdf" class="link-underline">
+						Пример результата
+					</a>
+
+					<div class="card-prise__tooltip">
+						<div class="card-prise__tooltip-icon"></div>
+						<div class="card-prise__tooltip-text">
+							<span>Предоставленный бланк является образцом, а не точной копией результата исследования.
+							Нормы исследований и единицы измерения могут меняться в зависимости от используемых
+								реактивов и аппаратуры.</span>
+							<div class="card-prise__tooltip-icon card-prise__tooltip-icon_mobil"></div>
+						</div>
+					</div>
+				</div>
+			
+		</div>
+	</div>
+</div>
+
+<script type="module">
+	import { addToCart } from '/static/js/components/common.js'
+	// Добавить в корзину
+	document.querySelector('.service-analysis__card-price')?.addEventListener('click', addToCart)
+</script>
+
+				</div>
+			</div>
+		
+	</div>
+
+	<script type="module">
+		import { switchTabs } from '/static/js/components/common.js'
+
+		// Переключение табов и таб-панелей
+		document.querySelectorAll('.nav-tabs')?.forEach(tabs => tabs.addEventListener('click', switchTabs))
+	</script>
+
+
+
+                </div>
+            </section>
+
+        </div> <!-- container -->
+
+<script type="module">
+			import { switchTabs, switchSelectURL } from '/static/js/components/common.js'
+
+			// Переключение табов и таб-панелей
+			document.querySelectorAll('.nav-tabs')?.forEach(tabs => tabs.addEventListener('click', switchTabs))
+			// Переход на страницу выбранного раздела в select'е
+			document.querySelectorAll('.select-url')?.forEach(select => select.addEventListener('change', switchSelectURL))
+		</script>
+    
+
+
+</main>
+
+
+
+
+  <a
+    href="/orders/check/"
+    class="results-ready-btn"
+    title="Узнать готовность результатов"
+  >
+    <span class="results-ready-btn__text">Готовность результатов</span>
+  </a>
+
+
+
+<footer class="footer">
+	<div class="footer__top">
+		<div class="footer__tel" data-ym-goal="number1">
+			<div>Единый справочный центр</div>
+			<a href="tel:84232242124" class="footer__tel-link">8 (423) 224-21-24</a>
+		</div>
+
+		<hr class="footer__separator separator__mobile"/>
+
+		<div class="footer__mobile-qr-title">Скачивайте мобильное приложение</div>
+
+		<div class="footer__mobile-qr-block">
+			<a
+                class="footer__mobile-qr-body"
+                href="https://apps.apple.com/ru/app/юнилаб/id6575384341"
+                data-ym-goal="ios"
+            >
+				<img class="footer__mobile-qr-code" src="/static/img/app_unilab_apple.908fbc18bc21.png"/>
+				<span>IOS</span>
+			</a>
+			<a
+                class="footer__mobile-qr-body"
+                href="https://play.google.com/store/apps/details?id=com.yusmp.unilab"
+                data-ym-goal="android"
+            >
+				<img class="footer__mobile-qr-code" src="/static/img/app_unilab_android.50c959535211.png"/>
+				<span>ANDROID</span>
+			</a>
+		</div>
+
+		<div class="footer__mobile-links-block">
+			<a
+                class="footer__mobile-link"
+                href="https://apps.apple.com/ru/app/юнилаб/id6575384341"
+                data-ym-goal="ios"
+            >
+				<img src="/static/img/appstore.326a79e7cf41.svg"/>
+			</a>
+			<a
+                class="footer__mobile-link"
+                href="https://play.google.com/store/apps/details?id=com.yusmp.unilab"
+                data-ym-goal="android"
+            >
+				<img src="/static/img/google-play.32b095108707.svg"/>
+			</a>
+		</div>
+
+		<div class="footer__button-container">
+			<button
+				class="footer__subscribe-button uni-button btn"
+				hx-get="/subscribe/"
+				hx-headers='{"X-Requested-With": "XMLHttpRequest"}'
+				hx-trigger="click"
+				hx-target="#footerSubscribe"
+				hx-indicator="#global-spinner"
+                data-ym-goal="rassilka"
+			>
+				Подписаться на новости и акции
+			</button>
+		</div>
+
+		<ul class="footer__social-list">
+			<li class="footer__social-item" data-ym-goal="vk">
+				<a href="https://vk.com/club114805499">
+					<img src="/static/img/vk.e6cbfa0a0a6f.svg" width="44" height="44" alt="vk icon">
+				</a>
+			</li>
+			
+			
+			
+			
+			
+<!--			<li class="footer__social-item" data-ym-goal="youtube">-->
+<!--				<a href="https://www.youtube.com/channel/UC41u9IJaQSq_48ZIKkFYY0A/">-->
+<!--					<img src="/static/img/youtube.c23f17e77c10.svg" width="44" height="44" alt="youtube icon">-->
+<!--				</a>-->
+<!--			</li>-->
+      <li class="footer__social-item" data-ym-goal="max">
+				<a href="https://max.ru/unilaboratori">
+					<img src="/static/img/max.bda3d36326ed.svg" width="44" height="44" alt="max icon">
+				</a>
+			</li>
+			<li class="footer__social-item" data-ym-goal="ok">
+				<a href="https://ok.ru/group/52879817244884">
+					<img src="/static/img/ok.d35ce3a73694.svg" width="44" height="44" alt="ok icon">
+				</a>
+			</li>
+			<li class="footer__social-item" data-ym-goal="telegram">
+				<a href="https://t.me/unilaboratori">
+					<img src="/static/img/telegram.c383879df8dc.svg" width="44" height="44" alt="telegram icon">
+				</a>
+			</li>
+			<li class="footer__social-item" data-ym-goal="hh">
+				<a href="https://vladivostok.hh.ru/employer/1414554">
+					<img src="/static/img/hh.bf9c124eacaf.svg" width="44" height="44" alt="hh icon">
+				</a>
+			</li>
+			<li class="footer__social-item" data-ym-goal="dzen">
+				<a href="https://zen.yandex.ru/unilaboratori">
+					<img src="/static/img/dzen.a24831d8874f.svg" width="44" height="44" alt="hh icon">
+				</a>
+			</li>
+
+		</ul>
+	</div>
+
+	<hr class="footer__separator"/>
+
+	<p class="footer__info">
+		ЮНИЛАБ - сеть клинико-диагностических лабораторий, расположенных на территории ДВФО и Восточной Сибири. Уже
+		более двадцати лет предоставляет качественный медицинский сервис. Сочетание современного оборудования и
+		высококвалифицированного персонала гарантирует нашим партнерам и клиентам максимальную достоверность
+		результатов.
+	</p>
+	<!-- Footer: Меню -->
+	
+		<div class="footer__nav-item">
+			<p class="footer__nav-title">УСЛУГИ И ЦЕНЫ</p>
+			<ul class="footer__nav-list">
+				
+					
+						<li class="footer__nav-list-item">
+							<a href="/services/analyses/vladivostok/">Анализы</a></li>
+					
+				
+					
+						<li class="footer__nav-list-item">
+							<a href="/services/complex/vladivostok/">Комплексы</a></li>
+					
+				
+					
+						<li class="footer__nav-list-item">
+							<a href="/services/uzi/vladivostok/">УЗИ</a></li>
+					
+				
+					
+						<li class="footer__nav-list-item">
+							<a href="/services/ekg/vladivostok/">ЭКГ/Холтер/СМАД</a></li>
+					
+				
+					
+						<li class="footer__nav-list-item">
+							<a href="/services/priyomy-vrachej/vladivostok/">Приемы врачей</a></li>
+					
+				
+					
+						<li class="footer__nav-list-item">
+							<a href="/services/prochie-uslugi/vladivostok/">Прочие услуги</a></li>
+					
+				
+					
+						<li class="footer__nav-list-item">
+							<a href="/online_record/">Онлайн-запись</a></li>
+					
+				
+			</ul>
+		</div>
+	
+		<div class="footer__nav-ite

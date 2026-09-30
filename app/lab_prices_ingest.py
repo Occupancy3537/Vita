@@ -51,14 +51,15 @@ def parse_rows(payload: list[dict]) -> list[dict]:
     """Валидирует и нормализует записи скрейпа; битая запись — ValueError, не
     тихий пропуск (молчаливая потеря цены хуже упавшего импорта).
 
-    external_code нормализуется до части до « / »: Юнилаб пишет
-    «101 / A09.05.023» (код + номер номенклатуры) у синглов и голый код у
-    комплексов; для ключа маппинга/уникальности нужен короткий стабильный код,
-    полный номер живёт в url позиции."""
+    external_code хранится КАК ЕСТЬ (30.09): в реальном прайсе «/» — часть
+    настоящих кодов Инвитро («110ГП/БЗ», «105/6» — разные позиции с разными
+    ценами), а у Юнилаба в новом сборе слэшей нет вовсе (сборщик берёт
+    короткий код «849», номенклатура не попадает в код). Прежний срез хвоста
+    после «/» склеивал 34 ключа Инвитро с разной ценой — убран."""
     rows = []
     for i, it in enumerate(payload):
         lab = str(it.get("lab_code") or "").strip()
-        ext = str(it.get("external_code") or "").strip().split("/")[0].strip()
+        ext = str(it.get("external_code") or "").strip()
         name = str(it.get("name") or "").strip()
         price = it.get("price")
         scraped = str(it.get("scraped_at") or "").strip()
@@ -116,7 +117,42 @@ def upsert(cur, rows: list[dict]) -> int:
     return len(rows)
 
 
-def ingest_paths(paths: list[str]) -> int:
+def prune_stale(cur, rows: list[dict]) -> dict[str, int]:
+    """Удалить из card.lab_item строки лаб, ПРИСУТСТВУЮЩИХ в файле, но
+    отсутствующих в нём (устаревшие/снятые позиции; фейковые старые уходят так
+    же). Защита: если по какой-то лабе удаляется >60% её строк — ошибка (что-то
+    не так с файлом), ничего не удаляем. Идемпотентно: второй запуск удаляет 0.
+    Возвращает {lab_key: удалено}. Вызывать только после успешного upsert тех
+    же rows и только для файла, прошедшего ворота качества."""
+    from psycopg import sql
+
+    from app.db import schema
+
+    labs_in_file = {r["lab_key"] for r in rows}
+    keys_in_file = {(r["lab_key"], r["external_code"]) for r in rows}
+    cur.execute(sql.SQL("SELECT lab_key, external_code FROM {t} WHERE lab_key = ANY(%s)").format(
+        t=sql.Identifier(schema(), "lab_item")), (sorted(labs_in_file),))
+    present = cur.fetchall()
+    stale = [(lab, ext) for lab, ext in present if (lab, ext) not in keys_in_file]
+    by_lab: dict[str, list[str]] = {}
+    for lab, ext in stale:
+        by_lab.setdefault(lab, []).append(ext)
+    total_by_lab = {lab: sum(1 for l, _ in present if l == lab) for lab in labs_in_file}
+    for lab, exts in sorted(by_lab.items()):
+        ratio = len(exts) / max(total_by_lab.get(lab, 1), 1)
+        if ratio > 0.6:
+            raise RuntimeError(
+                f"prune: у лабы {lab!r} удалялось бы {len(exts)} из {total_by_lab.get(lab)} "
+                f"строк ({ratio:.0%}) — файл не похож на полный прайс, отмена")
+    removed: dict[str, int] = {lab: 0 for lab in labs_in_file}
+    for lab, exts in sorted(by_lab.items()):
+        cur.execute(sql.SQL("DELETE FROM {t} WHERE lab_key = %s AND external_code = ANY(%s)").format(
+            t=sql.Identifier(schema(), "lab_item")), (lab, exts))
+        removed[lab] = cur.rowcount
+    return removed
+
+
+def ingest_paths(paths: list[str], prune: bool = False) -> int:
     from app.db import get_conn
 
     total = 0
@@ -126,6 +162,9 @@ def ingest_paths(paths: list[str]) -> int:
         rows = parse_rows(payload)
         with get_conn() as conn, conn.cursor() as cur:
             total += upsert(cur, rows)
+            if prune:
+                removed = prune_stale(cur, rows)
+                print(f"prune {path}: удалено " + (", ".join(f"{k}={v}" for k, v in sorted(removed.items())) or "0"))
     return total
 
 
@@ -178,6 +217,20 @@ def _report(cur) -> None:
         print(f"  [{lab}] {ext} «{name}» → {hint}")
     for lab, n in sorted(by_lab.items()):
         print(f"итог [{lab}]: незмапленных single — {n}")
+    # Ключи маппинга, для которых в текущем прайсе нет позиции: тихая потеря
+    # покрытия (лаба сменила код/название или убрала позицию) — так же, как
+    # «незмапленные», это очередь ручной приёмки, автоматически ничего не правим.
+    cur.execute(sql.SQL("SELECT lab_key, external_code FROM {t}").format(
+        t=sql.Identifier(schema(), "lab_item")))
+    present = {(lab, ext) for lab, ext in cur.fetchall()}
+    orphans = sorted(set(COVERS) - present)
+    if orphans:
+        by: dict[str, list[str]] = {}
+        for lab, ext in orphans:
+            by.setdefault(lab, []).append(ext)
+        print(f"ключи маппинга без позиции в прайсе: {len(orphans)}")
+        for lab, exts in sorted(by.items()):
+            print(f"  [{lab}] {', '.join(exts[:20])}{' …' if len(exts) > 20 else ''}")
 
 
 def main(argv: list[str]) -> int:
@@ -185,10 +238,13 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     if argv[0] == "seed":
-        if len(argv) < 2:
-            print("usage: python -m app.lab_prices_ingest seed <file.json> [...]")
+        rest = argv[1:]
+        prune = "--prune" in rest
+        rest = [a for a in rest if a != "--prune"]
+        if not rest:
+            print("usage: python -m app.lab_prices_ingest seed [--prune] <file.json> [...]")
             return 2
-        n = ingest_paths(argv[1:])
+        n = ingest_paths(rest, prune=prune)
         print(f"импортировано позиций: {n}")
         return 0
     if argv[0] == "report":
