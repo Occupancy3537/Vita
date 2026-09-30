@@ -1391,3 +1391,10 @@ def test_shape_doctor_next_draw_carries_groups_and_note():
     nd = vita.shape_doctor([], [], [], plan)["next_draw"]
     assert nd["groups"][0]["name"] == "Плановый мониторинг" and nd["markers"][0]["iv"] == "6 мес"
     assert "15 декабря" in nd["next_note"]
+
+
+def test_breakdown_limit_detail_has_no_trailing_zero():
+    today = {"decision": {"reasons": []}, "budget": [
+        {"kind": "limit", "status": "ok", "label": "Кофеин", "consumed": 80.0, "cap": 400.0, "unit": "мг"}]}
+    rows = vita.build_index_breakdown(today, {"metrics": []})
+    assert rows[0]["detail"] == "80/400 мг"

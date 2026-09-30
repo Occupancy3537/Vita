@@ -1159,8 +1159,7 @@ svg{display:block}
 .hmR i{height:22px;border-radius:6px;background:var(--line-soft)}
 .hmR i.c1{background:color-mix(in srgb,var(--green) 22%,transparent)}.hmR i.c2{background:color-mix(in srgb,var(--green) 50%,transparent)}.hmR i.c3{background:var(--green)}
 .hmR i.lo{background:color-mix(in srgb,var(--amber) 22%,transparent)}
-.hmR i.bad{background:color-mix(in srgb,var(--warm) 62%,transparent)}
-.hmR em.bad{color:var(--warm-ink)}
+.hmR i.bad{background:color-mix(in srgb,var(--amber) 40%,transparent)}
 .hmR em{font-style:normal;text-align:right;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--amber)}
 .hmA{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s var(--ease)}
 .hmA>div{overflow:hidden}
@@ -1776,8 +1775,8 @@ const B={
     const gcol=`grid-template-columns:92px repeat(${nd},1fr) 44px`;
     const micro=hm.length?`<div class="hm"><div class="hmH" style="${gcol}"><span></span>${dl.map(x=>`<span>${x}</span>`).join('')}<span>среднее</span></div>`
       +hm.map(m=>{const why=[(m.top_sources||[]).length?`За неделю больше всего дали: <b>${m.top_sources.join(', ')}</b>.`:'В записях еды за неделю его почти не было.',m.note?`Справка: ${m.note}`:''].filter(Boolean).join(' ');
-        return `<div class="hmW"><button class="hmR" style="${gcol}" data-a="micro"><span>${m.label}</span>${(m.days_pct||[]).map(v=>`<i class="${cc(v)}" title="${v==null?'нет данных':Math.round(v)+'%'}"></i>`).join('')}<em${m.avg_pct<45?' class="bad"':''}>${Math.round(m.avg_pct)}%</em></button><div class="hmA"><div><p>${why}</p></div></div></div>`}).join('')
-      +((T.normal||[]).length?`<div class="hmOk">${svg('check')}В норме за неделю: ${T.normal.slice(0,8).join(', ')}</div>`:'')+`<p class="gvNote" style="margin:8px 0 0">Цвет клетки — сколько нормы набрано за день: зелёный — почти норма, жёлтый — 45–60%, красный — меньше 45%. Пустая клетка — нет данных.</p></div>`
+        return `<div class="hmW"><button class="hmR" style="${gcol}" data-a="micro"><span>${m.label}</span>${(m.days_pct||[]).map(v=>`<i class="${cc(v)}" title="${v==null?'нет данных':Math.round(v)+'%'}"></i>`).join('')}<em>${Math.round(m.avg_pct)}%</em></button><div class="hmA"><div><p>${why}</p></div></div></div>`}).join('')
+      +((T.normal||[]).length?`<div class="hmOk">${svg('check')}В норме за неделю: ${T.normal.slice(0,8).join(', ')}</div>`:'')+`<p class="gvNote" style="margin:8px 0 0">Цвет клетки — сколько нормы набрано за день: зелёный — почти норма, жёлтый — недобор (чем насыщеннее, тем сильнее). Пустая клетка — нет данных.</p></div>`
       :`<p class="quietRow">${svg('check')}За неделю микронутриенты в норме${(T.normal||[]).length?': '+T.normal.slice(0,6).join(', '):''}.</p>`;
     return {html:`${top('Питание сегодня')}
     <div class="sectionHead rise" style="--i:1;margin-top:18px"><span class="lbl">За день</span><button class="linkline" data-a="foodyest">Вчера${svg('right')}</button></div>
