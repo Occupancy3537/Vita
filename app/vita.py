@@ -249,6 +249,13 @@ def compute_ahead(today: dict, health: dict, state: dict, steps: dict, protein: 
 _JUDGMENT_MARK = {"good": "y", "neutral": "y", "warn": "w", "bad": "n"}
 
 
+def _plain_num(v) -> str:
+    """80.0 -> «80», 6.2 -> «6.2» (в строках разбора не нужны лишние «.0»)."""
+    if isinstance(v, float):
+        return f"{v:.1f}".rstrip("0").rstrip(".")
+    return str(v)
+
+
 def build_index_breakdown(today: dict, health: dict) -> list[dict]:
     """Vita v2, этап 2 (2026-09-28, живая жалоба Влада: «нажатие на питание,
     заряд, сон, движение открывает один экран») — каждая строка теперь несёт
@@ -266,12 +273,12 @@ def build_index_breakdown(today: dict, health: dict) -> list[dict]:
         m = metric_by_key.get(key)
         if m and m.get("value") is not None:
             rows.append({"mark": _JUDGMENT_MARK.get(m["judgment"], "y"), "label": label,
-                         "detail": f"{m['value']} {m.get('unit') or ''}".strip(), "segment": segment})
+                         "detail": f"{_plain_num(m['value'])} {m.get('unit') or ''}".strip(), "segment": segment})
     for b in budget:
         if b.get("kind") != "limit":
             continue
         rows.append({"mark": _JUDGMENT_MARK[_budget_judgment(b)], "label": b["label"],
-                     "detail": f"{b['consumed']}/{b['cap']} {b['unit']}", "segment": "food"})
+                     "detail": f"{_plain_num(b['consumed'])}/{_plain_num(b['cap'])} {b['unit']}", "segment": "food"})
     return rows
 
 
@@ -466,6 +473,7 @@ def shape_food_topic(weekly: dict, yesterday: dict, publications: list[dict]) ->
     heatmap = [
         {"label": h["label"], "avg_pct": h["avgPct"], "level": h["level"], "unit": h["unit"],
          "days_pct": h["values"], "note": h.get("note") or None,
+         "upper_pct": h.get("upperBoundPct"),  # верхний допустимый предел в % нормы (только для пищи) — выше него клетка красная
          "top_sources": _week_top_sources(sources.get(h["label"]))}
         for h in (weekly.get("heatmap") or [])
     ]
