@@ -278,7 +278,7 @@ svg{display:block}
 .idxRow:first-child{border-top:0}
 .idxRow i{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center}
 .idxRow i svg{width:12px;height:12px;stroke-width:2.4;color:#fff}
-.idxRow i.y{background:var(--green)}.idxRow i.w{background:var(--amber)}.idxRow i.n{background:var(--warm)}.idxRow i.o{box-shadow:inset 0 0 0 1.4px var(--faint)}
+.idxRow i.y{background:color-mix(in srgb,var(--green) 16%,transparent)}.idxRow i.y svg{color:var(--green)}.idxRow i.w{background:var(--amber)}.idxRow i.n{background:var(--warm)}.idxRow i.o{box-shadow:inset 0 0 0 1.4px var(--faint)}
 .idxRow span{flex:1;font-size:14px}
 .idxRow span small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
 .idxRow em{font-style:normal;font-size:13px;font-variant-numeric:tabular-nums;color:var(--muted)}
@@ -503,7 +503,7 @@ svg{display:block}
 .togo{margin-top:6px;font-size:13px;color:var(--muted)}
 .togo b{font-weight:600;color:var(--accent-ink)}
 .chart{margin-top:14px;width:100%;height:auto;overflow:visible}
-.xl{font-size:11px;fill:var(--faint);font-family:var(--font);letter-spacing:.04em}
+.xl{font-size:11px;fill:var(--muted);font-family:var(--font);letter-spacing:.04em}
 .draw{stroke-dasharray:1;stroke-dashoffset:1}
 .go .draw{stroke-dashoffset:0;transition:stroke-dashoffset 1.6s var(--ease) .1s}
 .area,.fadein{opacity:0}
@@ -1097,6 +1097,7 @@ svg{display:block}
 .bbL b{font-weight:600;color:var(--amber)}
 .fsec{margin-top:26px}
 .fsec>.lbl{display:block;margin:0 2px 10px;font-size:17px;color:var(--ink)}
+.fsec>.lbl small{font-size:13px;color:var(--muted);margin-left:8px}
 .fsec .src{padding:9px 2px}
 .quietRow{display:flex;align-items:center;gap:8px;margin:14px 4px 0;font-size:13px;color:var(--muted)}
 .quietRow svg{width:14px;height:14px;color:var(--green)}
@@ -1122,9 +1123,10 @@ svg{display:block}
 .nd-q2 span{flex:1}
 .nd-q2 button{flex:none;font-size:13px;font-weight:600;color:var(--accent-ink);min-height:36px}
 .nextDraw .btnP{margin-top:16px}
-.drawW div{display:flex;gap:10px;align-items:baseline;padding:10px 2px;border-top:1px solid var(--line-soft);font-size:14px}
+.drawW div{display:grid;grid-template-columns:1fr auto;column-gap:10px;row-gap:2px;align-items:baseline;padding:11px 2px;border-top:1px solid var(--line-soft);font-size:14px}
 .drawW div:first-child{border-top:0}
-.drawW b{flex:none;font-weight:600}.drawW span{flex:1;color:var(--ink2)}.drawW em{font-style:normal;color:var(--muted);font-variant-numeric:tabular-nums}
+.actSt{display:block;margin-top:5px;font-style:normal;font-size:12px;font-weight:500;color:var(--muted)}.actSt.ok{color:var(--accent-ink)}
+.drawW b{grid-column:1;font-weight:600}.drawW span{grid-column:1/-1;grid-row:2;font-size:13px;line-height:1.4;color:var(--muted)}.drawW em{grid-column:2;grid-row:1;font-style:normal;color:var(--muted);font-variant-numeric:tabular-nums}
 /* Я: биовозраст как у Longevity — паспорт и био рядом, дельта; «Что дало» — образ жизни и кровь; системы органов */
 .ageCard{margin-top:18px;padding:16px;border-radius:24px;background:linear-gradient(135deg,#2C8981 0%,#4F9E6E 100%);color:#fff}
 :root[data-theme="dark"] .ageCard{background:linear-gradient(135deg,#1F5F5A 0%,#2F6B4A 100%)}
@@ -1341,6 +1343,11 @@ const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const haptic=(ms=6)=>{try{navigator.vibrate&&navigator.vibrate(ms)}catch(e){}};
 const eo4=t=>1-Math.pow(1-t,4);
 function tween(dur,fn,ease=eo4){return new Promise(res=>{if(reduce){fn(1);res();return}const t0=performance.now();const f=n=>{const t=Math.min(1,(n-t0)/dur);fn(ease(t));t<1?requestAnimationFrame(f):res()};requestAnimationFrame(f)})}
+/* русский вид чисел в строках с бэкенда: запятая, минус, степени, единицы нагрузки */
+const SUP={'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
+const rn=x=>String(x==null?'':x).replace(/(^|[\s(])-(?=\d)/g,'$1−').replace(/(?<![\d.])(\d+)\.(\d+)(?!\.\d)/g,'$1,$2').replace(/10\^(\d+)/g,(m,d)=>'10'+[...d].map(c=>SUP[c]).join('')).replace(/\bLOW\b/g,'ниже обычного').replace(/\bHIGH\b/g,'выше обычного').replace(/\b(OPTIMAL|NORMAL)\b/g,'в норме');
+const rn0=x=>rn(x).replace(/(\d+),0(?!\d)/g,'$1');
+const IDX_LABEL={'ACWR (Garmin)':'Нагрузка за неделю'};
 const fmt=(v,dec=0)=>dec?v.toFixed(dec).replace('.',','):Math.round(v).toLocaleString('ru-RU');
 function countUp(el,to,{dur=1400,dec=0,from=0}={}){tween(dur,p=>{el.textContent=fmt(from+(to-from)*p,dec)})}
 const replay=el=>{if(!el)return;el.classList.remove('go');void el.getBoundingClientRect();el.classList.add('go')};
@@ -1351,14 +1358,24 @@ const ACCENT='var(--accent)';
 let gid=0;
 function smooth(p){let d=`M${p[0][0].toFixed(1)},${p[0][1].toFixed(1)}`;for(let i=0;i<p.length-1;i++){const a=p[i-1]||p[i],b=p[i],c=p[i+1],e=p[i+2]||c,t=1/6;d+=` C${(b[0]+(c[0]-a[0])*t).toFixed(1)},${(b[1]+(c[1]-a[1])*t).toFixed(1)} ${(c[0]-(e[0]-b[0])*t).toFixed(1)},${(c[1]-(e[1]-b[1])*t).toFixed(1)} ${c[0].toFixed(1)},${c[1].toFixed(1)}`}return d}
 const pulseDot=(x,y,c)=>`<g class="pdot"><circle cx="${x}" cy="${y}" r="4" fill="${c}" opacity=".4"><animate attributeName="r" values="4;13" dur="2.6s" repeatCount="indefinite"/><animate attributeName="opacity" values=".45;0" dur="2.6s" repeatCount="indefinite"/></circle></g>`;
-function lineChart({data,w=320,h=140,color=ACCENT,min,max,base=null,labels=null,marks=[],padT=14,padB=labels?20:6}){
+const WDS=['вс','пн','вт','ср','чт','пт','сб'];
+const chartDates=h=>{const n=h.length;return n<3?[]:[0,Math.floor(n/2),n-1].map(i=>[i,shortDate(h[i].date)])};
+/* длинный пункт консилиума → жирная суть + серое пояснение */
+function actSplit(t){t=(t||'').trim();const seps=[': ',' — ','; ',' (','. '];let pos=-1,len=0;
+  for(const sp of seps){const i=t.indexOf(sp);if(i>=14&&i<=110&&(pos<0||i<pos)){pos=i;len=sp.length}}
+  if(pos<0){if(t.length<=110)return[t,''];const cut=t.slice(0,100).replace(/\s+\S*$/,'');return[cut+'…',t.slice(cut.length).trim()]}
+  const lead=t.slice(0,pos).trim(),rest=t.slice(pos+len).trim();return[lead.charAt(0).toUpperCase()+lead.slice(1),rest.charAt(0).toUpperCase()+rest.slice(1)]}
+function lineChart({data,w=320,h=140,color=ACCENT,min,max,base=null,labels=null,marks=[],xt=null,lastText=null,baseText=null,straight=false,padT=14,padB=(labels||xt)?20:6}){
   if(!data||data.length<2)return '<p class="empty">Пока мало данных для графика.</p>';
   const id='g'+(gid++);min=min??Math.min(...data)-.5;max=max??Math.max(...data)+.5;
   const ih=h-padT-padB,x=i=>6+i*(w-12)/(data.length-1),y=v=>padT+ih-(v-min)/(max-min)*ih;
-  const pts=data.map((v,i)=>[x(i),y(v)]),d=smooth(pts),L=pts[pts.length-1];
+  const pts=data.map((v,i)=>[x(i),y(v)]),d=straight?'M'+pts.map(q=>q.join(',')).join(' L'):smooth(pts),L=pts[pts.length-1];
   const bl=base!=null?`<line class="fadein" x1="0" x2="${w}" y1="${y(base)}" y2="${y(base)}" stroke="${color}" stroke-width="1" stroke-dasharray="2 5" stroke-linecap="round" opacity=".5"/>`:'';
   const mk=marks.map(i=>`<line class="fadein" x1="${x(i)}" x2="${x(i)}" y1="${padT}" y2="${h-padB}" stroke="${color}" stroke-width="1" stroke-dasharray="1.5 4" opacity=".55"/><circle class="pdot" cx="${x(i)}" cy="${y(data[i])}" r="3.4" fill="${color}" stroke="var(--bg)" stroke-width="1.5"/>`).join('');
-  const lab=labels?labels.map(([t,a,xx])=>`<text class="xl" x="${xx}" y="${h-4}" text-anchor="${a}">${t}</text>`).join(''):'';
+  const lab=(labels?labels.map(([t,a,xx])=>`<text class="xl" x="${xx}" y="${h-4}" text-anchor="${a}">${t}</text>`).join(''):'')
+    +(xt?xt.map(([i,t])=>`<text class="xl" x="${x(i)}" y="${h-4}" text-anchor="${i===0?'start':i===data.length-1?'end':'middle'}">${t}</text>`).join(''):'')
+    +(baseText&&base!=null?`<text class="xl" x="8" y="${y(base)+13}" text-anchor="start">${baseText}</text>`:'')
+    +(lastText?`<text class="xl" x="${Math.min(L[0],w-4)}" y="${Math.max(L[1]-9,10)}" text-anchor="end" style="fill:var(--ink);font-weight:600">${lastText}</text>`:'');
   return `<svg class="chart" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".26"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
   ${bl}<path class="area" d="${d} L${L[0]},${h-padB} L${pts[0][0]},${h-padB} Z" fill="url(#${id})"/>
   <path class="draw" pathLength="1" d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>${mk}
@@ -1485,7 +1502,7 @@ function renderDoctor(){if(!DOC)return;const c=DOC.consilium,n=(DOC.notes||[])[0
   $$('.rise',$('#s-plan')).forEach(e=>e.classList.add('in'));
 }
 const monthYear=d=>new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{month:'short',year:'numeric'}).replace(' г.','');
-let ME_ALL=false,ME_SYS=false;
+let ME_ALL=false,MP_ALL=false;
 function renderMe(){if(!ME)return;const pa=ME.phenoage||{},h=ME.history||[],dr=ME.drivers||[],sy=ME.systems||[];
   const f1=v=>v==null?'—':fmt(v,1);
   let html=`<div class="ageCard rise" style="--i:1"><div class="ageH"><span>Биовозраст · PhenoAge</span>${pa.delta!=null?`<em>${pa.delta<0?'−':'+'}${fmt(Math.abs(pa.delta),1)} ${Math.abs(pa.delta)%1?'года':plural(Math.abs(pa.delta),'год','года','лет')}</em>`:''}</div>
@@ -1697,7 +1714,7 @@ const B={
     return {html:`${top(TODAY.state.closed?'Итог дня':'Прогноз дня')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">${TODAY.state.closed?'Как закрылся день':'Чем закончится день'}</div><div class="big">${score!=null?score:'—'}<small>${ahead!=null&&ahead>score?`→ можно ${ahead} · оценочно`:'из 100'}</small></div>
       <p class="ov-sub" style="color:var(--accent-ink)">${TODAY.state.closed?'Сутки закрыты — цифра больше не меняется.':'Если ничего не менять — так и закроется.'} ${ahead!=null&&ahead>score?'Прогноз «можно» — оценочный, ещё не откалиброван на достаточной истории.':''}</p></div>
-    <div class="rise" style="--i:2;margin-top:18px">${rows.length?rows.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${esc(r.label)}${r.detail?`<small>${esc(r.detail)}</small>`:''}</span></div>`).join(''):'<p class="empty">Пока недостаточно данных за сегодня.</p>'}</div>`}},
+    <div class="rise" style="--i:2;margin-top:18px">${rows.length?rows.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${esc(IDX_LABEL[r.label]||r.label)}${r.detail?`<small>${esc(rn0(r.detail))}</small>`:''}</span></div>`).join(''):'<p class="empty">Пока недостаточно данных за сегодня.</p>'}</div>`}},
   streaks(){const streaks=TODAY.streaks||[],tr=TODAY.travel||{active:false},alive=streaks.filter(s=>s.status!=='paused'||(tr.active&&s.key!=='sleep_zone')).length,fz=TODAY.freezes_available;
     const tbtn=`<button class="tripBtn press${tr.active?' on':''}" data-a="tripbtn" aria-pressed="${tr.active}" aria-label="Режим поездки">${svg('car')}</button>`;
     const tbox=tr.active?`<div class="tripBox on rise" style="--i:1"><b>В поездке до ${tripUntil(tr.until)}</b><small>Серии питания на паузе и не сгорают. Сон и шаги считаются как обычно.</small><div class="tripAct"><button data-a="tripend">Завершить поездку</button></div></div>`
@@ -1745,14 +1762,14 @@ const B={
        данные». Ниже — реальные шторки макета (recovery()/topic('sleep')/
        move()/nutr()) на живых данных /vita/topic/{segment}, не общий список. */
     const own=(TODAY.ring.breakdown||[]).filter(r=>r.segment===k);
-    const idxRows=rs=>rs.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${esc(r.label)}${r.detail?`<small>${esc(r.detail)}</small>`:''}</span></div>`).join('');
+    const idxRows=rs=>rs.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${esc(IDX_LABEL[r.label]||r.label)}${r.detail?`<small>${esc(rn0(r.detail))}</small>`:''}</span></div>`).join('');
     if(k==='recovery'){
       const gate=TODAY.gate,statusWord=T.acwr_status==='HIGH'?'Нагрузка выше обычного':T.acwr_status==='LOW'?'Нагрузка ниже обычного':'Нагрузка в норме';
       return {html:`${top('Заряд')}
       <div class="ov-hero rise" style="--i:1"><div class="lbl">Нагрузка сегодня</div><p style="font-family:var(--serif);font-size:30px;font-weight:300;line-height:1.15;margin-top:8px">${statusWord}</p>
       ${gate.blocked?`<p class="ov-sub" style="color:var(--warm-ink)">${esc(gate.label)} — без бега, прыжков и ударных.</p>`:`<p class="ov-sub" style="color:var(--accent-ink)">Ограничений по здоровью нет.</p>`}</div>
-      <div class="rise" style="--i:2;margin-top:18px">${idxRows(own)}${T.acwr!=null?`<div class="reason"><span>Нагрузка (ACWR)</span><span>${T.acwr}${T.acwr_status?' · '+T.acwr_status:''}</span></div>`:''}${T.resting_hr!=null?`<div class="reason"><span>Пульс покоя</span><span>${T.resting_hr}</span></div>`:''}</div>
-      <div class="ov-chart rise" style="--i:3" id="ovChart"><div class="lbl" style="margin-bottom:4px">ВСР за 30 ночей${T.hrv_avg7!=null?` · 7д ${T.hrv_avg7} · 30д ${T.hrv_avg30}`:''}</div>${lineChart({data:T.hrv_history.map(x=>x.value),w:320,h:130,base:T.hrv_avg30})}</div>
+      <div class="rise" style="--i:2;margin-top:18px">${idxRows(own)}${T.acwr!=null?`<div class="reason"><span>Нагрузка за неделю</span><span>${rn(T.acwr)}${T.acwr_status?' · '+rn(T.acwr_status):''}</span></div>`:''}${T.resting_hr!=null?`<div class="reason"><span>Пульс покоя</span><span>${T.resting_hr}</span></div>`:''}</div>
+      <div class="ov-chart rise" style="--i:3" id="ovChart"><div class="lbl" style="margin-bottom:4px">ВСР за 30 ночей${T.hrv_avg7!=null?` · 7 дн. ${rn(T.hrv_avg7)} · 30 дн. ${rn(T.hrv_avg30)}`:''}</div>${lineChart({data:T.hrv_history.map(x=>x.value),w:320,h:140,base:T.hrv_avg30,baseText:T.hrv_avg30!=null?'норма 30 дн. '+rn0(T.hrv_avg30):null,lastText:T.hrv_last!=null?rn0(T.hrv_last)+' мс':null,xt:chartDates(T.hrv_history)})}</div>
       <p class="ov-coach rise" style="--i:4">${esc(T.coach)}</p>${pubList(T.publications,'Свежее по теме',5)}`,
       after(){replay($('#ovChart'))}}
     }
@@ -1769,7 +1786,7 @@ const B={
       return {html:`${top('Сон')}
       <div class="ov-hero rise" style="--i:1"><div class="lbl">Прошлая ночь</div><div class="big">${hrs(T.last_night_min)}</div>
         <p class="ov-sub" style="color:var(--accent-ink)">${T.avg14_min==null?'Пока мало ночей для среднего':T.delta_min>=0?`+${T.delta_min} мин к среднему за 14 ночей`:`${T.delta_min} мин к среднему за 14 ночей`}${T.sleep_score!=null?` · оценка сна ${Math.round(T.sleep_score)}`:''}</p></div>
-      <div class="ov-chart rise" style="--i:2" id="ovChart"><div class="lbl" style="margin-bottom:4px">Часы сна · 14 ночей</div>${lineChart({data:T.history.map(x=>x.hours),w:320,h:130,base:T.avg14_min!=null?T.avg14_min/60:null})}</div>
+      <div class="ov-chart rise" style="--i:2" id="ovChart"><div class="lbl" style="margin-bottom:4px">Часы сна · 14 ночей</div>${lineChart({data:T.history.map(x=>x.hours),w:320,h:140,base:T.avg14_min!=null?T.avg14_min/60:null,baseText:T.avg14_min!=null?'среднее '+hrs(T.avg14_min):null,lastText:hrs(Math.round(T.history[T.history.length-1].hours*60)),xt:chartDates(T.history)})}</div>
       <div class="stats g4 rise" style="--i:3">${[['Лёгкий',hrs(T.light_min)],['Глубокий',hrs(T.deep_min)],['Быстрый (РЕМ)',hrs(T.rem_min)],['Бодрствование',T.awake_min!=null?T.awake_min+' мин':'—']].map(s=>`<div class="stat"><div class="lbl">${s[0]}</div><div class="v">${s[1]}</div></div>`).join('')}</div>
       <p class="ov-coach rise" style="--i:4">${esc(T.coach)}</p>${pubList(T.publications,'Свежее по теме',5)}`,
       after(){replay($('#ovChart'))}}
@@ -1783,8 +1800,8 @@ const B={
       const workouts=(T.workouts||[]).map(w=>`<div class="reason"><span>${w.type}</span><span>${w.minutes} мин</span></div>`).join('');
       return {html:`${top('Движение')}
       <div class="hdr rise" style="--i:1;margin-top:14px"><span>Шаги сегодня</span><span class="status">${st.now_steps!=null?`${st.now_steps} из ${st.target}${st.status_word?' · '+st.status_word:''}`:'нет данных'}</span></div>
-      <div class="ov-chart rise" style="--i:2" id="ovChart"><div class="lbl" style="margin-bottom:4px">Шаги по дням · неделя</div>${lineChart({data:T.history_daily.map(x=>x.steps),w:320,h:130,min:0})}</div>
-      ${T.acwr!=null?`<div class="rise" style="--i:3;margin-top:14px"><div class="reason"><span>Нагрузка (ACWR)</span><span>${T.acwr}${T.acwr_status?' · '+T.acwr_status:''}</span></div></div>`:''}
+      <div class="ov-chart rise" style="--i:2" id="ovChart"><div class="lbl" style="margin-bottom:4px">Шаги по дням · неделя</div>${lineChart({data:T.history_daily.map(x=>x.steps),w:320,h:140,min:0,straight:true,lastText:fmt(T.history_daily[T.history_daily.length-1].steps),xt:T.history_daily.map((x,i)=>[i,WDS[new Date(x.date+'T12:00:00').getDay()]])})}</div>
+      ${T.acwr!=null?`<div class="rise" style="--i:3;margin-top:14px"><div class="reason"><span>Нагрузка за неделю</span><span>${rn(T.acwr)}${T.acwr_status?' · '+rn(T.acwr_status):''}</span></div></div>`:''}
       ${workouts?`<div class="rise" style="--i:4;margin-top:14px"><div class="lbl" style="margin-bottom:6px">Тренировки сегодня</div>${workouts}</div>`:''}
       <p class="ov-coach rise" style="--i:5">${esc(T.coach)}</p>${pubList(T.publications,'Свежее по теме',6)}`,
       after(){replay($('#ovChart'))}}
@@ -1853,7 +1870,7 @@ const B={
   consrep(){const c=DOC&&DOC.consilium;if(!c)return {html:top('Консилиум')};
     return {html:`${top('Консилиум')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">${dateFmt(c.date)}${c.roles.length?' · '+c.roles.join(', '):''}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${c.topic||''}</p>${c.question?`<p class="ov-sub" style="color:var(--accent-ink)">${c.question}</p>`:''}</div>
-    ${c.actions.length?`<div class="fsec rise" style="--i:2"><span class="lbl">Что делать</span><div class="rows">${c.actions.map(a=>row(svg(a.accepted?'check':'dots'),a.accepted?'teal':'',a.text,a.accepted?'принято · в Проверках':'не принято')).join('').replace(/<b>/g,'<b class="wrap">')}</div></div>`:''}
+    ${c.actions.length?`<div class="fsec rise" style="--i:2"><span class="lbl">Что делать</span><div class="rows">${c.actions.map(a=>{const[l,r]=actSplit(a.text);return row(a.accepted?svg('check'):'',a.accepted?'teal':'off',esc(l),`${esc(r)}<em class="actSt${a.accepted?' ok':''}">${a.accepted?'принято · в Проверках':'не принято'}</em>`)}).join('').replace(/<b>/g,'<b class="wrap">').replace(/<small>/g,'<small class="wrap">')}</div></div>`:''}
     ${c.skeptic.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Скептик</span>${c.skeptic.map(x=>`<p class="ov-coach" style="margin-top:6px">${x}</p>`).join('')}</div>`:''}
     ${c.emerging.length?`<div class="fsec rise" style="--i:4"><span class="lbl">Перспективное</span><div class="rows">${c.emerging.map(e=>row(svg('spark'),'amber',e.method,[e.maturity,e.grade].filter(Boolean).join(' · '))).join('').replace(/<b>/g,'<b class="wrap">')}</div></div>`:''}
     <p class="disc rise" style="--i:5">Новый консилиум — командой «/консилиум» в Telegram; раз в месяц он собирается сам.</p>`}},
@@ -1882,12 +1899,12 @@ const B={
     ${d.next_note?`<p class="nd-n rise" style="--i:4">${svg('check')}${esc(d.next_note)}</p>`:''}
     <p class="disc rise" style="--i:5">${d.price_rub?'':'Цены по лабораториям пока не заведены — стоимость уточнится в лаборатории. '}Состав собирает оптимизатор: поводы врачей, консилиума, проверок и плановые панели.</p>`}},
   medpass(mp){if(!mp)return {html:top('Медпаспорт')};const labs=mp.recent_labs||[],oor=labs.filter(l=>l.out_of_range);
-    const lrow=l=>row(svg('tube'),l.out_of_range?'warm':'',l.marker,`${l.ref_min!=null&&l.ref_max!=null?'реф. '+l.ref_min+'–'+l.ref_max:l.ref_max!=null?'реф. до '+l.ref_max:l.ref_min!=null?'реф. от '+l.ref_min:''}${l.date?' · '+shortDate(l.date):''}`,`<span class="rV ${l.out_of_range?'warm':''}">${fmt(l.value,Math.abs(l.value)<10&&l.value%1?1:0)}${l.unit?' '+l.unit:''}</span>`);
+    const lrow=l=>row(svg('tube'),l.out_of_range?'warm':'',l.marker,rn(`${l.ref_min!=null&&l.ref_max!=null?'реф. '+l.ref_min+'–'+l.ref_max:l.ref_max!=null?'реф. до '+l.ref_max:l.ref_min!=null?'реф. от '+l.ref_min:''}${l.date?' · '+shortDate(l.date):''}`),`<span class="rV ${l.out_of_range?'warm':''}">${fmt(l.value,Math.abs(l.value)<10&&l.value%1?1:0)}${l.unit?' '+esc(rn(l.unit)):''}</span>`).replace('<b>','<b class="wrap">');
     return {html:`${top('Медпаспорт')}
     <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${oor.length}</b><span>вне референса из ${labs.length}</span></div>${(mp.active_conditions||[]).length?`<p class="fsub am">${mp.active_conditions.map(c=>c.condition).join(' · ')}</p>`:''}</div>
     ${oor.length?`<div class="fsec rise" style="--i:2"><span class="lbl">Вне референса</span><div class="rows">${oor.map(lrow).join('')}</div></div>`:''}
     ${(mp.active_meds||[]).length?`<div class="fsec rise" style="--i:3"><span class="lbl">Принимаю</span><div class="rows">${mp.active_meds.map(m=>row(svg('drop'),'teal',m.name,[m.dose,m.regimen].filter(Boolean).join(' · '))).join('')}</div></div>`:''}
-    <div class="fsec rise" style="--i:4"><span class="lbl">Все маркеры</span><div class="rows">${labs.filter(l=>!l.out_of_range).map(lrow).join('')}</div></div>`}},
+    <div class="fsec rise" style="--i:4"><span class="lbl">В норме<small>${labs.length-oor.length} маркеров</small></span>${MP_ALL?`<div class="rows">${labs.filter(l=>!l.out_of_range).map(lrow).join('')}</div>`:''}<button class="gvMore press" style="margin-top:8px;border-top:0" data-a="mpall">${MP_ALL?'Свернуть':'Показать все в норме'}</button></div>`}},
   yesterday(snap){if(!snap)return {html:`${top('Вчера')}<p class="empty rise" style="--i:1" style="margin-top:20px">Снимок вчерашнего дня ещё не записан.</p>`};
     const r=snap.ring||{};
     return {html:`${top('Вчера')}
@@ -1959,6 +1976,8 @@ function closeSheet(opt={}){if(!ov.classList.contains('open'))return;haptic();
   }
   settle(()=>{if(ov.classList.contains('open'))return;ov.classList.remove('show');morph.style.cssText='';ov.style.cssText='';ovAnims.forEach(x=>x.cancel());ovAnims=[];appEl.classList.remove('morphing');sheetInert(false);if(sheetReturn&&sheetReturn.isConnected){try{sheetReturn.focus({preventScroll:true})}catch(e){}}})}
 async function tripSet(days,msg){try{await postJSON(days?'/vita/travel':'/vita/travel/end',days?{days}:{});TRIP_PICK=false;await loadToday();renderToday();refreshSheet();toast(msg)}catch(e){toast('Не получилось — попробуй ещё раз')}}
+function openSheetRefresh(){if(sheetKey==='medpass')refreshSheetForce()}
+function refreshSheetForce(){ovS.innerHTML=B[sheetKey](MEDP).html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}
 function refreshSheet(){if(!['today','index','draw','streaks'].includes(sheetKey))return;
   ovS.innerHTML=B[sheetKey]().html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}
 let drag=null,dragged=false;
@@ -2082,6 +2101,7 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'verdict':{const v=verdictWord();if(v.k==='none'&&TODAY.state.no_watch)toast('Часы не видели тебя с утра — как только появятся данные, индекс посчитается.');else openSheet(v.k==='week'?'week':'today',null,t);break}
     case'index':openSheet('index',null,t);break;
     case'streaks':TRIP_PICK=false;openSheet('streaks',null,t);break;
+    case'mpall':haptic();MP_ALL=!MP_ALL;openSheetRefresh&&openSheetRefresh();break;
     case'drvall':haptic();ME_ALL=!ME_ALL;renderMe();break;
     case'rxmark':haptic();postJSON('/vita/manual-mark',{date:t.dataset.d,field_key:k,value:true}).then(()=>loadToday()).then(()=>{renderChecksTab&&renderChecksTab()}).catch(()=>toast('Не получилось — попробуй ещё раз'));break;
     case'tripbtn':haptic();if((TODAY.travel||{}).active){tripSet(null,'Режим поездки выключен')}else{TRIP_PICK=!TRIP_PICK;refreshSheet()}break;

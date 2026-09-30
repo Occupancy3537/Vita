@@ -1435,6 +1435,14 @@ def _marker_reason(code: str, why: str) -> str:
     return "" if why == purpose else why
 
 
+def _clip(text: str, n: int) -> str:
+    """Обрезка по границе слова с многоточием — не посреди слова («…ГГТ чере»)."""
+    text = " ".join((text or "").split())
+    if len(text) <= n:
+        return text
+    return text[:n].rsplit(" ", 1)[0].rstrip(",;:—- ") + "…"
+
+
 def _draw_groups(markers: list[dict], panel_date: str) -> list[dict]:
     """Блок «Зачем» и группы в «Составе» (макет v5): по КТО назначил, у группы —
     короткий повод (sh) и фраза «зачем» (why); порядок фиксированный."""
@@ -1463,8 +1471,8 @@ def _draw_groups(markers: list[dict], panel_date: str) -> list[dict]:
             sh = f"срок был в {_MONTH_PREP[earliest.month - 1]} {earliest.year}" if old else "по графику"
             why = "плановые проверки по расписанию каталога"
         elif name in ("Назначил врач", "Контроль добавки"):
-            sh = "; ".join(reasons[:2])[:70] if reasons else "по назначению"
-            why = "; ".join(reasons)[:220] if reasons else ""
+            sh = _clip("; ".join(reasons[:2]), 80) if reasons else "по назначению"
+            why = _clip("; ".join(reasons), 220) if reasons else ""
         else:
             sh, why = "по показаниям", ""
         out.append({"name": name, "sh": sh, "why": why, "n": len(ms)})

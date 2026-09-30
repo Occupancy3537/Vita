@@ -1503,3 +1503,10 @@ def test_rx_week_today_walk_uses_live_steps():
     assert cells["walk"][2] == "y" and cells["move"][2] == "t"
     cells, _ = _rx("2026-09-30", [], [], steps_now=3000)
     assert cells["walk"][2] == "t"
+
+
+def test_draw_group_reason_is_clipped_on_word_boundary():
+    assert vita._clip("Пересдать печёночный профиль с дробным билирубином, АЛТ, АСТ, ГГТ через 4–6 недель", 60).endswith("…")
+    out = vita._clip("Пересдать печёночный профиль с дробным билирубином, АЛТ, АСТ, ГГТ через 4–6 недель", 60)
+    assert not out.rstrip("…").endswith((" че", " чер")) and len(out) <= 61
+    assert vita._clip("коротко", 60) == "коротко"
