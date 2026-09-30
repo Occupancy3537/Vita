@@ -152,6 +152,23 @@ def _detective_questions(cur, decisions: dict) -> list[dict]:
     return out
 
 
+_HEADLINE_MAX = 60
+
+
+def question_headline(significance: str) -> str:
+    """Короткий заголовок вопроса консилиума из его же текста: всё до первой скобки,
+    двоеточия или тире (там идёт детализация), не длиннее _HEADLINE_MAX по границе слова.
+    Без LLM: заголовок не выдуман, а вырезан из самого разногласия."""
+    text = " ".join((significance or "").split())
+    for cut in (" (", ": ", " — ", " - ", " после ", " при "):
+        i = text.find(cut)
+        if i > 0:
+            text = text[:i]
+    if len(text) > _HEADLINE_MAX:
+        text = text[:_HEADLINE_MAX].rsplit(" ", 1)[0].rstrip(",;") + "…"
+    return re.sub(r"(?<=\w)-(?=\w)", "\u2011", text)  # «25‑OH» не рвётся переносом
+
+
 def _disagreement_questions(cur, decisions: dict) -> list[dict]:
     cur.execute(
         sql.SQL("SELECT id, opinion_doctor, opinion_advisor, significance, ts_recorded, report_id FROM {t} "
@@ -162,10 +179,11 @@ def _disagreement_questions(cur, decisions: dict) -> list[dict]:
         qid = disagreement_question_id(dis_id)
         if qid in decisions:
             continue
-        between = " ↔ ".join(x for x in (a, b) if x)
+        between = " и ".join(x for x in (a, b) if x)
         out.append({
             "id": qid, "type": "вопрос", "source": "консилиум",
-            "title": between or "Разногласие консилиума",
+            "title": question_headline(significance) or "Разногласие консилиума",
+            "sub": f"Не сошлись: {between}" if between else "",
             "what": significance or "",
             "detail": significance or "",
             "status": "ждёт решения",

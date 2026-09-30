@@ -437,3 +437,20 @@ def test_sync_writes_zero_count_on_clean_day_and_real_count_with_episodes():
 def test_sync_is_a_noop_when_nothing_tracked():
     with get_conn() as conn, conn.cursor() as cur:
         assert checks.sync_episode_frequency_facts(cur) == 0
+
+
+def test_question_headline_cuts_at_detail_marker():
+    from app.checks import question_headline
+    assert question_headline("Целевой уровень ЛПНП (<2.6 ммоль/л у кардиолога) — закрывается: х") == "Целевой уровень ЛПНП"
+    assert question_headline("Первичный генез боли: гастроэнтеролог ведёт гипотезу") == "Первичный генез боли"
+
+
+def test_question_headline_truncates_on_word_boundary():
+    from app.checks import question_headline, _HEADLINE_MAX
+    h = question_headline("Срок контрольной пересдачи витамина D после старта приёма препарата в высокой дозировке на долгий срок")
+    assert h.endswith("…") and len(h) <= _HEADLINE_MAX + 1 and " " not in h[-2:]
+
+
+def test_question_headline_empty_is_empty():
+    from app.checks import question_headline
+    assert question_headline("") == "" and question_headline(None) == ""
