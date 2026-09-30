@@ -1,44 +1,50 @@
 #!/usr/bin/env bash
-# Еженедельная публикация цен лабораторий: сбор -> ворота -> seed --prune.
-# Вызывается cron'ом (сервер по Berlin); PATH/venv/env задаются здесь, не в crontab.
+# Еженедельная публикация цен лабораторий: сбор -> ворота качества -> seed --prune.
+# Вызывается cron'ом (сервер по Berlin, TZ= в cron не поддерживается); PATH/venv/env задаёт сама.
+# Принцип наименьших прав: из env контейнера берутся ТОЛЬКО CARD_PG_*, конвейером (полный env
+# на диск не пишется); файл реквизитов — 600 в каталоге 700, удаляется при любом выходе (trap).
 set -uo pipefail
+umask 077
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CARD=/home/openclaw/longevity-project/card-service
 BASE=/home/openclaw/lab_prices
 LOG="$BASE/scrape.log"
+ENV_FILE="$BASE/.env_db"
+
+cleanup() { rm -f "$ENV_FILE"; }
+trap cleanup EXIT
 
 {
   echo "=== cron-запуск $(date -u +%FT%TZ) ==="
-  cd "$CARD"
-  # env БД card-service (json-экспорт из контейнера, без системных переменных)
-  sudo docker inspect card-service --format '{{json .Config.Env}}' > /tmp/env_raw_cron.json
-  python3 - <<'PY'
-import json, shlex
-env = json.load(open("/tmp/env_raw_cron.json"))
-with open("/tmp/lab_env_cron.sh", "w") as f:
-    f.write("# cron env (600)\n")
-    for item in env:
-        if "=" not in item:
-            continue
-        k, v = item.split("=", 1)
-        if k in ("PATH", "HOME", "PYTHONPATH", "PYTHONUNBUFFERED", "PYTHON_VERSION", "PYTHON_PIP_VERSION", "PYTHON_SETUPTOOLS_VERSION", "PYTHON_GET_PIP_URL", "PYTHON_GET_PIP_SHA256"):
-            continue
-        f.write(f"export {k}={shlex.quote(v)}\n")
-PY
-  chmod 600 /tmp/lab_env_cron.sh
-  set -a; source /tmp/lab_env_cron.sh; set +a
-  export CARD_PG_HOST=127.0.0.1
-  unset CARD_PG_SCHEMA
+  cd "$CARD" || { echo "нет каталога $CARD"; exit 2; }
 
-  # 1) сбор (ворота качества внутри; провал = код 3, latest.json не меняется)
-  /home/openclaw/lab-scraper/.venv/bin/python -m scripts.lab_scrape run --base "$BASE"
-
-  # 2) публикация: seed --prune только если latest.json прошёл ворота
-  if [ -f "$BASE/latest.json" ] && [ -z "$(find "$BASE/latest.json" -mtime +8 2>/dev/null)" ]; then
-    $CARD/.venv/bin/python -m app.lab_prices_ingest seed --prune "$BASE/latest.json"
-  else
-    echo "cron: latest.json отсутствует или старше 8 дней — публикация отменена"
+  if ! sudo docker inspect card-service --format '{{json .Config.Env}}' | python3 -c '
+import json, shlex, sys
+keep = ("CARD_PG_HOST", "CARD_PG_USER", "CARD_PG_PASSWORD", "CARD_PG_DATABASE", "CARD_PG_PORT")
+env = json.load(sys.stdin)
+lines = []
+for item in env:
+    k, _, v = item.partition("=")
+    if k in keep:
+        lines.append("export %s=%s" % (k, shlex.quote(v)))
+if not any(l.startswith("export CARD_PG_PASSWORD=") for l in lines):
+    sys.exit(3)
+open(sys.argv[1], "w").write("\n".join(lines) + "\n")
+' "$ENV_FILE"; then
+    echo "не удалось получить реквизиты БД из контейнера card-service — цикл отменён"
+    exit 2
   fi
-  rm -f /tmp/env_raw_cron.json /tmp/lab_env_cron.sh
+
+  set -a; source "$ENV_FILE"; set +a
+  export CARD_PG_HOST=127.0.0.1
+
+  # 1) сбор (ворота качества внутри; провал = ненулевой код, latest.json не меняется)
+  if /home/openclaw/lab-scraper/.venv/bin/python -m scripts.lab_scrape run --base "$BASE"; then
+    # 2) публикация только после успешного сбора этого запуска
+    "$CARD/.venv/bin/python" -m app.lab_prices_ingest seed --prune "$BASE/latest.json"
+  else
+    echo "сбор не прошёл ворота качества или упал (код $?) — публикация НЕ выполняется, в базе прежние цены"
+  fi
+  echo "=== cron-запуск завершён ==="
 } >> "$LOG" 2>&1
