@@ -1007,6 +1007,73 @@ def build_assignments(cur, today: dict, state: dict) -> dict:
     }
 
 
+RX_ITEMS = (
+    # (k, поле ручной отметки, название, цель, нужно дней в неделю)
+    ("swim", "swim_happened", "Плавание", "2 раза в неделю", 2),
+    ("move", "movement_ok", "Подъёмы", "каждые 40 мин", 5),
+    ("walk", "steps_target_met", "Ходьба", None, 7),
+)
+_MOVE_GAP_OK_MIN = 40  # тот же порог, что MOVEMENT_GAP_OK_THRESHOLD_MIN в biohacking_ingest/dashboard
+
+
+def build_rx_week(cur, today_iso: str, steps_now, steps_target: int) -> dict:
+    """Привычки врача — недельная сетка Пн–Вс (макет v5, «Привычки»). Строка
+    daily_trends с датой D описывает ПРЕДЫДУЩИЙ день (плавание, шаги — «за вчера»),
+    поэтому значение дня d берём из строки d+1. Сегодня часы ещё не отдали данные:
+    ходьба — по живым шагам, остальное — пустой кружок «сегодня», который Влад
+    может отметить руками (card.vita_manual_mark). Ручная отметка перекрывает всё.
+    Коды клеток: y выполнено · y m выполнено вручную · '' не выполнено ·
+    q нет данных · t сегодня · f будущее."""
+    today = date.fromisoformat(today_iso)
+    monday = today - timedelta(days=today.weekday())
+    week = [monday + timedelta(days=i) for i in range(7)]
+    cur.execute(
+        'SELECT "Дата", "Плавание_было", "Провал_без_движения_мин", "Шаги_за_вчера" '
+        'FROM health.daily_trends WHERE "Дата" >= %s AND "Дата" <= %s',
+        (week[0] + timedelta(days=1), week[-1] + timedelta(days=1)),
+    )
+    by_row_date = {r[0].isoformat(): r for r in cur.fetchall() if r[0]}
+    cur.execute(
+        sql.SQL("SELECT date, field_key, value_bool FROM {t} WHERE date >= %s AND date <= %s AND field_key = ANY(%s)")
+        .format(t=sql.Identifier(schema(), "vita_manual_mark")),
+        (week[0], week[-1], [f for _, f, *_ in RX_ITEMS]),
+    )
+    marks = {(d.isoformat(), f): v for d, f, v in cur.fetchall()}
+    items = []
+    for k, field, title, goal, need in RX_ITEMS:
+        cells = []
+        for d in week:
+            iso = d.isoformat()
+            mark = marks.get((iso, field))
+            if d > today:
+                code = "f"
+            elif mark is True:
+                code = "y m"
+            elif d == today:
+                code = "y" if (k == "walk" and steps_now is not None and steps_now >= steps_target) else "t"
+            elif mark is False:
+                code = ""
+            else:
+                r = by_row_date.get((d + timedelta(days=1)).isoformat())
+                if r is None:
+                    code = "q"
+                elif k == "swim":
+                    code = "y" if r[1] == "Да" else ("" if r[1] == "Нет" else "q")
+                elif k == "move":
+                    g = _num(r[2])
+                    code = "q" if g is None else ("y" if g <= _MOVE_GAP_OK_MIN else "")
+                else:
+                    st = _num(r[3])
+                    code = "q" if st is None else ("y" if st >= steps_target else "")
+            cells.append({"date": iso, "c": code})
+        items.append({
+            "k": k, "field": field, "title": title,
+            "goal": goal or f"от {steps_target:,} шагов в день".replace(",", "\u202f"),
+            "need": need, "days": cells, "n": sum(1 for c in cells if c["c"].startswith("y")),
+        })
+    return {"today": today_iso, "items": items}
+
+
 def _day_met_and_at_risk(day_iso: str, row: dict, meals: list[dict], targets: list[dict], key: str):
     """(met, at_risk, has_data) для одного критерия на один день. has_data
     отличает "не выполнено" от "данных не было вообще" (день без Гармина/без
@@ -1261,6 +1328,7 @@ def build_today(cur) -> dict:
         "freezes_available": streak_data["freezes_available"],
         "travel": travel_state(travel_days, today_iso),
         "assignments": build_assignments(cur, today, state),
+        "rx": build_rx_week(cur, today_iso, steps.get("now_steps"), steps.get("target") or _STEPS_TARGET_DAILY),
         # «Проверки», этап 2 (2026-09-28): слот «Решить» (этап 1 оставил его
         # пустым — см. app/static/vita.html до этого коммита) + строка
         # «N проверок идут · ближайший вердикт» (Часть 3 тикета).

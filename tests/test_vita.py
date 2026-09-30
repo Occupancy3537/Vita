@@ -1460,3 +1460,46 @@ def test_vita_travel_endpoint_start_then_end():
     assert r.status_code == 200 and r.json()["travel"]["active"] and r.json()["travel"]["days_left"] == 7
     r = client.post("/vita/travel/end", cookies=_cookie())
     assert r.status_code == 200 and r.json()["travel"]["active"] is False
+
+
+# ─────── недельная сетка привычек врача (макет v5, «Привычки») ───────
+
+class _SeqCursor:
+    def __init__(self, *results):
+        self._results = list(results)
+        self._cur = []
+
+    def execute(self, *a, **k):
+        self._cur = self._results.pop(0)
+
+    def fetchall(self):
+        return self._cur
+
+
+def _rx(today_iso, trend_rows, marks, steps_now=None, target=8000):
+    cur = _SeqCursor(trend_rows, marks)
+    out = vita.build_rx_week(cur, today_iso, steps_now, target)
+    return {i["k"]: [d["c"] for d in i["days"]] for i in out["items"]}, out
+
+
+def test_rx_week_reads_previous_day_from_next_row_and_marks_future():
+    # среда 2026-09-30: Пн=28, Вт=29. Значение дня d лежит в строке d+1.
+    rows = [(date(2026, 9, 29), "Да", 30, 9000), (date(2026, 9, 30), "Нет", 90, 5000)]
+    cells, out = _rx("2026-09-30", rows, [])
+    assert cells["swim"][:3] == ["y", "", "t"] and cells["swim"][3:] == ["f"] * 4
+    assert cells["move"][:2] == ["y", ""]
+    assert cells["walk"][:2] == ["y", ""]
+    assert next(i for i in out["items"] if i["k"] == "swim")["n"] == 1
+
+
+def test_rx_week_no_row_is_no_data_and_manual_mark_overrides():
+    cells, _ = _rx("2026-09-30", [], [(date(2026, 9, 30), "swim_happened", True), (date(2026, 9, 28), "movement_ok", False)])
+    assert cells["swim"][:3] == ["q", "q", "y m"]
+    assert cells["move"][0] == ""  # ручное «нет» перекрывает отсутствие данных
+
+
+def test_rx_week_today_walk_uses_live_steps():
+    cells, _ = _rx("2026-09-30", [], [], steps_now=8500)
+    assert cells["walk"][2] == "y" and cells["move"][2] == "t"
+    cells, _ = _rx("2026-09-30", [], [], steps_now=3000)
+    assert cells["walk"][2] == "t"
