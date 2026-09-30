@@ -447,7 +447,7 @@ def test_question_headline_cuts_at_detail_marker():
 
 def test_question_headline_truncates_on_word_boundary():
     from app.checks import question_headline, _HEADLINE_MAX
-    h = question_headline("Срок контрольной пересдачи витамина D после старта приёма препарата в высокой дозировке на долгий срок")
+    h = question_headline("Срок контрольной пересдачи витамина D на старте приёма препарата в высокой дозировке на долгий срок")
     assert h.endswith("…") and len(h) <= _HEADLINE_MAX + 1 and " " not in h[-2:]
 
 
