@@ -23,9 +23,6 @@ from .core import get, make_row, now_iso, parse_price, save_raw
 BASE = "https://tafimed.ru"
 PRICES_URL = BASE + "/prices/"
 
-_ROW_RX = re.compile(
-    r'price-list__row[^>]*>.*?href="(/catalog/[^"]+)"[^>]*>\s*([^<]+?)\s*</a>.*?'
-    r'price-list__price">\s*([\d\s\u00a0\u202f]+)\s*(?:₽|руб)', re.S)
 _CITY_OK = re.compile(r"Владивосток")
 _TERM_RX = re.compile(r"(до\s*\d+\s*(?:раб\.\s*)?дн|\d+\s*(?:раб\.\s*)?дн\w*|1\s*день)", re.I)
 _COMPOSITION_RX = re.compile(
@@ -40,18 +37,37 @@ def _strip_tags(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def parse_prices_rows(html: str) -> list[dict]:
-    """Строки полного прайса: {slug, name, price, path}. Чистая функция."""
-    out, seen = [], set()
-    for m in _ROW_RX.finditer(html):
-        href, name, price_raw = m.group(1), m.group(2).strip(), m.group(3)
-        slug = href.rstrip("/").rsplit("/", 1)[-1]
-        if slug in seen:
+def parse_prices_rows(html: str) -> tuple[list[dict], list[dict]]:
+    """Строки полного прайса: ({slug, name, price, path}…, skipped…).
+    Разбор ПО БЛОКАМ (split по price-list__row): ленивый regex через весь html
+    переползал через «неудобные» блоки (акции с двумя ценами) и молча терял
+    позиции (30.09: 45 из 1361, включая «Аполлипротеины (Аро-В)»). Теперь
+    каждый блок даёт строку или запись в skipped — молчаливых потерь нет.
+    Чистая функция."""
+    out, skipped, seen = [], [], set()
+    parts = re.split(r"(price-list__row[^>]*>)", html)
+    for i in range(1, len(parts) - 1, 2):
+        block = parts[i] + parts[i + 1]
+        lm = re.search(r'href="(/catalog/[^"]+)"', block)
+        if not lm:
+            skipped.append({"reason": "в блоке нет ссылки на карточку",
+                            "snippet": _strip_tags(block)[:120]})
             continue
+        href = lm.group(1)
+        slug = href.rstrip("/").rsplit("/", 1)[-1]
+        nm = re.search(r'class="price-list__name">([^<]+)', block)
+        pm = re.search(r'price-list__price[^"]*">\s*([\d\s\u00a0\u202f]+)\s*(?:₽|руб)', block)
+        if nm is None or pm is None:
+            text = _strip_tags(block)[:120]
+            skipped.append({"reason": "в блоке нет названия или цены (акция/особый блок)",
+                            "slug": slug, "snippet": text})
+            continue
+        if slug in seen:
+            continue  # позиция в нескольких разделах — берём первое вхождение
         seen.add(slug)
-        out.append({"slug": slug, "name": name, "price": parse_price(price_raw),
-                    "path": href})
-    return out
+        out.append({"slug": slug, "name": nm.group(1).strip(),
+                    "price": parse_price(pm.group(1)), "path": href})
+    return out, skipped
 
 
 def parse_item_enrichment(html: str) -> tuple[str | None, str | None]:
@@ -82,7 +98,14 @@ def collect(session, run_dir: str, stats: dict, rejects: list[dict]) -> list[dic
     stats["city_method"] = f"признак города в ответе /prices/ («Ваш город Владивосток», raw: {ref})"
 
     enrich: list[tuple[str, str]] = []
-    for card in parse_prices_rows(html):
+    cards, skipped = parse_prices_rows(html)
+    # полнота: каждый блок прайса либо принят, либо явно объяснён — молчаливых
+    # потерь нет (правило «тихая потеря данных — риск №1»)
+    stats["price_blocks"] = len(cards) + len(skipped)
+    for s in skipped:
+        rejects.append({"lab": "tafi", "reason": f"прайс-блок пропущен: {s['reason']}",
+                        "name": s.get("snippet"), "raw_ref": ref})
+    for card in cards:
         if card["price"] is None or card["price"] <= 0:
             rejects.append({"lab": "tafi", "reason": f"цена не разобрана",
                             "name": card["name"], "raw_ref": ref})

@@ -42,11 +42,28 @@ def test_tafi_prices_rows_from_real_page():
     from scripts.lab_scrape import tafi
     html = _read("tafi_prices.html")
     assert "Владивосток" in html, "признак города должен быть в прайсе"
-    rows = tafi.parse_prices_rows(html)
+    rows, skipped = tafi.parse_prices_rows(html)
     assert rows, "строки прайса не найдены"
     br = [r for r in rows if r["slug"] == "bilirubin_obshchiy"]
     assert br and br[0]["name"] == "Билирубин общий"
     assert br[0]["price"] and br[0]["price"] > 0
+
+
+def test_tafi_parser_has_no_silent_losses():
+    """Регресс 30.09: ленивый regex терял ~45 позиций прайса (среди них
+    «Аполлипротеины (Аро-В)»). Теперь разбор по блокам: apolliproteiny есть,
+    и каждый блок либо в rows, либо в skipped."""
+    from scripts.lab_scrape import tafi
+    html = _read("tafi_prices.html")
+    rows, skipped = tafi.parse_prices_rows(html)
+    apob = [r for r in rows if r["slug"] == "apolliproteiny-aro-v"]
+    assert apob, "Аполлипротеины (Аро-В) потеряны парсером"
+    assert apob[0]["price"] and apob[0]["price"] > 0
+    total_blocks = html.count("price-list__row")
+    assert len(rows) + len(skipped) <= total_blocks
+    # акционные блоки (две цены) не теряются молча — они в skipped
+    for s in skipped:
+        assert s["reason"]
 
 
 def test_tafi_item_enrichment():
