@@ -7,7 +7,7 @@ pace_score = шаги ÷ ожидаемые к этому часу, не бол�
 смысла, держим 100. К 22:00 ожидаемое = цель, и оценка = процент выполнения цели."""
 from typing import Optional
 
-from app.goals import STEPS_TARGET_DAILY
+from app import goals
 
 DAY_START, DAY_END = 7.0, 22.0
 MIN_EXPECTED_SHARE = 0.03        # раньше этого ожидаемого — оценку не считаем (держим 100)
@@ -20,12 +20,14 @@ def expected_fraction(hour: float) -> float:
     return max(0.0, min(1.0, (hour - DAY_START) / (DAY_END - DAY_START)))
 
 
-def expected_steps(hour: float, target: int = STEPS_TARGET_DAILY) -> int:
+def expected_steps(hour: float, target: Optional[int] = None) -> int:
+    target = target or goals.steps_target()
     return round(target * expected_fraction(hour))
 
 
-def pace(steps: Optional[int], hour: float, target: int = STEPS_TARGET_DAILY) -> dict:
+def pace(steps: Optional[int], hour: float, target: Optional[int] = None) -> dict:
     """{expected, delta, score, behind, to_pace_min, to_goal_min, left}. steps=None -> все None."""
+    target = target or goals.steps_target()
     if steps is None:
         return {"expected": None, "delta": None, "score": None, "behind": False,
                 "to_pace_min": None, "to_goal_min": None, "left": None}
@@ -39,6 +41,7 @@ def pace(steps: Optional[int], hour: float, target: int = STEPS_TARGET_DAILY) ->
             "to_goal_min": round(left / STEPS_PER_MIN_WALK), "left": left}
 
 
-def closed_day_score(steps: Optional[int], target: int = STEPS_TARGET_DAILY) -> Optional[int]:
+def closed_day_score(steps: Optional[int], target: Optional[int] = None) -> Optional[int]:
     """Закрытый день: процент выполнения цели, не больше 100."""
+    target = target or goals.steps_target()
     return None if steps is None else min(100, round(100 * steps / target))

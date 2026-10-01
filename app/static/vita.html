@@ -963,6 +963,16 @@ svg{display:block}
 .ixV em{font-style:normal;font-size:12px;font-weight:600;color:var(--accent-ink)}.ixV em.l{color:var(--amber)}.ixV em.m{color:var(--warm-ink)}
 .rcT{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}.rcT div{background:var(--card);box-shadow:var(--card-sh);border-radius:18px;padding:11px 13px}
 .rcT small{display:block;font-size:12px;color:var(--muted)}.rcT b{display:block;margin-top:3px;font-size:22px;font-weight:300;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.rcT b span{font-size:12px;color:var(--muted);margin-left:4px;letter-spacing:0}.rcT em{display:block;font-style:normal;font-size:11.5px;color:var(--accent-ink);margin-top:1px}
+.goalR{width:100%;display:flex;align-items:center;gap:10px;padding:12px 14px;text-align:left}
+.goalR .gt{flex:1;min-width:0}.goalR .gt b{display:block;font-size:14.5px;font-weight:500}.goalR .gt small{display:block;margin-top:2px;font-size:12px;line-height:1.35;color:var(--muted)}
+.goalR .goalV{font-size:17px;font-weight:300;font-variant-numeric:tabular-nums;white-space:nowrap}.goalR .goalV span{font-size:12px;color:var(--muted);margin-left:3px}
+.goalW{border-top:1px solid var(--line-soft)}.goalW:first-child{border-top:0}
+.goalE{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s var(--ease)}.goalW.open .goalE{grid-template-rows:1fr}.goalE>div{overflow:hidden}
+.goalEi{padding:4px 14px 14px}
+.goalS{display:flex;align-items:center;justify-content:center;gap:18px;margin-top:6px}.goalS button{width:44px;height:44px;border-radius:50%;background:var(--line-soft);font-size:22px;color:var(--ink)}
+.goalS button:disabled{opacity:.35}.goalS b{min-width:110px;text-align:center;font-size:28px;font-weight:200;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.goalS b small{font-size:13px;color:var(--muted);margin-left:4px;letter-spacing:0}
+.goalA{display:flex;gap:8px;justify-content:center;margin-top:12px}.goalA button{min-height:38px;padding:0 16px;border-radius:19px;font-size:13px;font-weight:600;background:var(--accent-soft);color:var(--accent-ink)}.goalA button.m{background:var(--line-soft);color:var(--ink2);font-weight:500}
+.goalF{font-size:12px;color:var(--warm-ink);text-align:center;margin-top:8px}
 .mvTags{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .mvPill{display:inline-block;font-size:12px;font-weight:600;padding:4px 10px;border-radius:11px;background:var(--accent-soft);color:var(--accent-ink)}
 .mvPill.n{background:var(--line-soft);color:var(--ink2);font-weight:500}.mvPill.w{background:var(--warm-soft);color:var(--warm-ink)}
@@ -1639,7 +1649,7 @@ function renderMe(){if(!ME)return;const pa=ME.phenoage||{},h=ME.history||[],dr=M
     html+=`<div class="secH rise" style="--i:4;margin-top:28px"><span class="lbl">Системы</span><span>${okn.length} из ${sy.length} в норме</span></div>`;
     if(bad.length)html+=`<div class="sysGrid rise" style="--i:4">${bad.map(g=>{const out=g.status==='out',k=out?(g.n_out??g.flagged.length):(g.n_watch??g.flagged.length);return `<button class="sysC press" data-a="medpass"><span class="rIc ${out?'warm':'amber'}">${svg(SYS_IC[g.name]||'lab')}</span><b>${esc(SYS_SHORT[g.name]||g.name)}</b><small><i class="${out?'o':'w'}"></i>${k} ${out?'вне референса':'на контроле'}</small></button>`}).join('')}</div>`;
     if(okn.length)html+=`<button class="sysOk press rise" style="--i:5" data-a="medpass"><i></i><span>В норме: ${okn.map(g=>esc((SYS_SHORT[g.name]||g.name).toLowerCase())).join(', ')}</span></button>`}
-  html+=`<div class="rows rise" style="--i:5;margin-top:22px">${row(svg('flame'),'','Серии','рекорды, заморозки, 14 дней','','streaks')}${row(svg('medpass'),'','Медпаспорт','все маркеры и динамика','','medpass')}${row(svg('sun'),'','Тема',document.documentElement.dataset.theme==='dark'?'тёмная':'светлая','','theme')}${row(svg('expand'),'','Полный экран',!fsSupported()?'недоступен на этом устройстве':fsActive()?'включён · системные панели скрыты':fsPref()?'включится при касании':'выключен','','fs')}</div>`;
+  html+=`<div class="rows rise" style="--i:5;margin-top:22px">${row(svg('flame'),'','Серии','рекорды, заморозки, 14 дней','','streaks')}${row(svg('check'),'','Мои цели','у каждой видно, кто её задал · можно менять','','goals')}${row(svg('medpass'),'','Медпаспорт','все маркеры и динамика','','medpass')}${row(svg('sun'),'','Тема',document.documentElement.dataset.theme==='dark'?'тёмная':'светлая','','theme')}${row(svg('expand'),'','Полный экран',!fsSupported()?'недоступен на этом устройстве':fsActive()?'включён · системные панели скрыты':fsPref()?'включится при касании':'выключен','','fs')}</div>`;
   $('#meBody').innerHTML=html;$$('.rise',$('#s-me')).forEach(e=>e.classList.add('in'));replay($('#bioCard'));
 }
 const ICON_BY_SEGMENT={recovery:'charge',sleep:'moon',move:'steps',food:'bowl'};
@@ -1800,7 +1810,9 @@ function enterToday(){
 /* ================= ШТОРКИ (единый компонент — B{}+openSheet/closeSheet, без изменений механики) ================= */
 const MARK={y:()=>svg('check'),w:()=>'<b style="color:#fff;font-size:12px">!</b>',n:()=>'<b style="color:#fff;font-size:12px">!</b>'};
 const rowMark={good:'y',neutral:'y',warn:'w',bad:'n'};
-let FOODT=null;
+let FOODT=null,GOALS_DATA=null,GOAL_OPEN=null,GOAL_EDIT={};
+async function loadGoals(){GOALS_DATA=await fetchJSON('/vita/goals')}
+async function postGoal(url,body){const r=await fetchT(url,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)},false);let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.detail||('HTTP '+r.status));return j}
 const srcRows=(ss,u)=>{const mx=Math.max(...ss.map(x=>x.value),1);return ss.slice(0,4).map(x=>`<div class="src">${svg('dots')}<span style="width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.name)}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,u==='г'&&x.value<10?1:0)} ${u}</span></div>`).join('')};
 const STREAK_IC={sleep_zone:'moon',steps:'steps',alcohol:'drop','Натрий':'salt','Добавленный сахар':'cube','Насыщенные жиры':'fat'};
 const B={
@@ -1852,6 +1864,20 @@ const B={
       <p class="ov-sub" style="color:var(--accent-ink)">${closed?'Сутки закрыты — цифра больше не меняется.':'Если ничего не менять — так и закроется.'}</p></div>
     ${segs.length?`<div class="rows rise" style="--i:2;margin-top:18px">${segs.map(seg).join('')}</div><p class="mvCap rise" style="--i:2;margin-top:8px">Справа — круг и сколько баллов индекса он забирает. Нажмите на строку — подробности.</p>`:'<p class="empty">Пока недостаточно данных за сегодня.</p>'}
     ${!closed&&n?`<div class="bcard teal rise" style="--i:3;margin-top:18px"><span class="mc-ic">${svg('spark')}</span><span class="bbody"><span class="stw teal">Что поднимет прогноз сегодня</span><b>${esc(n.text)}</b></span></div>`:''}`}},
+  goals(){const G=(GOALS_DATA&&GOALS_DATA.goals)||[],grps=(GOALS_DATA&&GOALS_DATA.groups)||[];
+    const fv=(g,v)=>`${v==null?'—':fmt(v,g.decimals||0).replace(/\B(?=(\d{3})+(?!\d))/g,'\u00a0')}`;
+    const eff=g=>{let lo=g.lo,hi=g.hi;if(g.frame){if(g.frame.hi!=null)hi=Math.min(hi,g.frame.hi);if(g.frame.lo!=null)lo=Math.max(lo,g.frame.lo)}return [lo,hi]};
+    const rowOf=g=>{const open=GOAL_OPEN===g.key,v=GOAL_EDIT[g.key]!=null?GOAL_EDIT[g.key]:g.value,[lo,hi]=eff(g),dirty=Math.abs(v-g.value)>1e-9;
+      const src=g.mine?'задал я':g.source;
+      const frameTxt=g.frame?`Рамка врача (${esc(g.frame.source||'врач')}): ${g.frame.hi!=null?'не больше '+fv(g,g.frame.hi):''}${g.frame.lo!=null?'не меньше '+fv(g,g.frame.lo):''} ${esc(g.unit)}`:'';
+      return `<div class="goalW${open?' open':''}"><button class="goalR press" data-a="goalopen" data-k="${g.key}" aria-expanded="${open}"><span class="gt"><b>${esc(g.title)}</b><small>${esc(src)}${g.frame?' · есть рамка врача':''}</small></span><span class="goalV">${fv(g,g.value)}<span>${esc(g.unit)}</span></span>${svg('chev','ic chev')}</button>
+        <div class="goalE"><div><div class="goalEi">${g.hint?`<p class="mvCap" style="text-align:center;margin:0 0 6px">${esc(g.hint)}</p>`:''}
+          <div class="goalS"><button data-a="goalstep" data-k="${g.key}" data-d="-1" aria-label="Меньше"${v-g.step<lo-1e-9?' disabled':''}>−</button><b>${fv(g,v)}<small>${esc(g.unit)}</small></b><button data-a="goalstep" data-k="${g.key}" data-d="1" aria-label="Больше"${v+g.step>hi+1e-9?' disabled':''}>+</button></div>
+          ${frameTxt?`<p class="goalF">${frameTxt}</p>`:''}
+          <div class="goalA">${dirty?`<button data-a="goalsave" data-k="${g.key}">Сохранить</button>`:''}${g.mine?`<button class="m" data-a="goalreset" data-k="${g.key}">Сбросить к ${fv(g,g.base)}</button>`:''}</div></div></div></div></div>`};
+    return {html:`${top('Мои цели')}
+    <div class="ov-hero rise" style="--i:1"><p class="ov-sub" style="color:var(--ink2);margin-top:12px">У каждой цели видно, кто её задал. Свои цели можно менять; рамку врача можно только ужесточить.</p></div>
+    ${grps.map((gr,i)=>{const list=G.filter(g=>g.group===gr);return list.length?`<div class="fsec rise" style="--i:${i+2}"><span class="lbl">${gr}</span><div class="rows">${list.map(rowOf).join('')}</div></div>`:''}).join('')||'<p class="empty">Цели не загрузились.</p>'}`}},
   streaks(){const streaks=TODAY.streaks||[],tr=TODAY.travel||{active:false},alive=streaks.filter(s=>s.status!=='paused'||(tr.active&&s.key!=='sleep_zone')).length,fz=TODAY.freezes_available;
     const tbtn=`<button class="tripBtn press${tr.active?' on':''}" data-a="tripbtn" aria-pressed="${tr.active}" aria-label="Режим поездки">${svg('trip')}</button>`;
     const tbox=tr.active?`<div class="tripBox on rise" style="--i:1"><b>В поездке до ${tripUntil(tr.until)}</b><small>Серии питания на паузе и не сгорают. Сон и шаги считаются как обычно.</small><div class="tripAct"><button data-a="tripend">Завершить поездку</button></div></div>`
@@ -1945,7 +1971,7 @@ const B={
       const wk=(T.workouts||[]).map(w=>`<div class="reason"><span>${esc(w.type)}</span><span>${w.minutes} мин</span></div>`).join('');
       const pill=(t,c)=>`<span class="mvPill ${c||''}">${t}</span>`;
       const tags=[sn==null?'':(p.delta>=0?pill(`впереди темпа на ${thin(p.delta)}`):pill(`до темпа ${thin(-p.delta)} · ≈ ${p.to_pace_min} мин`,behind?'w':'n')),
-        sn!=null&&p.left>0?pill(`до цели ${thin(p.left)}`,'n'):pill('цель взята'),stk?pill(`серия ${stk.count} ${plural(stk.count,'день','дня','дней')}`,'n'):''].join('');
+        sn!=null&&p.left>0?pill(`до цели ${thin(p.left)}`,'n'):pill('цель взята'),stk?pill(`серия ${stk.count} ${plural(stk.count,'день','дня','дней')}`,'n'):'',`<button class="mvPill n press" data-a="goals" data-k="steps_daily">цель ${thin(tg)} · изменить</button>`].join('');
       const actTxt=sn==null?null:p.left<=0?['Цель на сегодня взята','Дальше — по самочувствию, без бега и прыжков.',false]
         :behind?[`Прогулка ${Math.max(10,p.to_pace_min)} мин вернёт в темп`,`≈ ${thin(Math.max(10,p.to_pace_min)*100)} шагов — круг «Движение» снова поднимется к 100`,true]
         :[`Осталось ${thin(p.left)} шагов ≈ ${p.to_goal_min} мин ходьбы`,`Например, прогулка после ужина: цель дня закроется и серия продолжится`,false];
@@ -2016,7 +2042,7 @@ const B={
     return {html:`${top('Питание сегодня')}
     <div class="sectionHead rise" style="--i:1;margin-top:18px"><span class="lbl">За день</span><button class="linkline" data-a="foodyest">Вчера${svg('right')}</button></div>
     <div class="macros rise" style="--i:1">${macros}</div>${prSrc}
-    <div class="sectionHead rise" style="--i:2"><span class="lbl">Лимиты</span><span>${anyLever?'тап — откуда':''}</span></div>
+    <div class="sectionHead rise" style="--i:2"><span class="lbl">Лимиты</span><button class="linkline" data-a="goals" data-k="sat_fat_g">изменить${svg('right')}</button></div>
     <div class="levers rise" style="--i:2">${levers}</div>
     ${anyLever?'':'<p class="foot rise" style="--i:2">Лимиты оживут после первой записи еды.</p>'}
     ${otherLimits.length?`<p class="quietRow rise" style="--i:2">${svg('check')}Ещё в лимите: ${otherLimits.map(r=>`${r.label.toLowerCase()} ${r.detail}`).join(', ')}</p>`:''}
@@ -2161,7 +2187,7 @@ function closeSheet(opt={}){if(!ov.classList.contains('open'))return;haptic();
   }
   settle(()=>{if(ov.classList.contains('open'))return;ov.classList.remove('show');morph.style.cssText='';ov.style.cssText='';ovAnims.forEach(x=>x.cancel());ovAnims=[];appEl.classList.remove('morphing');sheetInert(false);if(sheetReturn&&sheetReturn.isConnected){try{sheetReturn.focus({preventScroll:true})}catch(e){}}})}
 async function tripSet(days,msg){try{await postJSON(days?'/vita/travel':'/vita/travel/end',days?{days}:{});TRIP_PICK=false;await loadToday();renderToday();refreshSheet();toast(msg)}catch(e){toast('Не получилось — попробуй ещё раз')}}
-function refreshSheet(){if(!['today','index','draw','streaks'].includes(sheetKey))return;
+function refreshSheet(){if(!['today','index','draw','streaks','goals'].includes(sheetKey))return;
   ovS.innerHTML=B[sheetKey]().html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}
 let drag=null,dragged=false;
 const dStart=(y)=>{if(!ov.classList.contains('open')||ovS.scrollTop>0||ovAnims.some(a=>a.playState==='running'))return;drag={y,t:performance.now(),dy:0,on:false}};
@@ -2314,6 +2340,12 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
       if(fsActive()){try{localStorage.setItem(FS_KEY,'0')}catch(e){}document.exitFullscreen();toast('Полный экран выключен')}
       else{try{localStorage.setItem(FS_KEY,'1')}catch(e){}fsSuppress=false;fsEnter();toast('Полный экран включён')}
       if(typeof ME!=='undefined'&&ME)setTimeout(()=>{curTab==='me'&&renderMe()},250);break}
+    case'goals':haptic();GOAL_OPEN=k||null;GOAL_EDIT={};loadGoals().then(()=>openSheet('goals',null,t)).catch(()=>toast('Не удалось загрузить цели'));break;
+    case'goalopen':haptic();GOAL_OPEN=GOAL_OPEN===k?null:k;GOAL_EDIT={};refreshSheet();break;
+    case'goalstep':{haptic();const g=GOALS_DATA.goals.find(x=>x.key===k),cur=GOAL_EDIT[k]!=null?GOAL_EDIT[k]:g.value;let lo=g.lo,hi=g.hi;if(g.frame){if(g.frame.hi!=null)hi=Math.min(hi,g.frame.hi);if(g.frame.lo!=null)lo=Math.max(lo,g.frame.lo)}
+      const nv=Math.round((cur+(+t.dataset.d)*g.step)*100)/100;GOAL_EDIT[k]=Math.max(lo,Math.min(hi,nv));refreshSheet();break}
+    case'goalsave':{haptic();const v=GOAL_EDIT[k];postGoal('/vita/goals',{key:k,value:v}).then(()=>Promise.all([loadGoals(),loadToday()])).then(()=>{GOAL_EDIT={};renderToday();refreshSheet();toast('Цель сохранена')}).catch(e=>toast(e.message));break}
+    case'goalreset':haptic();postGoal('/vita/goals/reset',{key:k}).then(()=>Promise.all([loadGoals(),loadToday()])).then(()=>{GOAL_EDIT={};renderToday();refreshSheet();toast('Возвращено значение по умолчанию')}).catch(e=>toast(e.message));break;
     case'labgroup':haptic();openLabGroup(t.dataset.g);break;
     case'drvall':haptic();ME_ALL=!ME_ALL;renderMe();break;
     case'rxmark':haptic();postJSON('/vita/manual-mark',{date:t.dataset.d,field_key:k,value:true}).then(()=>loadToday()).then(()=>{renderChecksTab&&renderChecksTab()}).catch(()=>toast('Не получилось — попробуй ещё раз'));break;

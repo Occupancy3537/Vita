@@ -777,6 +777,7 @@ _LOAD_RX = re.compile(
 _BUDGET_KEYS = ["Насыщенные жиры", "Добавленный сахар", "Натрий", "Кофеин", "Клетчатка", "Витамин D", "Кальций"]
 _SLEEP_MIN_OK, _SLEEP_MAX_OK = 420, 540
 _CRP_SENS, _MCV_SENS, _CRP_REF = 1.041, 0.292, 1.5
+from app import goals
 from app.goals import STEPS_TARGET_DAILY as _STEPS_TARGET_DAILY  # единое место цели (2026-10-01); прежний комментарий:  # общепринятая суточная норма (Han 2023), не персональная база — см. TODO в JS-оригинале
 # 2026-09-22 (по прямому запросу Влада): следовые количества спирта из
 # ферментированных продуктов (кефир, квас, кимчи и т.п. — обычно <1 г на
@@ -1011,7 +1012,7 @@ def get_today_dashboard(cur) -> dict:
     meals = _rows_as_dicts(cur)
 
     cur.execute('SELECT * FROM health.nutrient_targets')
-    targets = _rows_as_dicts(cur)
+    targets = goals.apply_limits(_rows_as_dicts(cur))
 
     cur.execute('SELECT "Date", "Recommendation_Text" FROM health.recommendations_log')
     recs = _rows_as_dicts(cur)
@@ -1136,7 +1137,7 @@ def get_today_dashboard(cur) -> dict:
     sleep_streak = 0
     for r in reversed(rows):
         v = _num(r.get("Чистый_сон_мин"))
-        if v is not None and _SLEEP_MIN_OK <= v <= _SLEEP_MAX_OK:
+        if v is not None and goals.sleep_zone_min()[0] <= v <= goals.sleep_zone_min()[1]:
             sleep_streak += 1
         else:
             break
@@ -1457,7 +1458,7 @@ def get_today_nutrition(cur) -> dict:
         '"Date_of_birth" FROM health.nutrition_profile ORDER BY "User_ID"'
     )
     profile_rows = _rows_as_dicts(cur)
-    profile = profile_rows[0] if profile_rows else {}
+    profile = goals.apply_profile(profile_rows[0] if profile_rows else {})
 
     cur.execute(
         'SELECT date::text AS "date", anomaly_count, strong_count, raw_anomalies::text AS "raw_anomalies" '
@@ -1803,7 +1804,7 @@ def get_weekly_nutrition(cur) -> dict:
         'SELECT "Нутриент", "Колонка_в_Meals", "Единица", "Норма_RDA_AI", "Верхний_предел_UL", '
         '"Категория", "Источник", "Примечание" FROM health.nutrient_targets ORDER BY "Нутриент"'
     )
-    targets = _rows_as_dicts(cur)
+    targets = goals.apply_limits(_rows_as_dicts(cur))
 
     cur.execute(
         "SELECT m.*, to_char(m.\"Date\" AT TIME ZONE %s, 'YYYY-MM-DD\"T\"HH24:MI') AS \"Date\" "

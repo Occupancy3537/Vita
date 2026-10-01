@@ -14,7 +14,7 @@ pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
 def test_single_goal_everywhere():
     from app import dashboard, goals
     assert goals.STEPS_TARGET_DAILY == 10000 and dashboard._STEPS_TARGET_DAILY == 10000
-    assert sp.STEPS_TARGET_DAILY == 10000
+    assert goals.steps_target() == 10000 and sp.expected_steps(22.0) == 10000
 
 
 def test_expected_steps_linear_between_0700_and_2200():
@@ -96,7 +96,7 @@ def test_steps_streak_counts_closed_days_and_today_pending():
     rows = [_row("2026-09-27", 9000), _row("2026-09-28", 11000), _row("2026-09-29", 12000), _row("2026-09-30", 13000)]
     res = vita.build_streaks(rows, [], [], "2026-09-30", steps_today=4000, now_hour=11.0)
     s = _steps_streak(res)
-    assert s["count"] == 3 and s["label"] == "Шаги ≥ 10 000"
+    assert s["count"] == 3 and s["label"] == "Шаги ≥ 10\u202f000"
     assert s["days"][-1]["c"] == "t"                       # сегодня идёт, не провал
 
 

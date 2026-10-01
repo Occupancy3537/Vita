@@ -21,7 +21,7 @@ from typing import Optional
 from psycopg import sql
 
 from app import checks, steps_sampler, timeutil
-from app.goals import STEPS_TARGET_DAILY
+from app import goals
 from app.steps_pace import closed_day_score, expected_steps, pace as steps_pace
 from app.lab_systems import system_of, system_rank
 from app.dashboard import (
@@ -479,7 +479,7 @@ def build_move_detail(cur, today: dict, steps: dict, gate: dict) -> dict:
     daily_trends (шаги, перерывы, плавание, Garmin-нагрузка)."""
     today_d = timeutil.today()
     now_hour = steps.get("now_hour") or 0
-    target = steps.get("target") or STEPS_TARGET_DAILY
+    target = steps.get("target") or goals.steps_target()
     cur.execute(
         'SELECT "Дата", "Шаги_за_вчера", "Плавание_было", "Training_Acute_Load", "Training_Chronic_Load" '
         'FROM health.daily_trends WHERE "Дата" >= %s ORDER BY "Дата"', (today_d - timedelta(days=45),))
@@ -899,7 +899,7 @@ STREAK_STRIP_DAYS = 14  # полоса дней в шторке «Серии» (
 
 _STREAK_CRITERIA = [
     {"key": "sleep_zone", "label": "Сон в зоне 7–9 ч"},
-    {"key": "steps", "label": f"Шаги ≥ {STEPS_TARGET_DAILY // 1000} 000"},
+    {"key": "steps", "label": "Шаги ≥ цели"},
     {"key": "alcohol", "label": "Без алкоголя"},
     {"key": "Натрий", "label": "Соль в норме"},
     {"key": "Добавленный сахар", "label": "Сахар в норме"},
@@ -955,7 +955,7 @@ def _fetch_history(cur):
 
     targets_cur = cur.connection.cursor(row_factory=dict_row)
     targets_cur.execute('SELECT * FROM health.nutrient_targets')
-    targets = targets_cur.fetchall()
+    targets = goals.apply_limits(targets_cur.fetchall())
 
     return rows_tuple, rows_flat, meals, targets
 
@@ -1124,12 +1124,27 @@ def build_assignments(cur, today: dict, state: dict) -> dict:
 
 
 RX_ITEMS = (
-    # (k, поле ручной отметки, название, цель, нужно дней в неделю)
-    ("swim", "swim_happened", "Плавание", "2 раза в неделю", 2),
-    ("move", "movement_ok", "Подъёмы", "каждые 40 мин", 5),
+    # (k, поле ручной отметки, название, подпись цели; нужное число дней — из «Моих целей», см. _rx_need)
+    ("swim", "swim_happened", "Плавание", None, 2),
+    ("move", "movement_ok", "Подъёмы", None, 5),
     ("walk", "steps_target_met", "Ходьба", None, 7),
 )
-_MOVE_GAP_OK_MIN = 40  # тот же порог, что MOVEMENT_GAP_OK_THRESHOLD_MIN в biohacking_ingest/dashboard
+
+
+def _rx_need(k: str, default: int) -> int:
+    return {"swim": int(goals.get("swim_per_week")), "move": int(goals.get("stand_days_week"))}.get(k, default)
+
+
+def _rx_goal_text(k: str, steps_target: int) -> str:
+    if k == "swim":
+        n = int(goals.get("swim_per_week"))
+        return f"{n} {'раза' if n in (2, 3, 4) else 'раз'} в неделю"
+    if k == "move":
+        return f"каждые {int(goals.get('stand_gap_min'))} мин"
+    return f"от {steps_target:,} шагов в день".replace(",", "\u202f")
+
+
+_MOVE_GAP_OK_MIN = 40  # запасное значение; рабочее — goals.get('stand_gap_min') («Мои цели», рамка врача ≤ 40)
 
 
 def build_rx_week(cur, today_iso: str, steps_now, steps_target: int) -> dict:
@@ -1168,7 +1183,7 @@ def build_rx_week(cur, today_iso: str, steps_now, steps_target: int) -> dict:
             elif d == today:
                 code = "y" if (k == "walk" and steps_now is not None and steps_now >= steps_target) else "t"
                 own_today = by_row_date.get(iso)
-                if k == "move" and own_today and (_num(own_today[2]) or 0) > _MOVE_GAP_OK_MIN:
+                if k == "move" and own_today and (_num(own_today[2]) or 0) > goals.get('stand_gap_min'):
                     code = ""   # перерыв дольше 40 мин уже случился — день по этому пункту не выполнен
             elif mark is False:
                 code = ""
@@ -1181,15 +1196,15 @@ def build_rx_week(cur, today_iso: str, steps_now, steps_target: int) -> dict:
                 elif k == "move":
                     own = by_row_date.get(iso)   # перерыв — показатель самого дня (строка своей даты), не следующего
                     g = _num(own[2]) if own else None
-                    code = "q" if g is None else ("y" if g <= _MOVE_GAP_OK_MIN else "")
+                    code = "q" if g is None else ("y" if g <= goals.get("stand_gap_min") else "")
                 else:
                     st = _num(r[3])
                     code = "q" if st is None else ("y" if st >= steps_target else "")
             cells.append({"date": iso, "c": code})
         items.append({
             "k": k, "field": field, "title": title,
-            "goal": goal or f"от {steps_target:,} шагов в день".replace(",", "\u202f"),
-            "need": need, "days": cells, "n": sum(1 for c in cells if c["c"].startswith("y")),
+            "goal": _rx_goal_text(k, steps_target),
+            "need": _rx_need(k, need), "days": cells, "n": sum(1 for c in cells if c["c"].startswith("y")),
         })
     return {"today": today_iso, "items": items}
 
@@ -1204,8 +1219,9 @@ def _day_met_and_at_risk(day_iso: str, row: dict, meals: list[dict], targets: li
         v = _num(row.get("Чистый_сон_мин"))
         if v is None:
             return None, False, False
-        met = _SLEEP_MIN_OK <= v <= _SLEEP_MAX_OK
-        at_risk = met and (v - _SLEEP_MIN_OK <= 15 or _SLEEP_MAX_OK - v <= 15)
+        zmin, zmax = goals.sleep_zone_min()
+        met = zmin <= v <= zmax
+        at_risk = met and (v - zmin <= 15 or zmax - v <= 15)
         return met, at_risk, True
     budget = _budget_for_day(meals, targets, day_iso)
     b = next((x for x in budget if x["label"] == key), None)
@@ -1281,7 +1297,7 @@ def _fetch_streak_inputs(cur):
     )
     meals = _rows_as_dicts(cur)
     cur.execute('SELECT * FROM health.nutrient_targets')
-    targets = _rows_as_dicts(cur)
+    targets = goals.apply_limits(_rows_as_dicts(cur))
     return rows, meals, targets
 
 
@@ -1302,12 +1318,12 @@ def _steps_day_status(day_iso: str, today_iso: str, steps_by_day: dict, steps_to
     if day_iso == today_iso:
         if steps_today is None:
             return None, False, False
-        if steps_today >= STEPS_TARGET_DAILY:
+        if steps_today >= goals.steps_target():
             return True, False, True
         p = steps_pace(steps_today, now_hour if now_hour is not None else 0.0)
         return None, bool(now_hour is not None and now_hour >= 15 and p["behind"]), True
     st = steps_by_day.get(day_iso)
-    return (None, False, False) if st is None else (st >= STEPS_TARGET_DAILY, False, True)
+    return (None, False, False) if st is None else (st >= goals.steps_target(), False, True)
 
 
 def build_streaks(rows: list[dict], meals: list[dict], targets: list[dict], today_iso: str,
@@ -1388,7 +1404,9 @@ def build_streaks(rows: list[dict], meals: list[dict], targets: list[dict], toda
                 code = "p"
             strip.append({"date": day["date"], "c": code})
         out.append({
-            "key": crit["key"], "label": crit["label"], "count": current, "record": record,
+            "key": crit["key"],
+            "label": (f"Шаги ≥ {goals.steps_target():,}".replace(",", "\u202f") if crit["key"] == "steps" else crit["label"]),
+            "count": current, "record": record,
             "next_milestone": next_milestone, "days": strip,
             "at_risk": bool(today_status and today_status["at_risk"]),
             "status": "paused" if not (today_status and today_status["has_data"]) else ("at_risk" if today_status["at_risk"] else "alive"),
@@ -1415,7 +1433,7 @@ def build_steps(cur, gate: dict) -> dict:
     )
     row = cur.fetchone()
     steps_now = int(row[0]) if row and row[0] is not None else None
-    target = STEPS_TARGET_DAILY
+    target = goals.steps_target()
     now_local = timeutil.now_local()
     now_hour = now_local.hour + now_local.minute / 60
     p = steps_pace(steps_now, now_hour, target)
@@ -1481,7 +1499,7 @@ def build_today(cur) -> dict:
         "freezes_available": streak_data["freezes_available"],
         "travel": travel_state(travel_days, today_iso),
         "assignments": build_assignments(cur, today, state),
-        "rx": build_rx_week(cur, today_iso, steps.get("now_steps"), steps.get("target") or STEPS_TARGET_DAILY),
+        "rx": build_rx_week(cur, today_iso, steps.get("now_steps"), steps.get("target") or goals.steps_target()),
         # «Проверки», этап 2 (2026-09-28): слот «Решить» (этап 1 оставил его
         # пустым — см. app/static/vita.html до этого коммита) + строка
         # «N проверок идут · ближайший вердикт» (Часть 3 тикета).
@@ -1959,6 +1977,47 @@ def vita_manual_mark_endpoint(req: VitaManualMarkRequest, _: None = Depends(requ
 # =====================================================================
 # Vita v2, этап 2 (2026-09-28) — «Проверки»: агрегатор app/checks.py
 # =====================================================================
+
+class VitaGoalRequest(BaseModel):
+    key: str
+    value: float
+
+
+class VitaGoalKeyRequest(BaseModel):
+    key: str
+
+
+@router.get("/vita/goals")
+def vita_goals_endpoint(_: None = Depends(require_session)) -> dict:
+    """«Мои цели»: все цели с эффективным значением, источником («я» / по умолчанию / норма) и рамкой врача."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return {"groups": goals.GROUPS, "goals": goals.list_goals(cur)}
+
+
+@router.post("/vita/goals")
+def vita_goal_set_endpoint(req: VitaGoalRequest, _: None = Depends(require_session)) -> dict:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                out = goals.set_goal(cur, req.key, req.value)
+            conn.commit()
+    except goals.GoalError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, **out}
+
+
+@router.post("/vita/goals/reset")
+def vita_goal_reset_endpoint(req: VitaGoalKeyRequest, _: None = Depends(require_session)) -> dict:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                goals.reset_goal(cur, req.key)
+            conn.commit()
+    except goals.GoalError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
 
 class VitaTravelRequest(BaseModel):
     days: int = Field(ge=1, le=TRAVEL_MAX_DAYS)
