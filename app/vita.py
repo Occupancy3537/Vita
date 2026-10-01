@@ -1616,6 +1616,8 @@ def shape_me(bio: dict, labs_systems: Optional[list] = None) -> dict:
         # те же группы и те же счётчики, что в Медпаспорте (один источник на оба экрана)
         systems = [{"name": g["name"], "n": g["n"],
                     "status": "out" if g["worst"] == "out" else ("watch" if g["worst"] == "watch" else "ok"),
+                    "n_out": sum(1 for x in g["items"] if x["grade"] == "out"),
+                    "n_watch": sum(1 for x in g["items"] if x["grade"] == "watch"),
                     "flagged": [x["marker"] for x in g["items"] if x["grade"] in ("out", "watch")]}
                    for g in labs_systems]
         systems.sort(key=lambda g: ({"out": 0, "watch": 1, "ok": 2}[g["status"]], system_rank(g["name"])))

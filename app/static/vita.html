@@ -1163,11 +1163,11 @@ svg{display:block}
 .gvCard{padding:6px 14px;border-radius:24px;background:var(--card);box-shadow:var(--card-sh)}
 .gvNote{margin:10px 4px 0;font-size:12.5px;line-height:1.45;color:var(--muted)}
 .sysGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.sysC{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:14px;border-radius:22px;background:var(--card);box-shadow:var(--card-sh);text-align:left}
+.sysC{min-width:0;overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:14px;border-radius:22px;background:var(--card);box-shadow:var(--card-sh);text-align:left}
 .sysC .rIc{width:40px;height:40px}.sysC .rIc svg{width:23px;height:23px}
 .sysOk{display:flex;align-items:flex-start;gap:10px;width:100%;margin-top:10px;padding:14px;border-radius:22px;background:var(--card);box-shadow:var(--card-sh);text-align:left;font-size:13px;line-height:1.45;color:var(--muted)}
 .sysOk i{flex:none;width:7px;height:7px;margin-top:6px;border-radius:50%;background:var(--green)}
-.sysC b{font-size:15px;font-weight:500}
+.sysC b{max-width:100%;font-size:15px;font-weight:500;overflow-wrap:anywhere}
 .sysC small{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
 .sysC small i{width:7px;height:7px;border-radius:50%;background:var(--green)}
 .sysC small i.w{background:var(--amber)}.sysC small i.o{background:var(--warm)}
@@ -1462,6 +1462,7 @@ async function loadMedp(){if(!MEDP)MEDP=await fetchJSON('/vita/medpassport');ret
 let CHECKS=null,qMode='questions';
 async function loadChecks(force){if(CHECKS&&!force)return;CHECKS=await fetchJSON('/vita/checks')}
 const SRC_ICON={детектив:'spark',консилиум:'consilium',врач:'conclusion',кейс:'consilium',я:'sprout'};
+const SYS_SHORT={'Кровь и свёртывание':'Кровь','Иммунитет и воспаление':'Иммунитет','Сердце и сосуды':'Сердце','Печень и пищеварение':'Печень','Почки и электролиты':'Почки','Обмен веществ':'Обмен веществ','Эндокринная система':'Эндокринная','Репродуктивная система':'Репродуктивная'};
 const SYS_IC={'Кровь и свёртывание':'blood','Иммунитет и воспаление':'immune','Сердце и сосуды':'heart','Печень и пищеварение':'liver','Почки и электролиты':'kidney','Обмен веществ':'glucose','Эндокринная система':'thyroid','Репродуктивная система':'hormones','Прочее':'lab'};
 /* иконка вопроса по теме: ключевые слова из текста, иначе — по источнику */
 function qIcon(q){const t=((q.title||'')+' '+(q.sub||'')+' '+(q.detail||'')).toLowerCase();
@@ -1541,8 +1542,8 @@ function renderMe(){if(!ME)return;const pa=ME.phenoage||{},h=ME.history||[],dr=M
     <p class="gvNote rise" style="--i:3">Вклад маркера в разницу между паспортным и биологическим возрастом — по формуле PhenoAge.${TODAY&&TODAY.ring&&TODAY.ring.bioage_days?` Сегодня образ жизни — ${TODAY.ring.bioage_days<0?'моложе':'старше'} на ${fmt(Math.abs(TODAY.ring.bioage_days),1)} ${plural(Math.round(Math.abs(TODAY.ring.bioage_days)),'день','дня','дней')} (оценка по исследованиям).`:''}</p>`}
   if(sy.length){const bad=sy.filter(g=>g.status!=='ok'),okn=sy.filter(g=>g.status==='ok');
     html+=`<div class="secH rise" style="--i:4;margin-top:28px"><span class="lbl">Системы</span><span>${okn.length} из ${sy.length} в норме</span></div>`;
-    if(bad.length)html+=`<div class="sysGrid rise" style="--i:4">${bad.map(g=>`<button class="sysC press" data-a="medpass"><span class="rIc ${g.status==='out'?'warm':'amber'}">${svg(SYS_IC[g.name]||'lab')}</span><b>${esc(g.name)}</b><small><i class="${g.status==='out'?'o':'w'}"></i>${esc(g.flagged.slice(0,2).join(', '))}${g.status==='out'?' — вне референса':' — не в оптимуме'}</small></button>`).join('')}</div>`;
-    if(okn.length)html+=`<button class="sysOk press rise" style="--i:5" data-a="medpass"><i></i><span>В норме: ${okn.map(g=>esc(g.name.toLowerCase())).join(', ')}</span></button>`}
+    if(bad.length)html+=`<div class="sysGrid rise" style="--i:4">${bad.map(g=>{const out=g.status==='out',k=out?(g.n_out??g.flagged.length):(g.n_watch??g.flagged.length);return `<button class="sysC press" data-a="medpass"><span class="rIc ${out?'warm':'amber'}">${svg(SYS_IC[g.name]||'lab')}</span><b>${esc(SYS_SHORT[g.name]||g.name)}</b><small><i class="${out?'o':'w'}"></i>${k} ${out?'вне референса':'на контроле'}</small></button>`}).join('')}</div>`;
+    if(okn.length)html+=`<button class="sysOk press rise" style="--i:5" data-a="medpass"><i></i><span>В норме: ${okn.map(g=>esc((SYS_SHORT[g.name]||g.name).toLowerCase())).join(', ')}</span></button>`}
   html+=`<div class="rows rise" style="--i:5;margin-top:22px">${row(svg('flame'),'','Серии','рекорды, заморозки, 14 дней','','streaks')}${row(svg('medpass'),'','Медпаспорт','все маркеры и динамика','','medpass')}${row(svg('sun'),'','Тема',document.documentElement.dataset.theme==='dark'?'тёмная':'светлая','','theme')}</div>`;
   $('#meBody').innerHTML=html;$$('.rise',$('#s-me')).forEach(e=>e.classList.add('in'));replay($('#bioCard'));
 }
