@@ -1861,12 +1861,117 @@ def vita_doctor_endpoint(lab: str = "", panel: int = 0,
             return build_doctor(cur, lab=lab.strip() or None, panel=max(0, panel))
 
 
+# =====================================================================
+# Медпаспорт по системам (макет v5, «Тело · по системам»): маркеры группами
+# с грейдом. Группа и «оптимум» — из тех же biomarkers, что кормят «Я»
+# (get_bioage_dashboard: group, lab_min/max, opt_min/max). Остальные маркеры
+# card.lab_result (без группы/оптимума в каталоге) — в «Прочее», грейды только
+# «вне референса» / «норма».
+# Грейды: out — вне лабораторного референса; watch — в референсе, но вне
+# оптимума; exc («Отлично») — внутри оптимума, который СТРОЖЕ референса;
+# normal — в референсе (оптимум не строже референса или не задан).
+# =====================================================================
+
+_GRADE_RANK = {"out": 0, "watch": 1, "normal": 2, "exc": 3}
+
+
+def lab_grade(value, lab_min, lab_max, opt_min, opt_max) -> Optional[str]:
+    if value is None:
+        return None
+    if (lab_min is not None and value < lab_min) or (lab_max is not None and value > lab_max):
+        return "out"
+    if opt_min is None and opt_max is None:
+        return "normal"
+    if (opt_min is not None and value < opt_min) or (opt_max is not None and value > opt_max):
+        return "watch"
+    stricter = ((opt_min is not None and (lab_min is None or opt_min > lab_min))
+                or (opt_max is not None and (lab_max is None or opt_max < lab_max)))
+    return "exc" if stricter else "normal"
+
+
+def _range_txt(prefix: str, lo, hi) -> str:
+    if lo is not None and hi is not None:
+        return f"{prefix} {_plain_num(lo)}–{_plain_num(hi)}"
+    if hi is not None:
+        return f"{prefix} < {_plain_num(hi)}"
+    if lo is not None:
+        return f"{prefix} > {_plain_num(lo)}"
+    return ""
+
+
+def _fnum(v):
+    return float(v) if v is not None else None
+
+
+def shape_labs_by_system(biomarkers: list[dict], recent_labs: list[dict], recent_keys: dict) -> list[dict]:
+    """biomarkers — bio['biomarkers']; recent_labs — medpassport._recent_labs
+    (marker/value/unit/ref_min/ref_max/date), recent_keys — {marker label: marker_id}
+    не нужен вызывающему: сопоставление по marker_id, если он есть, иначе по названию."""
+    groups: dict[str, list[dict]] = {}
+    seen_labels = set()
+
+    def add(group, label, value, unit, date, lab_min, lab_max, opt_min, opt_max):
+        # нижняя граница 0 — «одностороннее» ограничение, не диапазон (0–3,4 → < 3,4)
+        lab_min, opt_min = (None if x == 0 else x for x in (lab_min, opt_min))
+        lab_max, opt_max = (None if x is not None and x >= 99 and unit in ("ммоль/л", "%") and label.endswith("ЛПВП") else x for x in (lab_max, opt_max))
+        unit = None if unit in ("-", "–", "—") else unit
+        grade = lab_grade(value, lab_min, lab_max, opt_min, opt_max)
+        if grade is None:
+            return
+        stricter_target = grade != "normal" or opt_min is not None or opt_max is not None
+        ref = _range_txt("реф.", lab_min, lab_max)
+        target = ""
+        if (opt_min is not None or opt_max is not None) and (
+                (opt_min is not None and (lab_min is None or opt_min > lab_min))
+                or (opt_max is not None and (lab_max is None or opt_max < lab_max))):
+            target = _range_txt("цель", opt_min, opt_max)
+        parts = [f"{_plain_num(round(value, 2))} {unit or ''}".strip()]
+        if ref:
+            parts.append(ref + (f", {target}" if target else ""))
+        elif target:
+            parts.append(target)
+        groups.setdefault(group, []).append({
+            "marker": label, "value": value, "unit": unit, "date": date,
+            "grade": grade, "text": " · ".join(parts),
+        })
+        seen_labels.add(label)
+
+    for m in biomarkers or []:
+        v = _fnum(m.get("value"))
+        add(m.get("group") or "Прочее", m["label"], v, m.get("unit"), m.get("measured_date"),
+            _fnum(m.get("lab_min")), _fnum(m.get("lab_max")), _fnum(m.get("opt_min")), _fnum(m.get("opt_max")))
+    # маркеры без записи в biomarkers (нет каталожного оптимума) — «Прочее»
+    for l in recent_labs or []:
+        if l["marker"] in seen_labels:
+            continue
+        add("Прочее", l["marker"], l["value"], l.get("unit"), l.get("date"),
+            l.get("ref_min"), l.get("ref_max"), None, None)
+    out = []
+    for name, items in groups.items():
+        items.sort(key=lambda x: (_GRADE_RANK[x["grade"]], x["marker"]))
+        worst = items[0]["grade"]
+        out.append({"name": name, "n": len(items),
+                    "ok": sum(1 for x in items if x["grade"] in ("normal", "exc")),
+                    "worst": worst, "items": items})
+    out.sort(key=lambda g: (g["name"] == "Прочее", _GRADE_RANK[g["worst"]], g["name"]))
+    return out
+
+
+def build_labs_by_system(cur) -> list[dict]:
+    from app import medpassport
+    from app.dashboard import get_bioage_dashboard
+    bio = get_bioage_dashboard(cur)
+    return shape_labs_by_system(bio.get("biomarkers"), medpassport._recent_labs(cur, limit=200), {})
+
+
 @router.get("/vita/medpassport")
 def vita_medpassport_endpoint(_: None = Depends(require_session)) -> dict:
     from app import medpassport
     with get_conn() as conn:
         with conn.cursor() as cur:
-            return medpassport.build_medpassport(cur)
+            mp = medpassport.build_medpassport(cur)
+            mp["systems"] = build_labs_by_system(cur)
+            return mp
 
 
 @router.get("/vita/me")

@@ -857,6 +857,10 @@ svg{display:block}
 .labsGroup:first-child{border-top:0}
 .labsGH{width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .labsGH b{font-size:14.5px;font-weight:500}
+.labsT{display:flex;align-items:center;gap:10px;min-width:0;text-align:left}
+.labsIc{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent-ink)}
+.labsIc svg{width:18px;height:18px}
+.labsIc.out{background:var(--warm-soft);color:var(--warm)}.labsIc.watch{background:var(--amber-soft);color:var(--amber)}
 .labsGH .gmeta{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .gdots{display:flex;gap:3px;margin-right:2px}
 .gdots i{width:5px;height:5px;border-radius:50%}
@@ -1345,6 +1349,8 @@ const eo4=t=>1-Math.pow(1-t,4);
 function tween(dur,fn,ease=eo4){return new Promise(res=>{if(reduce){fn(1);res();return}const t0=performance.now();const f=n=>{const t=Math.min(1,(n-t0)/dur);fn(ease(t));t<1?requestAnimationFrame(f):res()};requestAnimationFrame(f)})}
 /* русский вид чисел в строках с бэкенда: запятая, минус, степени, единицы нагрузки */
 const SUP={'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
+const GLABEL={exc:'Отлично',normal:'Норма',watch:'На контроле',out:'Вне референса'};
+function openLabGroup(i){$$('.labsGroup').forEach(el=>{const on=el.dataset.g===String(i)&&!el.classList.contains('open');el.classList.toggle('open',on);const b=$('.labsGH',el);b&&b.setAttribute('aria-expanded',on)})}
 const rn=x=>String(x==null?'':x).replace(/(^|[\s(])-(?=\d)/g,'$1−').replace(/(?<![\d.])(\d+)\.(\d+)(?!\.\d)/g,'$1,$2').replace(/10\^(\d+)/g,(m,d)=>'10'+[...d].map(c=>SUP[c]).join('')).replace(/\bLOW\b/g,'ниже обычного').replace(/\bHIGH\b/g,'выше обычного').replace(/\b(OPTIMAL|NORMAL)\b/g,'в норме');
 const rn0=x=>rn(x).replace(/(\d+),0(?!\d)/g,'$1');
 const IDX_LABEL={'ACWR (Garmin)':'Нагрузка за неделю'};
@@ -1416,6 +1422,7 @@ const I={
   cheese:'<path d="M3 17l9-10 9 5v5H3z"/><circle cx="9" cy="14.5" r="1"/><circle cx="15" cy="15" r="1.2"/>',
   beef:'<path d="M5 13c-1.5-4.5 2-9 7-9s8.5 3.5 7.5 8-5.5 7-9.5 6.5S6 16 5 13z"/><circle cx="14" cy="10" r="1.8"/>',
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/>',
+  tg:'<path d="M21 4L3 11l6 2.5M21 4l-4 16-8-6.5M21 4L9 13.5V19l3-3.5"/>',
   car:'<path d="M3.5 15.5v-3l1.7-4.4A2 2 0 0 1 7 6.8h10a2 2 0 0 1 1.8 1.3l1.7 4.4v3"/><path d="M3.5 15.5h17M5 12.2h14"/><circle cx="7.5" cy="17.6" r="1.6"/><circle cx="16.5" cy="17.6" r="1.6"/>',
   dots:'<circle cx="8" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16" cy="12" r="1"/>',
 };
@@ -1512,7 +1519,7 @@ function renderDoctor(){if(!DOC)return;const c=DOC.consilium,n=(DOC.notes||[])[0
   $$('.rise',$('#s-plan')).forEach(e=>e.classList.add('in'));
 }
 const monthYear=d=>new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{month:'short',year:'numeric'}).replace(' г.','');
-let ME_ALL=false,MP_ALL=false;
+let ME_ALL=false;
 function renderMe(){if(!ME)return;const pa=ME.phenoage||{},h=ME.history||[],dr=ME.drivers||[],sy=ME.systems||[];
   const f1=v=>v==null?'—':fmt(v,1);
   let html=`<div class="ageCard rise" style="--i:1"><div class="ageH"><span>Биовозраст · PhenoAge</span>${pa.delta!=null?`<em>${pa.delta<0?'−':'+'}${fmt(Math.abs(pa.delta),1)} ${Math.abs(pa.delta)%1?'года':plural(Math.abs(pa.delta),'год','года','лет')}</em>`:''}</div>
@@ -1908,13 +1915,23 @@ const B={
     </div>
     ${d.next_note?`<p class="nd-n rise" style="--i:4">${svg('check')}${esc(d.next_note)}</p>`:''}
     <p class="disc rise" style="--i:5">${d.price_rub?'':'Цены по лабораториям пока не заведены — стоимость уточнится в лаборатории. '}Состав собирает оптимизатор: поводы врачей, консилиума, проверок и плановые панели.</p>`}},
-  medpass(mp){if(!mp)return {html:top('Медпаспорт')};const labs=mp.recent_labs||[],oor=labs.filter(l=>l.out_of_range);
-    const lrow=l=>row(svg('tube'),l.out_of_range?'warm':'',l.marker,rn(`${l.ref_min!=null&&l.ref_max!=null?'реф. '+l.ref_min+'–'+l.ref_max:l.ref_max!=null?'реф. до '+l.ref_max:l.ref_min!=null?'реф. от '+l.ref_min:''}${l.date?' · '+shortDate(l.date):''}`),`<span class="rV ${l.out_of_range?'warm':''}">${fmt(l.value,Math.abs(l.value)<10&&l.value%1?1:0)}${l.unit?' '+esc(rn(l.unit)):''}</span>`).replace('<b>','<b class="wrap">');
+  medpass(mp){if(!mp)return {html:top('Медпаспорт')};const sy=mp.systems||[];
+    /* макет v5: «Тело · по системам» — группы-аккордеоны, у каждого маркера грейд */
+    const group=(g,i)=>{const dots=g.items.slice(0,8).map(x=>`<i class="gd-${x.grade}"></i>`).join('');
+      return `<div class="labsGroup rise" style="--i:${Math.min(i+2,8)}" data-g="${i}"><button class="labsGH" data-a="labgroup" data-g="${i}" aria-expanded="false">
+        <span class="labsT"><span class="labsIc ${g.worst}">${svg(SYS_IC[g.name]||'tube')}</span><b>${esc(g.name)}</b></span><span class="gmeta"><span class="gdots">${dots}</span>${g.ok}/${g.n} в норме${svg('chev','ic chev')}</span></button>
+        <div class="labsRows"><div>${g.items.map(x=>`<div class="labsRow"><div class="labsMain"><span class="labsName">${esc(x.marker)}</span><span class="labsValue">${esc(rn(x.text))}</span></div><span class="grade g-${x.grade}">${GLABEL[x.grade]}</span></div>`).join('')}</div></div></div>`};
     return {html:`${top('Медпаспорт')}
-    <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${oor.length}</b><span>вне референса из ${labs.length}</span></div>${(mp.active_conditions||[]).length?`<p class="fsub am">${mp.active_conditions.map(c=>c.condition).join(' · ')}</p>`:''}</div>
-    ${oor.length?`<div class="fsec rise" style="--i:2"><span class="lbl">Вне референса</span><div class="rows">${oor.map(lrow).join('')}</div></div>`:''}
-    ${(mp.active_meds||[]).length?`<div class="fsec rise" style="--i:3"><span class="lbl">Принимаю</span><div class="rows">${mp.active_meds.map(m=>row(svg('drop'),'teal',m.name,[m.dose,m.regimen].filter(Boolean).join(' · '))).join('')}</div></div>`:''}
-    <div class="fsec rise" style="--i:4"><span class="lbl">В норме<small>${labs.length-oor.length} маркеров</small></span>${MP_ALL?`<div class="rows">${labs.filter(l=>!l.out_of_range).map(lrow).join('')}</div>`:''}<button class="gvMore press" style="margin-top:8px;border-top:0" data-a="mpall">${MP_ALL?'Свернуть':'Показать все в норме'}</button></div>`}},
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">Тело · по системам</div><p class="labsIntro">Сгруппировано по системам организма. Разверни группу — увидишь маркеры с грейдами.</p>${(mp.active_conditions||[]).length?`<p class="fsub am" style="margin-top:10px">${mp.active_conditions.map(c=>esc(c.condition)).join(' · ')}</p>`:''}</div>
+    <div class="rise" style="--i:2;margin-top:6px">${sy.length?sy.map(group).join(''):'<p class="empty">Пока нет результатов анализов.</p>'}</div>
+    <div class="labsLegend rise" style="--i:3"><div class="lbl">Как читать грейды</div>
+      <div class="legendRow"><span class="grade g-exc">Отлично</span><span>Лучше нормы — внутри целевого диапазона</span></div>
+      <div class="legendRow"><span class="grade g-normal">Норма</span><span>В референсе</span></div>
+      <div class="legendRow"><span class="grade g-watch">На контроле</span><span>В референсе, но вне цели — следим</span></div>
+      <div class="legendRow"><span class="grade g-out">Вне референса</span><span>Требует внимания врача</span></div></div>
+    ${(mp.active_meds||[]).length?`<div class="fsec rise" style="--i:4"><span class="lbl">Принимаю</span><div class="rows">${mp.active_meds.map(m=>row(svg('drop'),'teal',esc(m.name),esc([m.dose,m.regimen].filter(Boolean).join(' · ')))).join('')}</div></div>`:''}
+    <a class="tgbtn tglink rise press" style="--i:5" href="https://t.me/AI_VVK_Doctor_bot" target="_blank" rel="noopener">${svg('tg')}Спросить врача в Telegram</a>`,
+    after(){openLabGroup(0)}}},
   yesterday(snap){if(!snap)return {html:`${top('Вчера')}<p class="empty rise" style="--i:1" style="margin-top:20px">Снимок вчерашнего дня ещё не записан.</p>`};
     const r=snap.ring||{};
     return {html:`${top('Вчера')}
@@ -1986,8 +2003,6 @@ function closeSheet(opt={}){if(!ov.classList.contains('open'))return;haptic();
   }
   settle(()=>{if(ov.classList.contains('open'))return;ov.classList.remove('show');morph.style.cssText='';ov.style.cssText='';ovAnims.forEach(x=>x.cancel());ovAnims=[];appEl.classList.remove('morphing');sheetInert(false);if(sheetReturn&&sheetReturn.isConnected){try{sheetReturn.focus({preventScroll:true})}catch(e){}}})}
 async function tripSet(days,msg){try{await postJSON(days?'/vita/travel':'/vita/travel/end',days?{days}:{});TRIP_PICK=false;await loadToday();renderToday();refreshSheet();toast(msg)}catch(e){toast('Не получилось — попробуй ещё раз')}}
-function openSheetRefresh(){if(sheetKey==='medpass')refreshSheetForce()}
-function refreshSheetForce(){ovS.innerHTML=B[sheetKey](MEDP).html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}
 function refreshSheet(){if(!['today','index','draw','streaks'].includes(sheetKey))return;
   ovS.innerHTML=B[sheetKey]().html;$$('.rise',ovS).forEach(e=>{e.style.transition='none';e.classList.add('in')})}
 let drag=null,dragged=false;
@@ -2111,7 +2126,7 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'verdict':{const v=verdictWord();if(v.k==='none'&&TODAY.state.no_watch)toast('Часы не видели тебя с утра — как только появятся данные, индекс посчитается.');else openSheet(v.k==='week'?'week':'today',null,t);break}
     case'index':openSheet('index',null,t);break;
     case'streaks':TRIP_PICK=false;openSheet('streaks',null,t);break;
-    case'mpall':haptic();MP_ALL=!MP_ALL;openSheetRefresh&&openSheetRefresh();break;
+    case'labgroup':haptic();openLabGroup(t.dataset.g);break;
     case'drvall':haptic();ME_ALL=!ME_ALL;renderMe();break;
     case'rxmark':haptic();postJSON('/vita/manual-mark',{date:t.dataset.d,field_key:k,value:true}).then(()=>loadToday()).then(()=>{renderChecksTab&&renderChecksTab()}).catch(()=>toast('Не получилось — попробуй ещё раз'));break;
     case'tripbtn':haptic();if((TODAY.travel||{}).active){tripSet(null,'Режим поездки выключен')}else{TRIP_PICK=!TRIP_PICK;refreshSheet()}break;

@@ -1510,3 +1510,48 @@ def test_draw_group_reason_is_clipped_on_word_boundary():
     out = vita._clip("Пересдать печёночный профиль с дробным билирубином, АЛТ, АСТ, ГГТ через 4–6 недель", 60)
     assert not out.rstrip("…").endswith((" че", " чер")) and len(out) <= 61
     assert vita._clip("коротко", 60) == "коротко"
+
+
+# ─────── медпаспорт по системам: грейды (макет v5) ───────
+
+def test_lab_grade_four_levels():
+    g = vita.lab_grade
+    assert g(10, 5, 8, None, None) == "out"            # выше референса
+    assert g(2, 5, 8, None, None) == "out"             # ниже референса
+    assert g(6, 5, 8, None, None) == "normal"          # оптимум не задан
+    assert g(7.5, 5, 8, 5.5, 7) == "watch"             # в референсе, вне цели
+    assert g(6, 5, 8, 5.5, 7) == "exc"                 # внутри цели, цель строже референса
+    assert g(6, 5, 8, 5, 8) == "normal"                # цель = референс → не «отлично»
+    assert g(None, 5, 8, 5.5, 7) is None
+
+
+def test_lab_grade_one_sided_reference():
+    assert vita.lab_grade(0.5, None, 5, None, 1) == "exc"      # СРБ: реф. < 5, цель < 1
+    assert vita.lab_grade(2.6, None, 5, None, 1) == "watch"
+    assert vita.lab_grade(6, None, 5, None, 1) == "out"
+
+
+def test_shape_labs_groups_sorted_and_zero_lower_bound_is_one_sided():
+    bm = [
+        {"label": "Холестерин не-ЛПВП", "group": "Липидный профиль", "value": 3.9, "unit": "ммоль/л",
+         "measured_date": "2026-08-14", "lab_min": 0.0, "lab_max": 3.8, "opt_min": 0.0, "opt_max": 3.4},
+        {"label": "Глюкоза", "group": "Углеводный обмен", "value": 5.0, "unit": "ммоль/л",
+         "measured_date": "2026-08-06", "lab_min": 3.9, "lab_max": 6.0, "opt_min": 4.2, "opt_max": 5.0},
+    ]
+    other = [{"marker": "АЧТВ", "value": 32.0, "unit": "сек", "ref_min": None, "ref_max": None, "date": "2026-08-06"}]
+    out = vita.shape_labs_by_system(bm, other, {})
+    assert [g["name"] for g in out] == ["Липидный профиль", "Углеводный обмен", "Прочее"]  # худшая группа первой, «Прочее» в конце
+    lip = out[0]
+    assert lip["worst"] == "out" and lip["ok"] == 0
+    assert "реф. < 3.8" in lip["items"][0]["text"] and "цель < 3.4" in lip["items"][0]["text"]  # 0–X → «< X»
+    assert out[1]["items"][0]["grade"] == "exc"
+    assert out[2]["items"][0]["grade"] == "normal"
+
+
+def test_shape_labs_skips_markers_already_in_biomarkers_and_dash_unit():
+    bm = [{"label": "МНО", "group": "Коагулограмма", "value": 1.1, "unit": "-", "measured_date": "2026-08-06",
+           "lab_min": None, "lab_max": 1.3, "opt_min": None, "opt_max": None}]
+    dup = [{"marker": "МНО", "value": 1.1, "unit": "-", "ref_min": None, "ref_max": 1.3, "date": "2026-08-06"}]
+    out = vita.shape_labs_by_system(bm, dup, {})
+    assert len(out) == 1 and out[0]["n"] == 1
+    assert out[0]["items"][0]["text"] == "1.1 · реф. < 1.3"
