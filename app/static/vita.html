@@ -959,6 +959,10 @@ svg{display:block}
 .cline .mini{flex:none;display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 11px;font-size:11.5px;white-space:nowrap;border-radius:13px;color:var(--accent-ink);border:1px solid var(--line)}
 .cline .mini svg{width:12px;height:12px;flex:none;stroke-width:2}
 .cline .mini.ok{color:var(--green);border-color:transparent;padding:0 2px}
+.ixV{display:flex;flex-direction:column;align-items:flex-end;margin-right:4px}.ixV b{font-size:20px;font-weight:300;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.ixV em{font-style:normal;font-size:12px;font-weight:600;color:var(--accent-ink)}.ixV em.l{color:var(--amber)}.ixV em.m{color:var(--warm-ink)}
+.rcT{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}.rcT div{background:var(--card);box-shadow:var(--card-sh);border-radius:18px;padding:11px 13px}
+.rcT small{display:block;font-size:12px;color:var(--muted)}.rcT b{display:block;margin-top:3px;font-size:22px;font-weight:300;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.rcT b span{font-size:12px;color:var(--muted);margin-left:4px;letter-spacing:0}.rcT em{display:block;font-style:normal;font-size:11.5px;color:var(--accent-ink);margin-top:1px}
 .mvTags{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .mvPill{display:inline-block;font-size:12px;font-weight:600;padding:4px 10px;border-radius:11px;background:var(--accent-soft);color:var(--accent-ink)}
 .mvPill.n{background:var(--line-soft);color:var(--ink2);font-weight:500}.mvPill.w{background:var(--warm-soft);color:var(--warm-ink)}
@@ -1388,7 +1392,7 @@ const GLABEL={exc:'Отлично',normal:'Норма',watch:'На контро�
 function openLabGroup(i){$$('.labsGroup').forEach(el=>{const on=el.dataset.g===String(i)&&!el.classList.contains('open');el.classList.toggle('open',on);const b=$('.labsGH',el);b&&b.setAttribute('aria-expanded',on)})}
 const rn=x=>String(x==null?'':x).replace(/(^|[\s(])-(?=\d)/g,'$1−').replace(/(?<![\d.])(\d+)\.(\d+)(?!\.\d)/g,'$1,$2').replace(/10\^(\d+)/g,(m,d)=>'10'+[...d].map(c=>SUP[c]).join('')).replace(/\bLOW\b/g,'ниже обычного').replace(/\bHIGH\b/g,'выше обычного').replace(/\b(OPTIMAL|NORMAL)\b/g,'в норме');
 const rn0=x=>rn(x).replace(/(\d+),0(?!\d)/g,'$1');
-const IDX_LABEL={'ACWR (Garmin)':'Нагрузка за неделю'};
+const IDX_LABEL={'ACWR (Garmin)':'Нагрузка за неделю','ВСР к базе':'ВСР','Насыщенные жиры':'Жиры','Добавленный сахар':'Сахар'};
 const fmt=(v,dec=0)=>dec?v.toFixed(dec).replace('.',','):Math.round(v).toLocaleString('ru-RU');
 function countUp(el,to,{dur=1400,dec=0,from=0}={}){tween(dur,p=>{el.textContent=fmt(from+(to-from)*p,dec)})}
 const replay=el=>{if(!el)return;el.classList.remove('go');void el.getBoundingClientRect();el.classList.add('go')};
@@ -1797,7 +1801,7 @@ function enterToday(){
 const MARK={y:()=>svg('check'),w:()=>'<b style="color:#fff;font-size:12px">!</b>',n:()=>'<b style="color:#fff;font-size:12px">!</b>'};
 const rowMark={good:'y',neutral:'y',warn:'w',bad:'n'};
 let FOODT=null;
-const srcRows=(ss,u)=>{const mx=Math.max(...ss.map(x=>x.value),1);return ss.slice(0,4).map(x=>`<div class="src">${svg('dots')}<span style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.name)}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,u==='г'&&x.value<10?1:0)} ${u}</span></div>`).join('')};
+const srcRows=(ss,u)=>{const mx=Math.max(...ss.map(x=>x.value),1);return ss.slice(0,4).map(x=>`<div class="src">${svg('dots')}<span style="width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.name)}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,u==='г'&&x.value<10?1:0)} ${u}</span></div>`).join('')};
 const STREAK_IC={sleep_zone:'moon',steps:'steps','Натрий':'salt','Добавленный сахар':'cube','Насыщенные жиры':'fat'};
 const B={
   today(){const n=TODAY.nudge,lv=(RHYTHM&&RHYTHM.levers)||{},stp=(RHYTHM&&RHYTHM.steps)||{},score=TODAY.ring.score,ahead=TODAY.ring.ahead;
@@ -1808,7 +1812,7 @@ const B={
       hero=`<div class="fbig"><b>${fmt(p.consumed,dec)}</b><span>из ${fmt(p.target,dec)} г белка</span></div><p class="fsub ${p.status==='done'?'':'am'}">${esc(n.text)}</p>`;
       bar=`<div class="rise" style="--i:2"><div class="bb"><i style="width:${Math.min(100,p.consumed/p.target*75)}%"></i><u></u></div><div class="bbL"><span>0</span><span>цель ${fmt(p.target)} г</span></div></div>`;
       const ss=p.sources||[],mx=ss.length?Math.max(...ss.map(x=>x.value)):1;
-      src=ss.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Откуда</span><div class="srcs" style="opacity:1;transform:none;padding:0">${ss.slice(0,3).map(x=>`<div class="src">${svg('dots')}<span style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.name)}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,1)} г</span></div>`).join('')}</div></div>`:'';
+      src=ss.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Откуда</span><div class="srcs" style="opacity:1;transform:none;padding:0">${ss.slice(0,3).map(x=>`<div class="src">${svg('dots')}<span style="width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.name)}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,1)} г</span></div>`).join('')}</div></div>`:'';
     }else if(main==='steps'&&stp.now_steps!=null){
       hero=`<div class="fbig"><b>${fmt(stp.now_steps)}</b><span>из ${fmt(stp.target)} шагов</span></div><p class="fsub am">${esc(n.text)}</p>`;
       bar=`<div class="rise" style="--i:2"><div class="bb"><i style="width:${Math.min(100,stp.now_steps/stp.target*75)}%"></i><u></u></div><div class="bbL"><span>0</span><span>цель ${fmt(stp.target)}${stp.status_word?' · '+stp.status_word:''}</span></div></div>`;
@@ -1822,23 +1826,32 @@ const B={
     ['fat','sodium'].forEach(k=>{const l=lv[k];if(!l||!l.has_data)return;const dec=l.target<10?1:0;
       if(l.status==='ok')fine.push(l.label);else more.push(row(svg(k==='sodium'?'salt':'shield'),l.status==='over'?'warm':'amber',`${esc(l.label)} ${fmt(l.consumed,dec)} из ${fmt(l.target,dec)} ${esc(l.unit)}`,esc(l.note),'','chip','food'))});
     if(main!=='protein'&&lv.protein&&lv.protein.has_data&&lv.protein.status!=='done')more.push(row(svg('protein'),'teal',`Белок ${fmt(lv.protein.consumed)} из ${fmt(lv.protein.target)} г`,esc(lv.protein.note),'','chip','food'));
-    (TODAY.ring.breakdown||[]).filter(r=>r.mark==='y').forEach(r=>{if(!fine.includes(r.label))fine.push(r.label)});
+    (TODAY.ring.breakdown||[]).filter(r=>r.mark==='y').forEach(r=>{const lb=IDX_LABEL[r.label]||r.label;if(!fine.includes(lb))fine.push(lb)});
     const title=main==='protein'?'Белок сегодня':main==='steps'?'Шаги сегодня':'Сегодня';
     return {html:`${top(title)}
     <div class="ov-hero rise" style="--i:1">${hero}</div>${bar}${src}
     ${gives.length?`<div class="fsec rise" style="--i:4"><span class="lbl">Что даст</span><div class="rows">${gives.join('')}</div></div>`:''}
     ${more.length?`<div class="fsec rise" style="--i:5"><span class="lbl">Ещё можно</span><div class="rows">${more.slice(0,2).join('')}</div></div>`:''}
-    ${fine.length?`<p class="quietRow rise" style="--i:6">${svg('check')}В норме: ${fine.slice(0,5).join(', ')}</p>`:''}
+    ${fine.length?`<p class="quietRow rise" style="--i:6">${svg('check')}В норме: ${fine.slice(0,6).join(', ')}</p>`:''}
     <button class="whyRow press rise" style="--i:7" data-a="index">${svg('hint')}Из чего прогноз</button>`}},
   week(){const w=TODAY.week||{scores:[]};
     return {html:`${top('Неделя')}
     <div class="ov-hero rise" style="--i:1"><div class="fbig"><b>${w.green}</b><span>из ${w.days} ${plural(w.days,'дня','дней','дней')} в зелёной зоне</span></div><p class="fsub">средний индекс ${w.avg} · зелёный — от 80</p></div>
     <div class="fsec rise" style="--i:2"><div class="rows">${w.scores.map(x=>`<div class="row"><span class="rIc ${x.score>=80?'ok':'off'}">${x.score>=80?svg('check'):''}</span><span class="rT"><b>${dateFmt(x.date)}</b></span><span class="rV">${x.score}</span></div>`).join('')}</div></div>`}},
-  index(){const rows=(TODAY.ring.breakdown||[]),score=TODAY.ring.score,ahead=TODAY.ring.ahead;
-    return {html:`${top(TODAY.state.closed?'Итог дня':'Прогноз дня')}
-    <div class="ov-hero rise" style="--i:1"><div class="lbl">${TODAY.state.closed?'Как закрылся день':'Чем закончится день'}</div><div class="big">${score!=null?score:'—'}<small>${ahead!=null&&ahead>score?`→ можно ${ahead} · оценочно`:'из 100'}</small></div>
-      <p class="ov-sub" style="color:var(--accent-ink)">${TODAY.state.closed?'Сутки закрыты — цифра больше не меняется.':'Если ничего не менять — так и закроется.'} ${ahead!=null&&ahead>score?'Прогноз «можно» — оценочный, ещё не откалиброван на достаточной истории.':''}</p></div>
-    <div class="rise" style="--i:2;margin-top:18px">${rows.length?rows.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${esc(IDX_LABEL[r.label]||r.label)}${r.detail?`<small>${esc(rn0(r.detail))}</small>`:''}</span></div>`).join(''):'<p class="empty">Пока недостаточно данных за сегодня.</p>'}</div>`}},
+  index(){const rows=(TODAY.ring.breakdown||[]),score=TODAY.ring.score,ahead=TODAY.ring.ahead,closed=TODAY.state.closed,ch=TODAY.chips||{},st=(RHYTHM&&RHYTHM.steps)||{},n=TODAY.nudge;
+    /* Индекс = среднее четырёх кругов, поэтому «потеря» каждого = (100 − значение) / 4 — сумма потерь ровно сходится с индексом (2026-10-01) */
+    const hrs=v=>v==null?'—':(Math.floor(v/60)+':'+String(v%60).padStart(2,'0')),by=sg=>rows.filter(r=>r.segment===sg),f1=r=>`${esc(IDX_LABEL[r.label]||r.label)} ${esc(rn0(r.detail))}`;
+    const D={recovery:by('recovery').map(f1).join(' · '),
+      sleep:ch.sleep_min!=null?`${hrs(ch.sleep_min)}${ch.sleep_quality!=null?` · оценка сна ${Math.round(ch.sleep_quality)}`:''}`:'',
+      move:st.now_steps!=null?`${thin(st.now_steps)} из ${thin(st.target)} шагов${st.pace&&st.pace.score!=null?` · темп ${st.pace.score}%`:''}`:'шаги ещё не пришли',
+      food:(()=>{const w=by('food').filter(r=>r.mark!=='y');return w.length?w.map(r=>`${esc(r.label)} ${esc(rn0(r.detail))}`).join(' · '):'все лимиты в коридоре'})()};
+    const segs=chipsFor().map(x=>({...x,loss:(100-x.v)/4})).sort((a,b)=>b.loss-a.loss);
+    const seg=x=>row(svg(x.ic),x.loss>=5?'amber':'teal',x.l,D[x.k]||'',`<span class="ixV"><b>${x.v}</b><em class="${x.loss>=5?'m':x.loss>=2?'l':''}">${x.loss>=0.5?'−'+Math.round(x.loss):'✓'}</em></span>`,'chip',x.k).replace(/<small>/,'<small class="wrap">');
+    return {html:`${top(closed?'Итог дня':'Прогноз дня')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">${closed?'Как закрылся день':'Чем закончится день'}</div><div class="big">${score!=null?score:'—'}<small>${ahead!=null&&ahead>score?`→ можно ${ahead} · оценочно`:'из 100'}</small></div>
+      <p class="ov-sub" style="color:var(--accent-ink)">${closed?'Сутки закрыты — цифра больше не меняется.':'Если ничего не менять — так и закроется.'}</p></div>
+    ${segs.length?`<div class="rows rise" style="--i:2;margin-top:18px">${segs.map(seg).join('')}</div><p class="mvCap rise" style="--i:2;margin-top:8px">Справа — круг и сколько баллов индекса он забирает. Нажмите на строку — подробности.</p>`:'<p class="empty">Пока недостаточно данных за сегодня.</p>'}
+    ${!closed&&n?`<div class="bcard teal rise" style="--i:3;margin-top:18px"><span class="mc-ic">${svg('spark')}</span><span class="bbody"><span class="stw teal">Что поднимет прогноз сегодня</span><b>${esc(n.text)}</b></span></div>`:''}`}},
   streaks(){const streaks=TODAY.streaks||[],tr=TODAY.travel||{active:false},alive=streaks.filter(s=>s.status!=='paused'||(tr.active&&s.key!=='sleep_zone')).length,fz=TODAY.freezes_available;
     const tbtn=`<button class="tripBtn press${tr.active?' on':''}" data-a="tripbtn" aria-pressed="${tr.active}" aria-label="Режим поездки">${svg('trip')}</button>`;
     const tbox=tr.active?`<div class="tripBox on rise" style="--i:1"><b>В поездке до ${tripUntil(tr.until)}</b><small>Серии питания на паузе и не сгорают. Сон и шаги считаются как обычно.</small><div class="tripAct"><button data-a="tripend">Завершить поездку</button></div></div>`
@@ -1888,13 +1901,21 @@ const B={
     const own=(TODAY.ring.breakdown||[]).filter(r=>r.segment===k);
     const idxRows=rs=>rs.map(r=>`<div class="idxRow"><i class="${r.mark}">${MARK[r.mark]?MARK[r.mark]():''}</i><span>${esc(IDX_LABEL[r.label]||r.label)}${r.detail?`<small>${esc(rn0(r.detail))}</small>`:''}</span></div>`).join('');
     if(k==='recovery'){
-      const gate=TODAY.gate,statusWord=T.acwr_status==='HIGH'?'Нагрузка выше обычного':T.acwr_status==='LOW'?'Нагрузка ниже обычного':'Нагрузка в норме';
+      /* 2026-10-01: герой — действие на сегодня (а не «нагрузка ниже обычного»), цифры — плитками, нагрузка — в «Движении» */
+      const gate=TODAY.gate,bb=(TODAY.chips||{}).energy,hrv=T.hrv_last,base=T.hrv_avg30,dh=hrv!=null&&base!=null?hrv-base:null;
+      const act=bb==null?'Часы не отдали заряд — ориентируйся на самочувствие'
+        :bb<40?'Заряд низкий — береги силы'
+        :gate.blocked?'Ходьба и плавание':(bb>=60&&(dh==null||dh>=-3))?'Заряда хватает — нагрузка по плану':'Лёгкая активность';
+      const sub=bb==null?'':bb<40?(gate.blocked?`${esc(gate.label)} — без бега, прыжков и ударных.`:'Сегодня лучше отдых и ходьба.')
+        :gate.blocked?`${esc(gate.label)} — без бега, прыжков и ударных. Запас восстановления не отменяет ограничение.`:`Body Battery ${Math.round(bb)} — ${bb>=60?'хороший запас':'средний запас'}.`;
+      const tile=(l,v,u,e)=>`<div><small>${l}</small><b>${v==null?'—':v}${u&&v!=null?`<span>${u}</span>`:''}</b>${e?`<em>${e}</em>`:''}</div>`;
+      const stv=((TODAY.ring.breakdown||[]).find(r=>r.label==='Стресс')||{}).detail;
       return {html:`${top('Заряд')}
-      <div class="ov-hero rise" style="--i:1"><div class="lbl">Нагрузка сегодня</div><p style="font-family:var(--serif);font-size:30px;font-weight:300;line-height:1.15;margin-top:8px">${statusWord}</p>
-      ${gate.blocked?`<p class="ov-sub" style="color:var(--warm-ink)">${esc(gate.label)} — без бега, прыжков и ударных.</p>`:`<p class="ov-sub" style="color:var(--accent-ink)">Ограничений по здоровью нет.</p>`}</div>
-      <div class="rise" style="--i:2;margin-top:18px">${idxRows(own)}${T.acwr!=null?`<div class="reason"><span>Нагрузка за неделю</span><span>${rn(T.acwr)}${T.acwr_status?' · '+rn(T.acwr_status):''}</span></div>`:''}${T.resting_hr!=null?`<div class="reason"><span>Пульс покоя</span><span>${T.resting_hr}</span></div>`:''}</div>
-      <div class="ov-chart rise" style="--i:3" id="ovChart"><div class="lbl" style="margin-bottom:4px">ВСР за 30 ночей${T.hrv_avg7!=null?` · 7 дн. ${rn(T.hrv_avg7)} · 30 дн. ${rn(T.hrv_avg30)}`:''}</div>${lineChart({data:T.hrv_history.map(x=>x.value),w:320,h:140,base:T.hrv_avg30,baseText:T.hrv_avg30!=null?'норма 30 дн. '+rn0(T.hrv_avg30):null,lastText:T.hrv_last!=null?rn0(T.hrv_last)+' мс':null,xt:chartDates(T.hrv_history)})}</div>
-      <p class="ov-coach rise" style="--i:4">${esc(T.coach)}</p>${pubList(T.publications,'Свежее по теме',5)}`,
+      <div class="ov-hero rise" style="--i:1"><div class="lbl">Заряд сегодня</div><p style="font-family:var(--serif);font-size:30px;font-weight:300;line-height:1.15;margin-top:8px">${act}</p><p class="ov-sub" style="color:${gate.blocked||bb<40?'var(--warm-ink)':'var(--accent-ink)'}">${sub}</p></div>
+      <div class="rcT rise" style="--i:2">${tile('Body Battery',bb==null?null:Math.round(bb),'из 100')}${tile('ВСР ночью',hrv==null?null:rn0(hrv),'мс',dh==null?'':(dh>=0?'+':'−')+rn0(Math.abs(Math.round(dh*10)/10))+' к норме 30 дн.')}${tile('Пульс покоя',T.resting_hr==null?null:rn0(T.resting_hr),'уд/мин')}${tile('Стресс',stv==null?null:rn0(stv),'')}</div>
+      <div class="ov-chart rise" style="--i:3" id="ovChart"><div class="lbl" style="margin-bottom:4px">ВСР за 30 ночей${T.hrv_avg7!=null?` · 7 дн. ${rn(T.hrv_avg7)} · 30 дн. ${rn(T.hrv_avg30)}`:''}</div>${lineChart({data:T.hrv_history.map(x=>x.value),w:320,h:140,base:T.hrv_avg30,lastText:T.hrv_last!=null?rn0(T.hrv_last)+' мс':null,xt:chartDates(T.hrv_history)})}</div>
+      <div class="rows rise" style="--i:4;margin-top:14px">${row(svg('steps'),'teal','Нагрузка и тренировки','нагрузка за неделю, шаги, плавание — в «Движении»','','chip','move')}</div>
+      ${pubList(T.publications,'Свежее по теме',5)}`,
       after(){replay($('#ovChart'))}}
     }
     if(k==='sleep'){

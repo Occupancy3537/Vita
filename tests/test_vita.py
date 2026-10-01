@@ -729,14 +729,19 @@ def test_chips_sleep_quality_is_garmin_sleep_score_not_duration():
 
 # ─────── _short_meal_label / _dish_sources ───────
 
-def test_short_meal_label_extracts_meal_type_prefix():
-    assert vita._short_meal_label("Завтрак: овсянка с ягодами", "08:10") == "Завтрак · 08:10"
+def test_short_meal_label_is_the_first_dish_not_the_meal_type():
+    # 2026-10-01: «Откуда» показывает блюдо, а не «Приём пищи · 07:34»
+    assert vita._short_meal_label("Завтрак: овсянка с ягодами", "08:10") == "Овсянка с ягодами"
+    assert vita._short_meal_label("Овсяная каша на воде (350г), салат латук, ломтик хлеба", "07:34") == "Овсяная каша на воде"
+    assert vita._short_meal_label("Лосось под маринадом (красная рыба, морковь), покупное блюдо", "12:06") == "Лосось под маринадом"
+    assert vita._short_meal_label("Творог 5% (250г), груша (150г)", "15:16") == "Творог 5%"
 
 
-def test_short_meal_label_falls_back_when_no_prefix():
-    """Meal_description в реальных данных часто НЕ начинается со слова
-    "Завтрак"/"Обед" — честный фолбэк "Приём пищи", не выдуманное название."""
-    assert vita._short_meal_label("Бутерброд с ветчиной", "12:47") == "Приём пищи · 12:47"
+def test_short_meal_label_long_name_is_cut_on_word_boundary_and_unreadable_falls_back():
+    out = vita._short_meal_label("Очень длинное название блюда без запятых которое не помещается в строку", "10:00")
+    assert len(out) <= vita._DISH_MAX and not out.endswith(" ")
+    assert vita._short_meal_label("Перекус 1", "10:00") == "Приём пищи · 10:00"   # нет читаемого названия — прежний фолбэк
+    assert vita._short_meal_label("", "10:00") == "Приём пищи · 10:00"
 
 
 class _FakeCursor:
@@ -1705,3 +1710,9 @@ def test_shape_food_topic_micro_normal_and_groups():
 def test_shape_food_topic_micro_missing_inputs_is_empty_not_error():
     out = vita.shape_food_topic({}, {"meals": []}, [])
     assert out["micro_normal"] == [] and out["micro_groups"] == []
+
+
+def test_dish_sources_same_dish_twice_is_told_apart_by_time():
+    rows = [("Яблоко свежее, 150г", 3.0, "10:00"), ("Яблоко свежее, 150г", 4.0, "18:16")]
+    names = [n for n, _ in vita._dish_sources(_FakeCursor(rows), "Белок")]
+    assert names == ["Яблоко свежее · 18:16", "Яблоко свежее"] or sorted(names) == sorted(["Яблоко свежее", "Яблоко свежее · 10:00"])

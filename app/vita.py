@@ -782,17 +782,23 @@ _LEVER_META = {
 _MEAL_TYPE_RX = re.compile(r"^\s*(завтрак|обед|ужин|перекус|полдник|ланч)\b", re.I)
 
 
+_DISH_CUT_RX = re.compile(r"[,(;:]|\s+[—-]\s+|\.\s")
+_DISH_MAX = 30
+
+
 def _short_meal_label(desc: str, time_str: str) -> str:
-    """Макет предполагает короткие подписи источника («Сыр», «Курица») —
-    Meal_description в реальных данных это ПОЛНОЕ описание приёма пищи
-    целиком (AI-регистратор пишет предложение, не список продуктов), короткого
-    названия ингредиента в данных просто нет. Честная короткая подпись —
-    название приёма пищи (оно реально есть первым словом в описании) + время,
-    не выдуманный по названию продукт. Ряд в UI — 68px, длинный текст туда не
-    влезает физически (см. .src .sb в CSS макета)."""
-    m = _MEAL_TYPE_RX.match(desc or "")
-    label = m.group(1).capitalize() if m else "Приём пищи"
-    return f"{label} · {time_str}"
+    """Короткое название блюда для строки «Откуда» (2026-10-01, просьба Влада: «Откуда» — блюда, а не «Приём пищи · 07:34»).
+    Meal_description — свободный текст регистратора («Овсяная каша на воде (350г), салат латук, …»): берём первое блюдо
+    до запятой/скобки/двоеточия, без префикса приёма пищи («Завтрак: …»), не длиннее _DISH_MAX по границе слова.
+    Нет читаемого названия — «Приём пищи · время»."""
+    text = _MEAL_TYPE_RX.sub("", desc or "", count=1).lstrip(" :—-").strip()
+    first = _DISH_CUT_RX.split(text, maxsplit=1)[0].strip()
+    first = re.sub(r"\s+\d+\s*(г|мл|кг|шт)\b.*$", "", first).strip()
+    if len(first) < 3:
+        return f"Приём пищи · {time_str}"
+    if len(first) > _DISH_MAX:
+        first = first[:_DISH_MAX].rsplit(" ", 1)[0].rstrip(",;:—- ")
+    return first[:1].upper() + first[1:]
 
 
 def _dish_sources(cur, col: str, limit: int = 4) -> list[tuple[str, float]]:
@@ -814,7 +820,7 @@ def _dish_sources(cur, col: str, limit: int = 4) -> list[tuple[str, float]]:
         label = _short_meal_label(desc, t)
         if label in seen_labels:
             seen_labels[label] += 1
-            label = f"{label.split(' · ')[0]} {seen_labels[label]} · {t}"
+            label = f"{label.split(' · ')[0]} · {t}"          # одинаковое блюдо дважды — различаем временем
         else:
             seen_labels[label] = 1
         out.append((label, val))
