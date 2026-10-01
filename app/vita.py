@@ -20,8 +20,8 @@ from typing import Optional
 
 from psycopg import sql
 
-from app import checks, steps_sampler, timeutil
-from app import goals
+from app import checks, predictions, steps_sampler, timeutil
+from app import goals, lifestyle
 from app.steps_pace import closed_day_score, expected_steps, pace as steps_pace
 from app.lab_systems import system_of, system_rank
 from app.dashboard import (
@@ -1498,6 +1498,7 @@ def build_today(cur) -> dict:
         "streaks": streak_data["streaks"],
         "freezes_available": streak_data["freezes_available"],
         "travel": travel_state(travel_days, today_iso),
+        "accuracy": predictions.accuracy(cur),
         "assignments": build_assignments(cur, today, state),
         "rx": build_rx_week(cur, today_iso, steps.get("now_steps"), steps.get("target") or goals.steps_target()),
         # «Проверки», этап 2 (2026-09-28): слот «Решить» (этап 1 оставил его
@@ -1808,7 +1809,12 @@ def shape_me(bio: dict, labs_systems: Optional[list] = None) -> dict:
                     "flagged": [x["marker"] for x in g["items"] if x["grade"] in ("out", "watch")]}
                    for g in labs_systems]
         systems.sort(key=lambda g: ({"out": 0, "watch": 1, "ok": 2}[g["status"]], system_rank(g["name"])))
+    # Потенциал: сколько лет вернулось бы, если бы маркеры, добавляющие возраст, перестали его добавлять (по формуле PhenoAge —
+    # сумма их вкладов; оценка, не обещание: часть вкладов — разброс в пределах нормы)
+    adders = sorted([d for d in drivers if d["years"] > 0], key=lambda d: -d["years"])
+    potential = {"years": round(-sum(d["years"] for d in adders), 1), "markers": [d["label"] for d in adders[:3]]} if adders else None
     return {
+        "potential": potential,
         "phenoage": {"value": pa.get("value"), "chrono_age": pa.get("chrono_age"), "delta": pa.get("delta"),
                      "date": pa.get("date"), "note": pa.get("note")},
         "history": [{"date": h["date"], "phenoage": h["phenoage"], "chrono_age": h.get("chrono_age"), "kind": h.get("kind")}
@@ -1820,11 +1826,77 @@ def shape_me(bio: dict, labs_systems: Optional[list] = None) -> dict:
     }
 
 
+_WEIGHT_RU = {"strong": "сильные данные", "moderate": "умеренные данные", "weak": "слабые данные", "unknown": "данных мало"}
+_FACTOR_RU = {"sleep": "Сон", "steps": "Шаги", "alcohol": "Алкоголь", "fiber": "Клетчатка", "fatsugar": "Жиры и сахар"}
+LIFESTYLE_DAYS = 30
+
+
+def _split_source(how: str) -> tuple[str, Optional[str]]:
+    """«Объяснение. Источник: Han 2023.» -> (объяснение, «Han 2023»)."""
+    m = re.search(r"\s*Источник:\s*(.+?)\.?\s*$", how or "")
+    return ((how[:m.start()].rstrip() if m else (how or "")), (m.group(1).strip() if m else None))
+
+
+def lifestyle_for_day(day_iso: str, rows_by_date: dict, meals: list[dict], targets: list[dict], steps_target: int, zone: tuple) -> Optional[dict]:
+    """Вклад образа жизни в биовозраст ЗАКРЫТОГО дня (в днях жизни; минус — моложе). Входы дня: сон ночи, закончившейся утром этого
+    дня; шаги дня (в строке следующей даты); алкоголь, клетчатка, насыщенные жиры и сахар из записей еды дня. Нет ни одного входа — None.
+    Считается при чтении, ничего не пишется и старые записи не пересчитываются."""
+    d = date.fromisoformat(day_iso)
+    sleep = _num((rows_by_date.get(day_iso) or {}).get("Чистый_сон_мин"))
+    steps = _num((rows_by_date.get((d + timedelta(days=1)).isoformat()) or {}).get("Шаги_за_вчера"))
+    day_meals = [m for m in meals if str(m.get("Date") or "")[:10] == day_iso]
+    alcohol = fiber = sat = sugar = None
+    if day_meals:
+        raw = sum((_num(m.get("Алкоголь")) or 0) for m in day_meals)
+        alcohol = raw if raw > _ALCOHOL_TRACE_THRESHOLD_G else 0
+        budget = _budget_for_day(meals, targets, day_iso)
+        fiber = next((b for b in budget if b["label"] == "Клетчатка"), None)
+        sat = next((b for b in budget if b["label"] == "Насыщенные жиры"), None)
+        sugar = next((b for b in budget if b["label"] == "Добавленный сахар"), None)
+    if sleep is None and steps is None and alcohol is None:
+        return None
+    eff = lifestyle.effects(sleep, steps, steps_target, alcohol, fiber, sat, sugar, zone=zone)
+    factors = []
+    for e in eff:
+        days = round((e["est_years"] or 0) * 365, 1)
+        how, src = _split_source(e.get("how"))
+        factors.append({"key": e["key"], "label": _FACTOR_RU.get(e["key"], e["key"]), "what": e["what"], "days": days,
+                        "weight": e.get("weight"), "grade": _WEIGHT_RU.get(e.get("weight"), ""), "how": how, "source": src,
+                        "markers": e.get("markers") or []})
+    return {"date": day_iso, "total_days": round(sum(f["days"] for f in factors), 1), "factors": factors}
+
+
+def build_lifestyle(cur, days: int = LIFESTYLE_DAYS) -> dict:
+    """Блок «Образ жизни» для «Я»: вчера по факторам («Вклад дня»), история дневных вкладов за 30 дней и их сумма по факторам."""
+    rows, meals, targets = _fetch_streak_inputs(cur)
+    rows_by_date = {r["Дата"]: r for r in rows if r.get("Дата")}
+    today_d = timeutil.today()
+    zone, tgt = goals.sleep_zone_min(), goals.steps_target()
+    per_day = []
+    for i in range(days, 0, -1):
+        iso = (today_d - timedelta(days=i)).isoformat()
+        r = lifestyle_for_day(iso, rows_by_date, meals, targets, tgt, zone)
+        if r:
+            per_day.append(r)
+    by_factor: dict[str, float] = {}
+    for r in per_day:
+        for f in r["factors"]:
+            by_factor[f["key"]] = by_factor.get(f["key"], 0) + f["days"]
+    return {"yesterday": per_day[-1] if per_day and per_day[-1]["date"] == (today_d - timedelta(days=1)).isoformat() else None,
+            "history": [{"date": r["date"], "days": r["total_days"]} for r in per_day],
+            "n_days": len(per_day), "window": days,
+            "total_days": round(sum(r["total_days"] for r in per_day), 1),
+            "by_factor": [{"key": k, "label": _FACTOR_RU.get(k, k), "days": round(v, 1)} for k, v in
+                          sorted(by_factor.items(), key=lambda kv: kv[1])]}
+
+
 def build_me(cur) -> dict:
     from app import medpassport
     from app.dashboard import get_bioage_dashboard
     bio = get_bioage_dashboard(cur)
-    return shape_me(bio, shape_labs_by_system(bio.get("biomarkers"), medpassport._recent_labs(cur, limit=200), {}))
+    out = shape_me(bio, shape_labs_by_system(bio.get("biomarkers"), medpassport._recent_labs(cur, limit=200), {}))
+    out["lifestyle"] = build_lifestyle(cur)
+    return out
 
 
 def build_rhythm(cur) -> dict:

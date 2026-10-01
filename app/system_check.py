@@ -211,6 +211,16 @@ def _check_lab_prices_freshness(cur, problems: list) -> None:
             f"/home/openclaw/lab_prices/scrape.log")
 
 
+def _check_prediction_accuracy(cur, problems: list) -> None:
+    """Сверка предсказаний (2026-10-01): средняя ошибка «Прогноза дня» против итога дня больше порога на ≥14 днях — сигнал,
+    что формулу индекса пора пересмотреть (просьба Влада: «если получится совсем неточно — корректировать»)."""
+    from app import predictions
+    acc = predictions.accuracy(cur)
+    if acc["alert"]:
+        problems.append(f"🟡 «Прогноз дня» неточен: в среднем ошибается на {acc['mae']} балла из 100 за {acc['n']} дн "
+                        f"(смещение {acc['bias']:+}) — пора пересмотреть формулу индекса")
+
+
 def _check_numeric_garbage(cur, problems: list, notes: list) -> None:
     """Ловит именно тот класс бага, что нашёлся живой проверкой в MicroClimate
     (temperature="26,4" — запятая-десятичная, float() падает молча внутри
@@ -327,6 +337,7 @@ def build_message() -> dict:
         _check_pg_status(cur, problems)
         _check_numeric_garbage(cur, problems, notes)
         _check_lab_prices_freshness(cur, problems)
+        _check_prediction_accuracy(cur, problems)
         _check_anomaly_freshness(cur, problems, notes)
         _check_garmin_ingest_failures(cur, problems, notes)
     _check_load_gate(today_cache, problems, notes)

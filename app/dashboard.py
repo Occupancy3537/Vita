@@ -776,8 +776,8 @@ _LOAD_RX = re.compile(
 )
 _BUDGET_KEYS = ["Насыщенные жиры", "Добавленный сахар", "Натрий", "Кофеин", "Клетчатка", "Витамин D", "Кальций"]
 _SLEEP_MIN_OK, _SLEEP_MAX_OK = 420, 540
-_CRP_SENS, _MCV_SENS, _CRP_REF = 1.041, 0.292, 1.5
-from app import goals
+from app.lifestyle import CRP_SENS as _CRP_SENS, MCV_SENS as _MCV_SENS, CRP_REF as _CRP_REF
+from app import goals, lifestyle
 from app.goals import STEPS_TARGET_DAILY as _STEPS_TARGET_DAILY  # единое место цели (2026-10-01); прежний комментарий:  # общепринятая суточная норма (Han 2023), не персональная база — см. TODO в JS-оригинале
 # 2026-09-22 (по прямому запросу Влада): следовые количества спирта из
 # ферментированных продуктов (кефир, квас, кимчи и т.п. — обычно <1 г на
@@ -1307,65 +1307,8 @@ def get_today_dashboard(cur) -> dict:
     fiber_b = next((b for b in budget if b["label"] == "Клетчатка"), None)
     sat_fat_b = next((b for b in budget if b["label"] == "Насыщенные жиры"), None)
     sugar_b = next((b for b in budget if b["label"] == "Добавленный сахар"), None)
-    affects = []
-
-    if sleep_min_today is not None:
-        lo, hi = 420, 540
-        years, what = 0, None
-        if sleep_min_today < lo:
-            years = 0.582 * min(1, (lo - sleep_min_today) / 180) / 365
-            what = f"сон {sleep_min_today / 60:.1f} ч — короче нормы"
-        elif sleep_min_today > hi:
-            years = 0.694 * min(1, (sleep_min_today - hi) / 120) / 365
-            what = f"сон {sleep_min_today / 60:.1f} ч — длиннее нормы"
-        else:
-            what = "сон в зоне 7–9 ч"
-        affects.append({
-            "what": what,
-            "how": "Короткий/длинный сон системно повышает СРБ (воспалительный маркер формулы) — но нужно ≥3 ночи подряд, разовая ночь почти не в счёт. Источник: Ballesio 2025, You 2024 (NHANES).",
-            "markers": ["crp"], "direction": "up" if years > 0.00005 else "down" if years < -0.00005 else "neutral",
-            "weight": "unknown" if years == 0 else "moderate", "est_years": None if years == 0 else _round4(years),
-        })
-
-    if steps_today is not None:
-        delta_steps = steps_today - _STEPS_TARGET_DAILY
-        years = -3.98 * ((delta_steps / 100) / 30) / 365
-        affects.append({
-            "what": f"{'+' if delta_steps >= 0 else ''}{round(delta_steps)} шагов к норме {_STEPS_TARGET_DAILY}",
-            "how": "Замена сидения на движение снижает СРБ/лейкоциты/RDW — самая воспроизводимая связь в базе (2 независимых NHANES-анализа). Источник: Han 2023.",
-            "markers": ["crp", "wbc", "rdw"], "direction": "up" if years > 0.00005 else "down" if years < -0.00005 else "neutral",
-            "weight": "strong", "est_years": _round4(years),
-        })
-
-    mcv_shift_fl = (0.30 * (alcohol_g_today / 40) / 100) * 88
-    years = (mcv_shift_fl * _MCV_SENS) / (90 / 7)
-    affects.append({
-        "what": f"{alcohol_g_today} г алкоголя вчера" if alcohol_g_today > 0 else "без алкоголя вчера",
-        "how": "Алкоголь линейно повышает MCV — причинная связь (менделевская рандомизация, UK Biobank). Эффект накапливается за ~90 дней оборота эритроцитов. Источник: Thompson 2021.",
-        "markers": ["mcv"], "direction": "up" if years > 0.00002 else "neutral",
-        "weight": "moderate" if alcohol_g_today > 0 else "unknown", "est_years": _round4(years),
-    })
-
-    if fiber_b:
-        gap_g = fiber_b["cap"] - fiber_b["consumed"]
-        years = (gap_g / 8) * (0.37 * _CRP_SENS / _CRP_REF) / 42
-        affects.append({
-            "what": f"клетчатка {fiber_b['consumed']}/{fiber_b['cap']} г",
-            "how": "Клетчатка снижает СРБ — подтверждено в 7+ независимых RCT/метаанализах. Источник: Jiao 2015, Jain 2025.",
-            "markers": ["crp"], "direction": "up" if years > 0.00002 else "down" if years < -0.00002 else "neutral",
-            "weight": "moderate", "est_years": _round4(years),
-        })
-
-    if sat_fat_b and sugar_b:
-        proxy_pct = (sat_fat_b["pct"] - 100) + (sugar_b["pct"] - 100)
-        years = (0.21 * proxy_pct / 10) / 365
-        affects.append({
-            "what": f"насыщ. жиры {sat_fat_b['pct']}%, сахар {sugar_b['pct']}% от лимита",
-            "how": "Хронический избыток насыщенных жиров/сахара связан с ростом PhenoAge через глюкозу и слабее СРБ, но за один день эффект почти не заметен (нужны недели) — самый слабый по доказательности пункт формулы. Источник: Cardoso 2024.",
-            "markers": ["gluc", "crp"], "direction": "up" if years > 0.00002 else "down" if years < -0.00002 else "neutral",
-            "weight": "weak", "est_years": _round4(years),
-        })
-
+    affects = lifestyle.effects(sleep_min_today, steps_today, goals.steps_target(), alcohol_g_today, fiber_b, sat_fat_b, sugar_b,
+                                zone=goals.sleep_zone_min())
     affects_total = _round4(sum(a["est_years"] or 0 for a in affects))
 
     if ph:

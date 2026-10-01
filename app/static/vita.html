@@ -973,6 +973,14 @@ svg{display:block}
 .goalS button:disabled{opacity:.35}.goalS b{min-width:110px;text-align:center;font-size:28px;font-weight:200;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.goalS b small{font-size:13px;color:var(--muted);margin-left:4px;letter-spacing:0}
 .goalA{display:flex;gap:8px;justify-content:center;margin-top:12px}.goalA button{min-height:38px;padding:0 16px;border-radius:19px;font-size:13px;font-weight:600;background:var(--accent-soft);color:var(--accent-ink)}.goalA button.m{background:var(--line-soft);color:var(--ink2);font-weight:500}
 .goalF{font-size:12px;color:var(--warm-ink);text-align:center;margin-top:8px}
+.meTab{display:flex;gap:4px;padding:4px;border-radius:18px;background:var(--line-soft);margin-top:12px}.meTab button{flex:1;min-height:36px;border-radius:14px;font-size:13px;color:var(--ink2)}.meTab button.on{background:var(--card);color:var(--ink);font-weight:600;box-shadow:var(--card-sh)}
+.vdRow{display:flex;gap:12px;padding:13px 0;border-top:1px solid var(--line-soft)}.vdRow:first-child{border-top:0}
+.vdN{flex:none;width:62px;font-size:19px;font-weight:300;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--accent-ink)}.vdN.up{color:var(--warm)}.vdN.z{color:var(--muted)}
+.vdT{flex:1;min-width:0}.vdT b{display:block;font-size:14.5px;font-weight:500}.vdT small{display:block;margin-top:2px;font-size:12px;line-height:1.4;color:var(--muted)}
+.vdT small.cl{max-height:2.8em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.vdBar{height:5px;border-radius:3px;background:var(--line-soft);margin-top:7px;overflow:hidden}.vdBar i{display:block;height:100%;border-radius:3px;background:var(--accent)}.vdBar i.up{background:var(--warm)}
+.vdChips{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}.vdChips span{font-size:11px;padding:2px 8px;border-radius:8px;background:var(--line-soft);color:var(--ink2)}
+.agePot{margin-top:6px;font-size:12.5px;opacity:.9}
 .mvTags{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .mvPill{display:inline-block;font-size:12px;font-weight:600;padding:4px 10px;border-radius:11px;background:var(--accent-soft);color:var(--accent-ink)}
 .mvPill.n{background:var(--line-soft);color:var(--ink2);font-weight:500}.mvPill.w{background:var(--warm-soft);color:var(--warm-ink)}
@@ -1626,25 +1634,37 @@ function renderDoctor(){if(!DOC)return;const c=DOC.consilium,n=(DOC.notes||[])[0
   $$('.rise',$('#s-plan')).forEach(e=>e.classList.add('in'));
 }
 const monthYear=d=>new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{month:'short',year:'numeric'}).replace(' г.','');
-let ME_ALL=false;
+let ME_ALL=false,ME_TAB='blood';
+const dWord=(v,dec=1)=>{const a=Math.abs(v),r=Math.round(a*10)/10;return `${fmt(a,dec)} ${r%1?'дня':plural(Math.round(r),'день','дня','дней')}`};
 function renderMe(){if(!ME)return;const pa=ME.phenoage||{},h=ME.history||[],dr=ME.drivers||[],sy=ME.systems||[];
   const f1=v=>v==null?'—':fmt(v,1);
   let html=`<div class="ageCard rise" style="--i:1"><div class="ageH"><span>Биовозраст · PhenoAge</span>${pa.delta!=null?`<em>${pa.delta<0?'−':'+'}${fmt(Math.abs(pa.delta),1)} ${Math.abs(pa.delta)%1?'года':plural(Math.abs(pa.delta),'год','года','лет')}</em>`:''}</div>
     <div class="ageT"><div class="bio"><small>Биологический возраст</small><b>${f1(pa.value)}<span>лет</span></b></div><p class="ageP">по паспорту<b>${f1(pa.chrono_age)}</b></p></div>
-    <p class="ageF">${pa.value!=null?`По крови ${pa.date?shortDate(pa.date):''} · обновится со следующей сдачей`:(esc(pa.note||'PhenoAge ещё не рассчитан'))}</p></div>`;
+    <p class="ageF">${pa.value!=null?`По крови ${pa.date?shortDate(pa.date):''} · обновится со следующей сдачей`:(esc(pa.note||'PhenoAge ещё не рассчитан'))}</p>${ME.potential?`<p class="ageF agePot">Потенциал — ещё ${fmt(ME.potential.years,1).replace('-','−')} ${Math.abs(ME.potential.years)%1?'года':plural(Math.abs(ME.potential.years),'год','года','лет')} · ${ME.potential.markers.map(esc).join(', ')}</p>`:''}</div>`;
   /* лесенка: между сдачами значение держится ровно; меньше 3 точек — график не рисуем (бенчмарк) */
   if(h.length>=3){const w=320,H=124,pt=12,pb=20,ih=H-pt-pb,vs=h.map(x=>x.phenoage),mn=Math.min(...vs)-1,mx=Math.max(...vs)+1,t0=new Date(h[0].date),t1=new Date(h[h.length-1].date),sp=Math.max(1,t1-t0);
     const X=d=>8+h.findIndex(q=>q.date===d)/(h.length-1)*(w-24),Y=v=>pt+ih-(v-mn)/(mx-mn)*ih;let d=`M${X(h[0].date)},${Y(vs[0])}`;for(let i=1;i<h.length;i++)d+=` H${X(h[i].date)} V${Y(vs[i])}`;
     html+=`<div class="bioChart rise" style="--i:2" id="bioCard"><svg class="chart" viewBox="0 0 ${w} ${H}"><path class="draw" pathLength="1" d="${d}" fill="none" stroke="${ACCENT}" stroke-width="2" stroke-linejoin="round"/>${h.map(x=>`<circle class="pdot" cx="${X(x.date)}" cy="${Y(x.phenoage)}" r="2.6" fill="var(--bg)" stroke="${ACCENT}" stroke-width="1.8"/>`).join('')}<text class="xl" x="8" y="${H-3}">${monthYear(h[0].date)}</text><text class="xl" x="${w-16}" y="${H-3}" text-anchor="end">${monthYear(h[h.length-1].date)} · ${h.length} ${plural(h.length,'сдача','сдачи','сдач')}</text></svg></div>`}
   else if(h.length)html+=`<p class="gvNote rise" style="--i:2">Для тренда нужно хотя бы 3 сдачи — сейчас ${h.length}.</p>`;
-  /* что дало: вклад маркеров от паспортного возраста к биологическому */
-  if(dr.length&&pa.chrono_age!=null&&pa.value!=null){
+  /* «Что дало»: переключатель «Кровь · N маркеров» / «Образ жизни · N дн» (макет v5) */
+  const LS=ME.lifestyle,hasLife=LS&&LS.n_days>0,hasBlood=dr.length&&pa.chrono_age!=null&&pa.value!=null;
+  if(hasBlood||hasLife){
+    html+=`<div class="secH rise" style="--i:3;margin-top:28px"><span class="lbl">Что дало</span></div>`;
+    if(hasBlood&&hasLife)html+=`<div class="meTab rise" style="--i:3" role="tablist"><button class="press${ME_TAB==='blood'?' on':''}" data-a="metab" data-k="blood" role="tab" aria-selected="${ME_TAB==='blood'}">Кровь · ${dr.length} ${plural(dr.length,'маркер','маркера','маркеров')}</button><button class="press${ME_TAB==='life'?' on':''}" data-a="metab" data-k="life" role="tab" aria-selected="${ME_TAB==='life'}">Образ жизни · ${LS.n_days} дн</button></div>`;
+    if(hasLife&&(ME_TAB==='life'||!hasBlood)){
+      const mxd=Math.max(...LS.by_factor.map(f=>Math.abs(f.days)),1);
+      html+=`<div class="gvCard rise" style="--i:3"><div class="gvAx"><span>моложе</span><span>старше</span></div>${LS.by_factor.map(f=>{const w=Math.max(1.5,Math.abs(f.days)/mxd*50),z=Math.abs(f.days)<0.05;return `<div class="gv"><span class="gn">${esc(f.label)}</span><span class="gb c" style="background:none">${z?'':`<i class="${f.days>0?'old':''}" style="${f.days>0?'left:50%':'right:50%'};width:${w}%"></i>`}</span><span class="gd ${f.days>0?'old':z?'zero':''}">${z?'0':(f.days<0?'−':'+')+fmt(Math.abs(f.days),1)}</span></div>`}).join('')}
+        <div class="gv end"><span class="gn">Итого за ${LS.n_days} дн</span><span class="gb" style="background:none"></span><span class="gd ${LS.total_days>0?'old':''}">${LS.total_days<0?'−':'+'}${fmt(Math.abs(LS.total_days),1)} дн</span></div></div>
+      <p class="gvNote rise" style="--i:3">Оценка направления и порядка величины по исследованиям, не измерение: настоящий биовозраст считается только по крови. Точность оценок мы сверяем с реальностью по мере накопления данных.</p>`;
+      if(LS.yesterday)html+=`<div class="rows rise" style="--i:4;margin-top:14px">${row(svg('sprout'),'teal',`Вчера: ${LS.yesterday.total_days<=0?'моложе':'старше'} на ${dWord(LS.yesterday.total_days)}`,'по факторам и со ссылками на исследования','','effect')}</div>`;
+    }else if(hasBlood){
     const sorted=[...dr].sort((a,b)=>Math.abs(b.years)-Math.abs(a.years)),shown=ME_ALL?sorted:sorted.slice(0,3),mx=Math.max(...sorted.map(x=>Math.abs(x.years)),.1);
     const fd=v=>(v<0?'−':'+')+fmt(Math.abs(v),1);
-    html+=`<div class="secH rise" style="--i:3;margin-top:28px"><span class="lbl">Что дало</span><span>кровь · ${dr.length} ${plural(dr.length,'маркер','маркера','маркеров')}</span></div>
-    <div class="gvCard rise" style="--i:3"><div class="gvAx"><span>моложе</span><span>старше</span></div>${shown.map(x=>{const w=Math.max(1.5,Math.abs(x.years)/mx*50);return `<div class="gv"><span class="gn">${esc(x.label)}</span><span class="gb c" style="background:none"><i class="${x.years>0?'old':''}" style="${x.years>0?'left:50%':'right:50%'};width:${w}%"></i></span><span class="gd ${x.years>0?'old':''}">${fd(x.years)}</span></div>`}).join('')}
+    html+=`<div class="gvCard rise" style="--i:3"><div class="gvAx"><span>моложе</span><span>старше</span></div>${shown.map(x=>{const w=Math.max(1.5,Math.abs(x.years)/mx*50);return `<div class="gv"><span class="gn">${esc(x.label)}</span><span class="gb c" style="background:none"><i class="${x.years>0?'old':''}" style="${x.years>0?'left:50%':'right:50%'};width:${w}%"></i></span><span class="gd ${x.years>0?'old':''}">${fd(x.years)}</span></div>`}).join('')}
     ${sorted.length>3?`<button class="gvMore press" data-a="drvall">${ME_ALL?'Свернуть':`Показать все ${sorted.length}`}</button>`:''}</div>
-    <p class="gvNote rise" style="--i:3">Вклад маркера в разницу между паспортным и биологическим возрастом — по формуле PhenoAge.${TODAY&&TODAY.ring&&TODAY.ring.bioage_days?` Сегодня образ жизни — ${TODAY.ring.bioage_days<0?'моложе':'старше'} на ${fmt(Math.abs(TODAY.ring.bioage_days),1)} ${plural(Math.round(Math.abs(TODAY.ring.bioage_days)),'день','дня','дней')} (оценка по исследованиям).`:''}</p>`}
+    <p class="gvNote rise" style="--i:3">Вклад маркера в разницу между паспортным и биологическим возрастом — по формуле PhenoAge.${TODAY&&TODAY.ring&&TODAY.ring.bioage_days?` Сегодня образ жизни — ${TODAY.ring.bioage_days<0?'моложе':'старше'} на ${fmt(Math.abs(TODAY.ring.bioage_days),1)} ${plural(Math.round(Math.abs(TODAY.ring.bioage_days)),'день','дня','дней')} (оценка по исследованиям).`:''}</p>`
+    }
+  }
   if(sy.length){const bad=sy.filter(g=>g.status!=='ok'),okn=sy.filter(g=>g.status==='ok');
     html+=`<div class="secH rise" style="--i:4;margin-top:28px"><span class="lbl">Системы</span><span>${okn.length} из ${sy.length} в норме</span></div>`;
     if(bad.length)html+=`<div class="sysGrid rise" style="--i:4">${bad.map(g=>{const out=g.status==='out',k=out?(g.n_out??g.flagged.length):(g.n_watch??g.flagged.length);return `<button class="sysC press" data-a="medpass"><span class="rIc ${out?'warm':'amber'}">${svg(SYS_IC[g.name]||'lab')}</span><b>${esc(SYS_SHORT[g.name]||g.name)}</b><small><i class="${out?'o':'w'}"></i>${k} ${out?'вне референса':'на контроле'}</small></button>`}).join('')}</div>`;
@@ -1857,13 +1877,24 @@ const B={
       sleep:ch.sleep_min!=null?`${hrs(ch.sleep_min)}${ch.sleep_quality!=null?` · оценка сна ${Math.round(ch.sleep_quality)}`:''}`:'',
       move:st.now_steps!=null?`${thin(st.now_steps)} из ${thin(st.target)} шагов${st.pace&&st.pace.score!=null?` · темп ${st.pace.score}%`:''}`:'шаги ещё не пришли',
       food:(()=>{const w=by('food').filter(r=>r.mark!=='y');return w.length?w.map(r=>`${esc(r.label)} ${esc(rn0(r.detail))}`).join(' · '):'все лимиты в коридоре'})()};
+    const ac=TODAY.accuracy||{n:0},accLine=`<p class="mvCap rise" style="--i:3;margin-top:10px">${ac.enough?`Точность прогноза: в среднем ±${fmt(ac.mae,1)} из 100 за ${ac.n} ${plural(ac.n,'день','дня','дней')}${ac.alert?' — это много, формулу пересмотрим':''}.`:ac.n>0?`Сверка прогноза с итогом дня копится: ${ac.n} из 7 дней.`:'Прогноз будет сверяться с итогом дня: точность появится через неделю.'}</p>`;
     const segs=chipsFor().map(x=>({...x,loss:(100-x.v)/4})).sort((a,b)=>b.loss-a.loss);
     const seg=x=>row(svg(x.ic),x.loss>=5?'amber':'teal',x.l,D[x.k]||'',`<span class="ixV"><b>${x.v}</b><em class="${x.loss>=5?'m':x.loss>=2?'l':''}">${x.loss>=0.5?'−'+Math.round(x.loss):'✓'}</em></span>`,'chip',x.k).replace(/<small>/,'<small class="wrap">');
     return {html:`${top(closed?'Итог дня':'Прогноз дня')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">${closed?'Как закрылся день':'Чем закончится день'}</div><div class="big">${score!=null?score:'—'}<small>${ahead!=null&&ahead>score?`→ можно ${ahead} · оценочно`:'из 100'}</small></div>
       <p class="ov-sub" style="color:var(--accent-ink)">${closed?'Сутки закрыты — цифра больше не меняется.':'Если ничего не менять — так и закроется.'}</p></div>
     ${segs.length?`<div class="rows rise" style="--i:2;margin-top:18px">${segs.map(seg).join('')}</div><p class="mvCap rise" style="--i:2;margin-top:8px">Справа — круг и сколько баллов индекса он забирает. Нажмите на строку — подробности.</p>`:'<p class="empty">Пока недостаточно данных за сегодня.</p>'}
+    ${accLine}
     ${!closed&&n?`<div class="bcard teal rise" style="--i:3;margin-top:18px"><span class="mc-ic">${svg('spark')}</span><span class="bbody"><span class="stw teal">Что поднимет прогноз сегодня</span><b>${esc(n.text)}</b></span></div>`:''}`}},
+  effect(){const LS=(ME&&ME.lifestyle)||{},y=LS.yesterday;
+    if(!y)return {html:`${top('Вклад дня')}<p class="empty rise" style="--i:1;margin-top:20px">За вчера пока нет данных для оценки.</p>`};
+    const tot=y.total_days,mx=Math.max(...y.factors.map(f=>Math.abs(f.days)),1);
+    return {html:`${top('Вклад дня')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">Вчера · к биовозрасту · по закрытым суткам</div><div class="big">${tot<=0?'−':'+'}${fmt(Math.abs(tot),1)}<small>${tot<=0?'дня моложе':'дня старше'}</small></div>
+      <p class="ov-sub" style="color:var(--accent-ink)">Минус — моложе, плюс — старше. Так поведение дня влияет на маркеры крови, из которых считается биовозраст.</p></div>
+    <div class="mvCard rise" style="--i:2;padding-top:6px">${[...y.factors].sort((a,b)=>a.days-b.days).map(f=>{const z=Math.abs(f.days)<0.05;
+      return `<div class="vdRow"><span class="vdN ${z?'z':f.days>0?'up':''}">${z?'0':(f.days<0?'−':'+')+fmt(Math.abs(f.days),1)}</span><span class="vdT"><b>${esc(f.what)}</b><small class="cl" data-a="vdx" role="button" tabindex="0">${esc(f.how)}</small>${z?'':`<div class="vdBar"><i class="${f.days>0?'up':''}" style="width:${Math.max(4,Math.abs(f.days)/mx*100)}%"></i></div>`}<div class="vdChips">${f.grade?`<span>${esc(f.grade)}</span>`:''}${f.source?`<span>${esc(f.source)}</span>`:''}</div></span></div>`}).join('')}</div>
+    <p class="disc rise" style="--i:3">Оценка направления и порядка величины по поведенческим исследованиям — не пересчёт PhenoAge. Настоящий биовозраст считается только по крови${(typeof DOC!=='undefined'&&DOC&&DOC.next_draw)?`: следующая сдача ${shortDate(DOC.next_draw.date)}`:''}.</p>`}},
   goals(){const G=(GOALS_DATA&&GOALS_DATA.goals)||[],grps=(GOALS_DATA&&GOALS_DATA.groups)||[];
     const fv=(g,v)=>`${v==null?'—':fmt(v,g.decimals||0).replace(/\B(?=(\d{3})+(?!\d))/g,'\u00a0')}`;
     const eff=g=>{let lo=g.lo,hi=g.hi;if(g.frame){if(g.frame.hi!=null)hi=Math.min(hi,g.frame.hi);if(g.frame.lo!=null)lo=Math.max(lo,g.frame.lo)}return [lo,hi]};
@@ -2340,6 +2371,9 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
       if(fsActive()){try{localStorage.setItem(FS_KEY,'0')}catch(e){}document.exitFullscreen();toast('Полный экран выключен')}
       else{try{localStorage.setItem(FS_KEY,'1')}catch(e){}fsSuppress=false;fsEnter();toast('Полный экран включён')}
       if(typeof ME!=='undefined'&&ME)setTimeout(()=>{curTab==='me'&&renderMe()},250);break}
+    case'effect':haptic();(ME?Promise.resolve():loadMe()).then(()=>openSheet('effect',null,t)).catch(()=>toast('Не удалось загрузить'));break;
+    case'vdx':t.classList.toggle('cl');break;
+    case'metab':haptic();ME_TAB=k;renderMe();break;
     case'goals':haptic();GOAL_OPEN=k||null;GOAL_EDIT={};loadGoals().then(()=>openSheet('goals',null,t)).catch(()=>toast('Не удалось загрузить цели'));break;
     case'goalopen':haptic();GOAL_OPEN=GOAL_OPEN===k?null:k;GOAL_EDIT={};refreshSheet();break;
     case'goalstep':{haptic();const g=GOALS_DATA.goals.find(x=>x.key===k),cur=GOAL_EDIT[k]!=null?GOAL_EDIT[k]:g.value;let lo=g.lo,hi=g.hi;if(g.frame){if(g.frame.hi!=null)hi=Math.min(hi,g.frame.hi);if(g.frame.lo!=null)lo=Math.max(lo,g.frame.lo)}

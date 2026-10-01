@@ -119,6 +119,7 @@ import app.lab_optimizer as lab_optimizer
 import app.lab_reminder as lab_reminder
 import app.redflag_followup as redflag_followup
 import app.steps_sampler as steps_sampler
+import app.predictions as predictions
 from app.biohacking_ingest import BiohackingPayload, process_ingest
 from app.write_path import process as process_source
 from app.vita import router as vita_router
@@ -196,6 +197,8 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     ("RF_FOLLOWUP_ENABLED", lambda: redflag_followup.run_scheduler(), "redflag-followup-scheduler"),
     # Замеры шагов в течение дня (2026-10-01): кривая «ход дня» на экране «Движение».
     ("STEPS_SAMPLER_ENABLED", lambda: steps_sampler.run_scheduler(), "steps-sampler"),
+    # Журнал предсказаний (2026-10-01): прогноз индекса дня в 15:00 + сверка с итогом закрытого дня.
+    ("PREDICTIONS_ENABLED", lambda: predictions.run_scheduler(), "predictions-scheduler"),
     # «Научный контур» (2026-09-25): единственная цель VISION со статусом «ноль».
     ("RESEARCH_SCAN_ENABLED", lambda: research_scan.run_scheduler(), "research-scan-scheduler"),
     # 2026-09-21: Food diary_v5 — свой бот (vlad_health), свой polling-цикл,
