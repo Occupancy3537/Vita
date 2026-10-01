@@ -1519,6 +1519,20 @@ def lab_draw_due(cur) -> bool:
         return False
 
 
+def _fallback_verdict(actions: list[dict]) -> Optional[str]:
+    """Нет итога семейного врача (старый отчёт) — первые три коротких действия через «;», не простыня из всех."""
+    shorts = [_short_action(a) for a in actions if a.get("imperative")]
+    if not shorts:
+        return None
+    return "; ".join(shorts[:3]) + (f" (и ещё {len(shorts) - 3})" if len(shorts) > 3 else "")
+
+
+def _short_action(a: dict) -> str:
+    """Короткая формулировка действия консилиума (до 90 знаков): готовая из итога семейного врача, иначе вырезка."""
+    from app.consilium import _clip_short
+    return a.get("short") or _clip_short(a.get("imperative") or "")
+
+
 def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict], plan: dict,
                  panel: int = 0) -> dict:
     latest = next((r for r in reports if r.get("status") == "completed"), None)
@@ -1527,7 +1541,10 @@ def shape_doctor(reports: list[dict], notes: list[dict], labs_flags: list[dict],
         consilium_block = {
             "id": latest["id"], "date": (latest.get("ts_recorded") or "")[:10], "topic": latest.get("topic"),
             "question": latest.get("question"), "roles": latest.get("roles") or [],
-            "actions": [{"text": a.get("imperative"), "accepted": a.get("accepted")}
+            # итог семейного врача (1–3 предложения); у отчёта без итога — короткие действия через «;»
+            "verdict": latest.get("verdict") or _fallback_verdict(latest.get("actions") or []),
+            "verdict_generated": bool(latest.get("verdict")),
+            "actions": [{"text": _short_action(a), "full": a.get("imperative"), "accepted": a.get("accepted")}
                         for a in (latest.get("actions") or []) if a.get("imperative")],
             "emerging": [{"method": e.get("method"), "maturity": e.get("maturity"), "grade": e.get("grade")}
                          for e in (latest.get("emerging") or []) if e.get("method")],

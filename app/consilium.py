@@ -398,6 +398,88 @@ _SYNTHESIZER_SYSTEM = """Ты — председатель консилиума.
 Только JSON, без пояснений."""
 
 
+_FAMILY_SYSTEM = """Ты — семейный врач пациента. Консилиум специалистов закончился: тебе даны действия, которые
+предложил председатель, неразрешённые разногласия и замечания методолога. Реши за них и напиши ИТОГ пациенту.
+
+Правила:
+- verdict — 1–3 коротких предложения: что делать (с цифрами, дозой, временем суток) и когда повторить анализ или
+  осмотр. БЕЗ обоснований, БЕЗ пересказа споров, БЕЗ имён специалистов, без оборотов «рекомендуется рассмотреть».
+  Пример: «Насыщенные жиры менее 28 г в день; псиллиум 1 ч. л. каждый день в 12:00 перед обедом; через месяц
+  сдать кровь на холестерин.»
+- Используй ТОЛЬКО то, что есть во входных действиях: не выдумывай новых назначений, доз и сроков.
+- Если разногласие влияет на действие — выбери осторожный вариант (меньшая доза, более поздний срок), без объяснений.
+- short_actions — по одной короткой строке (до 90 знаков, императив, с цифрами) на КАЖДОЕ входное действие, в том
+  же порядке и ровно столько же, сколько действий.
+Верни JSON строго: {{"verdict": "...", "short_actions": ["...", "..."]}}"""
+
+FAMILY_SHORT_MAX = 90
+FAMILY_VERDICT_MAX = 400
+NO_CHANGES_VERDICT = "Менять ничего не нужно, продолжай как сейчас."
+
+
+def _clip_short(text: str, n: int = FAMILY_SHORT_MAX) -> str:
+    text = " ".join((text or "").split())
+    for cut in (" — ", "; ", ": ", " (", ". "):
+        i = text.find(cut)
+        if i > 10:
+            text = text[:i]
+    if len(text) > n:
+        text = text[:n].rsplit(" ", 1)[0].rstrip(",;:—- ") + "…"
+    return text
+
+
+def family_verdict(topic: str, question: Optional[str], actions: list[str], disagreements: list[dict],
+                   skeptic_top: list[str]) -> dict:
+    """Итог семейного врача: {"verdict": str|None, "short_actions": [str]}. Сбой LLM — verdict=None,
+    короткие формулировки режутся из самих действий (UI покажет их вместо итога)."""
+    if not actions:
+        return {"verdict": NO_CHANGES_VERDICT, "short_actions": []}
+    user = (f"Тема: {topic}\n" + (f"Вопрос пациента: {question}\n" if question else "") +
+            f"\nДействия председателя:\n{json.dumps(actions, ensure_ascii=False)}\n\n"
+            f"Неразрешённые разногласия:\n{json.dumps(disagreements or [], ensure_ascii=False, default=str)}\n\n"
+            f"Замечания методолога:\n{json.dumps(skeptic_top or [], ensure_ascii=False)}")
+    res = _call_llm(_FAMILY_SYSTEM, user, "consilium_family", effort=SPECIALIST_EFFORT)
+    verdict = str(res.get("verdict") or "").strip()[:FAMILY_VERDICT_MAX] or None
+    shorts = res.get("short_actions")
+    if not isinstance(shorts, list) or len(shorts) != len(actions):
+        shorts = [None] * len(actions)
+    shorts = [(str(sh).strip() if sh else "") or _clip_short(a) for sh, a in zip(shorts, actions)]
+    return {"verdict": verdict, "short_actions": shorts}
+
+
+def build_verdict_message(verdict: str) -> str:
+    return f"🩺 Врачи посовещались и решили:\n{verdict}\n\nПодробности — в приложении, вкладка «Врач»."
+
+
+def ensure_verdict(report_id: str) -> Optional[str]:
+    """Один раз дописывает итог в УЖЕ существующий отчёт (старые отчёты создавались до итога). Если итог уже есть —
+    возвращает его, ничего не вызывает. Вызывается вручную/скриптом, не из запроса пользователя (LLM-вызов)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql.SQL("SELECT topic, question, actions, skeptic_notes, verdict FROM {t} WHERE id = %s")
+                    .format(t=sql.Identifier(schema(), "consilium_report")), (report_id,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        topic, question, actions, skeptic, verdict = row
+        if verdict:
+            return verdict
+        cur.execute(sql.SQL("SELECT opinion_doctor, opinion_advisor, significance FROM {t} WHERE report_id = %s")
+                    .format(t=sql.Identifier(schema(), "disagreement")), (report_id,))
+        dis = [{"between": [a, b], "about": sig} for a, b, sig in cur.fetchall()]
+    items = [a for a in (actions or []) if a.get("imperative")]
+    fam = family_verdict(topic, question, [a["imperative"] for a in items], dis, list(skeptic or []))
+    if not fam["verdict"]:
+        return None
+    for a, sh in zip(items, fam["short_actions"]):
+        a["short"] = sh
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql.SQL("UPDATE {t} SET verdict = %s, actions = %s WHERE id = %s")
+                    .format(t=sql.Identifier(schema(), "consilium_report")),
+                    (fam["verdict"], json.dumps(actions, ensure_ascii=False), report_id))
+        conn.commit()
+    return fam["verdict"]
+
+
 def synthesize(specialist_opinions: list[dict], skeptic_review: dict, topic: str, question: Optional[str]) -> dict:
     user = (f"Тема: {topic}\n" + (f"Вопрос пациента: {question}\n" if question else "") +
             f"\nМнения специалистов:\n{json.dumps(specialist_opinions, ensure_ascii=False, default=str)}\n\n"
@@ -627,8 +709,15 @@ def run_consilium(topic: str, question: Optional[str] = None, trigger: str = "co
             result = {"accepted": False, "rejected_gate": "error", "rejected_reason": "внутренняя ошибка"}
         actions_results.append((action, result))
 
-    compact = build_compact_summary(topic, actions_results, synthesis.get("emerging") or [],
-                                    synthesis.get("disagreements") or [], skeptic_result.get("top_concerns") or [])
+    try:
+        fam = family_verdict(topic, question, [a["imperative"] for a, _ in actions_results],
+                             synthesis.get("disagreements") or [], skeptic_result.get("top_concerns") or [])
+    except Exception:
+        logger.exception("consilium: итог семейного врача не получился — отчёт сохраняется без него")
+        fam = {"verdict": None, "short_actions": [a["imperative"][:90] for a, _ in actions_results]}
+    compact = (build_verdict_message(fam["verdict"]) if fam["verdict"] else
+               build_compact_summary(topic, actions_results, synthesis.get("emerging") or [],
+                                     synthesis.get("disagreements") or [], skeptic_result.get("top_concerns") or []))
     full_text = build_full_document(topic, question, specialist_opinions + [skeptic_opinion], skeptic_result,
                                     synthesis, actions_results)
 
@@ -639,13 +728,14 @@ def run_consilium(topic: str, question: Optional[str] = None, trigger: str = "co
         cur.execute(
             sql.SQL(
                 "INSERT INTO {t} (id, topic, question, trigger, roles, actions, emerging, skeptic_notes, "
-                "full_text, status, cost_usd) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                "full_text, status, cost_usd, verdict) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
             ).format(t=sql.Identifier(schema(), "consilium_report")),
             (report_id, topic, question, trigger, json.dumps(specialists),
-             json.dumps([{"imperative": a["imperative"], "accepted": r.get("accepted"), "id": r.get("id")} for a, r in actions_results], ensure_ascii=False),
+             json.dumps([{"imperative": a["imperative"], "accepted": r.get("accepted"), "id": r.get("id"), "short": sh}
+                         for (a, r), sh in zip(actions_results, fam["short_actions"])], ensure_ascii=False),
              json.dumps(synthesis.get("emerging") or [], ensure_ascii=False),
              json.dumps(skeptic_result.get("top_concerns") or [], ensure_ascii=False),
-             full_text, status, cost_usd),
+             full_text, status, cost_usd, fam["verdict"]),
         )
         write_journal(cur, "consilium_report", report_id, "create", diff={"topic": topic, "status": status})
         conn.commit()
@@ -702,16 +792,16 @@ def get_consilium_reports(cur, limit: int = 20) -> dict:
     cur.execute(
         sql.SQL(
             "SELECT id, ts_recorded, topic, question, trigger, roles, actions, emerging, "
-            "skeptic_notes, full_text, status, cost_usd FROM {t} ORDER BY ts_recorded DESC LIMIT %s"
+            "skeptic_notes, full_text, status, cost_usd, verdict FROM {t} ORDER BY ts_recorded DESC LIMIT %s"
         ).format(t=sql.Identifier(schema(), "consilium_report")),
         (limit,),
     )
     reports = []
-    for i, ts, topic, question, trig, roles, actions, emerging, skeptic_notes, full_text, status, cost in cur.fetchall():
+    for i, ts, topic, question, trig, roles, actions, emerging, skeptic_notes, full_text, status, cost, verdict in cur.fetchall():
         reports.append({
             "id": i, "ts_recorded": ts.isoformat(), "topic": topic, "question": question, "trigger": trig,
             "roles": roles, "actions": actions, "emerging": emerging, "skeptic_notes": skeptic_notes,
-            "full_text": full_text, "status": status, "cost_usd": cost,
+            "full_text": full_text, "status": status, "cost_usd": cost, "verdict": verdict,
         })
     return {"reports": reports}
 

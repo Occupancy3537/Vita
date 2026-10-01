@@ -139,6 +139,11 @@ svg{display:block}
 .sectionHead{display:flex;justify-content:space-between;align-items:baseline;margin:30px 2px 12px;gap:10px}
 .sectionHead h2{font-size:20px;font-weight:300;letter-spacing:-.01em}
 .sectionHead span{font-size:12px;color:var(--muted)}
+.decCard{display:flex;align-items:flex-start;gap:12px;width:100%;padding:14px;text-align:left;border-bottom:1px solid var(--line-soft)}
+.decT{flex:1;min-width:0}
+.decT small{display:block;font-size:12px;color:var(--muted)}
+.decT b{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin-top:4px;font-size:15px;font-weight:500;line-height:1.35;color:var(--ink)}
+.decGo{flex:none;width:14px;height:14px;margin-top:6px;color:var(--muted);transform:rotate(-90deg)}
 .linkline{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--accent-ink);font-weight:500}
 .linkline svg{width:13px;height:13px}
 .flatRow{border-top:1px solid var(--line);padding:13px 0}
@@ -1508,9 +1513,10 @@ function rxCard(rx){const ti=(new Date(rx.today+'T12:00:00').getDay()+6)%7,anyMa
     `<div class="rxRow"><span class="rxT"><b>${esc(r.title)}</b><small>${esc(r.goal)}</small></span>${r.days.map((d,i)=>i===ti&&d.c!=='y'&&d.c!=='y m'?`<button class="rxD ${d.c} tap" style="--k:${i}" data-a="rxmark" data-k="${r.field}" data-d="${d.date}" aria-label="Отметить вручную"></button>`:`<i class="rxD ${d.c}" style="--k:${i}"></i>`).join('')}<span class="rxN${r.n>=r.need?' ok':''}">${r.n}/${r.need}</span></div>`).join('')
     +`<p class="rxNote">${anyMan?'Пунктир — отмечено вручную, без часов. ':''}Не видно на часах — нажми на сегодняшний кружок.</p></div></div>`}
 function renderDoctor(){if(!DOC)return;const c=DOC.consilium,n=(DOC.notes||[])[0],f=(DOC.labs_flags||[])[0],d=DOC.next_draw;
-  $('#docRows').innerHTML=(c?row(svg('consilium'),'teal','Консилиум',`${shortDate(c.date)} · ${esc(c.topic||'итог')}`,'','consrep')
+  /* Консилиум одним итогом (2026-10-01): «Врачи посовещались и решили …» — споры и рассуждения под «Как врачи пришли к решению» */
+  $('#docRows').innerHTML=(c&&c.verdict?`<button class="decCard press" data-a="consrep"><span class="rIc teal">${svg('consilium')}</span><span class="decT"><small>Врачи посовещались и решили · ${shortDate(c.date)}</small><b>${esc(c.verdict)}</b></span>${svg('chev','ic decGo')}</button>`
       :row(svg('consilium'),'teal','Консилиум','собрать — командой «/консилиум» в Telegram','','toast').replace('data-a="toast"','data-a="toast" data-msg="Консилиум запускается командой «/консилиум» в Telegram; раз в месяц — сам."'))
-    +(n?row(svg('conclusion'),'','Заключение врача',`${shortDate(n.date)}${n.category?' · '+esc(n.category):''}`,'','notes'):'')
+    +(n?row(svg('conclusion'),'','Записи врача',`${shortDate(n.date)}${n.category?' · '+esc(n.category):''}`,'','notes'):'')
     +row(svg('medpass'),f?'warm':'','Медпаспорт',f?`вне референса: ${esc(f.marker)} ${fmt(f.value,f.value%1?1:0)}`:'все маркеры в референсе',f?'<i class="rDot warm"></i>':'','medpass');
   $('#drawH').hidden=!d;$('#nextDraw').hidden=!d;
   if(d){const days=Math.round((new Date(d.date+'T00:00:00')-new Date(new Date().toDateString()))/864e5);
@@ -1901,16 +1907,21 @@ const B={
     </div>`:''}
     ${ah!=null?`<p class="ov-coach rise" style="--i:4">AHEI — индекс качества рациона: цель ${dq.ahei_target}, сейчас ${Math.round(ah)}. Считается за неделю, не за день.</p>`:''}
     ${pubList(T.publications,'Свежее по теме',5)}`}},
-  consrep(){const c=DOC&&DOC.consilium;if(!c)return {html:top('Консилиум')};
-    return {html:`${top('Консилиум')}
-    <div class="ov-hero rise" style="--i:1"><div class="lbl">${dateFmt(c.date)}${c.roles.length?' · '+c.roles.join(', '):''}</div><p style="font-family:var(--serif);font-size:28px;font-weight:300;line-height:1.15;margin-top:10px">${c.topic||''}</p>${c.question?`<p class="ov-sub" style="color:var(--accent-ink)">${c.question}</p>`:''}</div>
-    ${c.actions.length?`<div class="fsec rise" style="--i:2"><span class="lbl">Что делать</span><div class="rows">${c.actions.map(a=>{const[l,r]=actSplit(a.text);return row(a.accepted?svg('check'):'',a.accepted?'teal':'off',esc(l),`${esc(r)}<em class="actSt${a.accepted?' ok':''}">${a.accepted?'принято · в Проверках':'не принято'}</em>`)}).join('').replace(/<b>/g,'<b class="wrap">').replace(/<small>/g,'<small class="wrap">')}</div></div>`:''}
-    ${c.skeptic.length?`<div class="fsec rise" style="--i:3"><span class="lbl">Скептик</span>${c.skeptic.map(x=>`<p class="ov-coach" style="margin-top:6px">${x}</p>`).join('')}</div>`:''}
-    ${c.emerging.length?`<div class="fsec rise" style="--i:4"><span class="lbl">Перспективное</span><div class="rows">${c.emerging.map(e=>row(svg('spark'),'amber',e.method,[e.maturity,e.grade].filter(Boolean).join(' · '))).join('').replace(/<b>/g,'<b class="wrap">')}</div></div>`:''}
-    <p class="disc rise" style="--i:5">Новый консилиум — командой «/консилиум» в Telegram; раз в месяц он собирается сам.</p>`}},
+  consrep(){const c=DOC&&DOC.consilium;if(!c)return {html:top('Решение врачей')};
+    const acc=(id,t,m,body)=>`<div class="accS" data-s="${id}"><button class="accH" data-a="acc" data-k="${id}" aria-expanded="false"><span class="accT"><b>${t}</b><small>${m}</small></span>${svg('chev','ic chev')}</button><div class="accB"><div>${body}</div></div></div>`;
+    const how=`${(c.roles||[]).length?`<p class="ov-coach">${esc(c.roles.join(', '))}</p>`:''}
+      ${c.actions.length?`<div class="lbl" style="margin:12px 0 4px">Полные формулировки</div>${c.actions.map(a=>`<p class="ov-coach" style="margin-top:6px">${esc(a.full||a.text)}</p>`).join('')}`:''}
+      ${(c.skeptic||[]).length?`<div class="lbl" style="margin:12px 0 4px">Замечания методолога</div>${c.skeptic.map(x=>`<p class="ov-coach" style="margin-top:6px">${esc(x)}</p>`).join('')}`:''}
+      ${(c.emerging||[]).length?`<div class="lbl" style="margin:12px 0 4px">Перспективное, пока не внедрено</div>${c.emerging.map(e=>`<p class="ov-coach" style="margin-top:6px">${esc(e.method)}${e.grade?' · '+esc(e.grade):''}</p>`).join('')}`:''}
+      <p class="ov-coach" style="margin-top:12px">Новый консилиум — командой «/консилиум» в Telegram; раз в месяц он собирается сам.</p>`;
+    return {html:`${top('Решение врачей')}
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">Врачи посовещались и решили · ${shortDate(c.date)}</div><p style="font-family:var(--serif);font-size:26px;font-weight:300;line-height:1.2;margin-top:10px">${esc(c.verdict||'Итог пока не сформирован')}</p></div>
+    ${c.actions.length?`<div class="fsec rise" style="--i:2"><span class="lbl">Что делать</span><div class="rows">${c.actions.map(a=>row(a.accepted?svg('check'):'',a.accepted?'teal':'off',esc(a.text),a.accepted?'<em class="actSt ok" style="margin-top:0">в Проверках</em>':'<em class="actSt" style="margin-top:0">без проверки</em>')).join('').replace(/<b>/g,'<b class="wrap">')}</div></div>`:''}
+    <div class="rise" style="--i:3;margin-top:18px">${acc('how','Как врачи пришли к решению',`${(c.roles||[]).length} ${plural((c.roles||[]).length,'специалист','специалиста','специалистов')} · споры и замечания`,how)}</div>`}},
   notes(){const ns=(DOC&&DOC.notes)||[];
-    return {html:`${top('Заключение врача')}
-    <div class="rise" style="--i:1;margin-top:18px">${ns.map(x=>`<div class="bcard teal" style="margin-top:10px"><span class="mc-ic">${svg('doc')}</span><span class="bbody"><span class="stw teal">${dateFmt(x.date)}${x.category?' · '+x.category:''}</span><b style="font-weight:400">${x.note}</b></span></div>`).join('')||'<p class="empty">Записей врача пока нет.</p>'}</div>`}},
+    const prev=t=>{t=(t||'').replace(/\s+/g,' ').trim();return t.length>90?t.slice(0,90).replace(/\s+\S*$/,'')+'…':t};
+    return {html:`${top('Записи врача')}
+    <div class="rise" style="--i:1;margin-top:10px">${ns.length?ns.map((x,i)=>`<div class="accS" data-s="n${i}"><button class="accH" data-a="acc" data-k="n${i}" aria-expanded="false"><span class="accT"><b>${esc(shortDate(x.date))}${x.category?' · '+esc(x.category):''}</b><small>${esc(prev(x.note))}</small></span>${svg('chev','ic chev')}</button><div class="accB"><div><p class="ov-coach" style="margin:0 0 14px">${esc(x.note)}</p></div></div></div>`).join(''):'<p class="empty">Записей пока нет.</p>'}</div>`}},
   draw(){const d=DOC&&DOC.next_draw;if(!d)return {html:top('Сдача')};
     /* макет v5: «Зачем» (сводка по группам) + три свёрнутые секции; группы — по КТО назначил (Влад, 29.09) */
     const acc=(id,t,m,body)=>`<div class="accS${drawAcc===id?' open':''}" data-s="${id}"><button class="accH" data-a="acc" data-k="${id}" aria-expanded="${drawAcc===id}"><span class="accT"><b>${t}</b><small>${m}</small></span>${svg('chev','ic chev')}</button><div class="accB"><div>${body}</div></div></div>`;

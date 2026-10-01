@@ -169,6 +169,13 @@ def question_headline(significance: str) -> str:
     return re.sub(r"(?<=\w)-(?=\w)", "\u2011", text)  # «25‑OH» не рвётся переносом
 
 
+# 2026-10-01 (просьба Влада: «в Проверках непонятная информация, я ей не пользуюсь»): споры специалистов
+# консилиума — внутренняя кухня; пользователю их решает семейный врач одним итогом (consilium_report.verdict).
+# Поэтому в «Вопросах» и в точке на вкладке остаются только вопросы детектива, требующие решения Влада.
+# Код разногласий не удалён (таблица, resolve_question, тесты) — флаг вернёт прежнее поведение.
+SHOW_DISAGREEMENT_QUESTIONS = False
+
+
 def _disagreement_questions(cur, decisions: dict) -> list[dict]:
     cur.execute(
         sql.SQL("SELECT id, opinion_doctor, opinion_advisor, significance, ts_recorded, report_id FROM {t} "
@@ -310,7 +317,8 @@ _MODES = ("questions", "checks", "habits")
 def list_checks(cur, mode: Optional[str] = None) -> dict:
     decisions = get_decisions(cur)
     items = {
-        "questions": _detective_questions(cur, decisions) + _disagreement_questions(cur, decisions),
+        "questions": _detective_questions(cur, decisions) + (
+            _disagreement_questions(cur, decisions) if SHOW_DISAGREEMENT_QUESTIONS else []),
         "checks": _recommendation_checks(cur) + _intervention_checks(cur),
         "habits": _habits(cur),
     }
@@ -339,7 +347,8 @@ def pending_questions_count(cur) -> int:
     (включая разногласия консилиума, которые в слот «Решить» никогда не
     попадают, см. докстринг home_inbox) — отдельный, полный счётчик."""
     decisions = get_decisions(cur)
-    return len(_detective_questions(cur, decisions)) + len(_disagreement_questions(cur, decisions))
+    return len(_detective_questions(cur, decisions)) + (
+        len(_disagreement_questions(cur, decisions)) if SHOW_DISAGREEMENT_QUESTIONS else 0)
 
 
 def home_inbox(cur) -> list[dict]:

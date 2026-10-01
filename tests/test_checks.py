@@ -122,7 +122,8 @@ def test_list_checks_unknown_mode_raises():
 
 # ─────── вопросы: consilium.disagreement ───────
 
-def test_disagreement_appears_as_question():
+def test_disagreement_appears_as_question(monkeypatch):
+    monkeypatch.setattr(checks, "SHOW_DISAGREEMENT_QUESTIONS", True)  # прежнее поведение — за флагом
     dis_id = _write_disagreement()
     with get_conn() as conn, conn.cursor() as cur:
         result = checks.list_checks(cur, mode="questions")
@@ -300,7 +301,8 @@ def test_pending_questions_count_zero_when_none():
         assert checks.pending_questions_count(cur) == 0
 
 
-def test_pending_questions_count_includes_disagreements_not_in_home_inbox():
+def test_pending_questions_count_includes_disagreements_not_in_home_inbox(monkeypatch):
+    monkeypatch.setattr(checks, "SHOW_DISAGREEMENT_QUESTIONS", True)  # прежнее поведение — за флагом
     """Живая жалоба Влада (2026-09-28): точка на вкладке «Проверки» должна
     гореть, даже когда home_inbox() пуст — разногласия консилиума туда не
     попадают вовсе (см. её докстринг), но это всё ещё нерешённый вопрос."""
@@ -454,3 +456,13 @@ def test_question_headline_truncates_on_word_boundary():
 def test_question_headline_empty_is_empty():
     from app.checks import question_headline
     assert question_headline("") == "" and question_headline(None) == ""
+
+
+def test_disagreements_are_hidden_from_questions_and_counter_by_default():
+    """2026-10-01: споры консилиума не показываем пользователю — итог даёт семейный врач."""
+    _write_disagreement()
+    with get_conn() as conn, conn.cursor() as cur:
+        questions = checks.list_checks(cur, mode="questions")["items"]
+        before = checks.pending_questions_count(cur)
+    assert [q for q in questions if q.get("source") == "консилиум"] == []
+    assert before == len([q for q in questions])  # точка на вкладке считает только то, что реально показано

@@ -410,11 +410,14 @@ def test_run_consilium_end_to_end_writes_opinions_and_report(monkeypatch):
     from app import recommendations as rc
     monkeypatch.setattr(rc, "propose_recommendation", lambda req: FakeResp())
 
+    monkeypatch.setattr(cs, "family_verdict", lambda *a, **kw: {
+        "verdict": "сделать МРТ в течение двух недель", "short_actions": ["сделать МРТ"]})
     result = cs.run_consilium("боль в боку 10 лет, причина не найдена", trigger="command")
     report_id = result["report_id"]
     try:
         assert result["status"] == "completed"
-        assert "сделать МРТ" in result["compact_summary"]
+        assert "Врачи посовещались и решили" in result["compact_summary"]
+        assert "сделать МРТ в течение двух недель" in result["compact_summary"]
         assert "## Действия" in result["full_text"]
 
         with get_conn() as conn, conn.cursor() as cur:
@@ -453,7 +456,7 @@ def test_run_consilium_empty_result_is_legitimate(monkeypatch):
     report_id = result["report_id"]
     try:
         assert result["status"] == "empty"
-        assert "менять нечего" in result["compact_summary"]
+        assert "Менять ничего не нужно" in result["compact_summary"]
     finally:
         with get_conn() as conn, conn.cursor() as cur:
             from psycopg import sql
@@ -608,3 +611,57 @@ def test_relevant_publications_includes_id_field():
             from psycopg import sql
             cur.execute(sql.SQL("DELETE FROM {t} WHERE id = %s").format(t=sql.Identifier(schema(), "publication")), (pub_id,))
             conn.commit()
+
+
+# ─────── итог семейного врача (2026-10-01): «врачи посовещались и решили …» ───────
+
+def test_family_verdict_parses_and_aligns_short_actions(monkeypatch):
+    monkeypatch.setattr(cs, "_call_llm", lambda *a, **kw: {
+        "verdict": "Жиры менее 28 г в день; псиллиум 1 ч. л. в 12:00; через месяц кровь на холестерин.",
+        "short_actions": ["Жиры < 28 г/день", "Псиллиум 1 ч. л. в 12:00"]})
+    out = cs.family_verdict("липиды", None, ["Удерживать жиры < 28 г", "Принимать псиллиум"], [], [])
+    assert out["verdict"].startswith("Жиры менее 28 г")
+    assert out["short_actions"] == ["Жиры < 28 г/день", "Псиллиум 1 ч. л. в 12:00"]
+
+
+def test_family_verdict_misaligned_short_actions_fall_back_to_clipped_originals(monkeypatch):
+    monkeypatch.setattr(cs, "_call_llm", lambda *a, **kw: {"verdict": "Итог", "short_actions": ["только одно"]})
+    long_a = "Удерживать насыщенные жиры ≤28 г/день с растворимой клетчаткой и пересдать липидограмму через 90 дней"
+    out = cs.family_verdict("липиды", None, [long_a, "Принимать псиллиум"], [], [])
+    assert out["verdict"] == "Итог" and len(out["short_actions"]) == 2
+    assert all(len(x) <= cs.FAMILY_SHORT_MAX + 1 for x in out["short_actions"])
+
+
+def test_family_verdict_llm_failure_gives_no_verdict_but_short_actions(monkeypatch):
+    monkeypatch.setattr(cs, "_call_llm", lambda *a, **kw: {})
+    out = cs.family_verdict("липиды", None, ["Принимать псиллиум"], [], [])
+    assert out["verdict"] is None and out["short_actions"] == ["Принимать псиллиум"]
+
+
+def test_family_verdict_no_actions_is_legitimate_no_llm(monkeypatch):
+    monkeypatch.setattr(cs, "_call_llm", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("LLM не нужен")))
+    assert cs.family_verdict("тема", None, [], [], []) == {"verdict": cs.NO_CHANGES_VERDICT, "short_actions": []}
+
+
+def test_verdict_message_is_short_and_has_no_debate():
+    msg = cs.build_verdict_message("Жиры менее 28 г в день.")
+    assert msg.startswith("🩺 Врачи посовещались и решили:") and "Жиры менее 28 г в день." in msg
+    assert len(msg) < 300
+
+
+def test_ensure_verdict_fills_once_and_is_idempotent(monkeypatch):
+    from psycopg import sql
+    rid = "cs_TEST_verdict"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql.SQL("INSERT INTO {t} (id, topic, actions, status) VALUES (%s, %s, %s, 'completed')")
+                    .format(t=sql.Identifier(schema(), "consilium_report")),
+                    (rid, "тест", json.dumps([{"imperative": "Принимать псиллиум", "accepted": True}])))
+        conn.commit()
+    calls = []
+    monkeypatch.setattr(cs, "family_verdict", lambda *a, **kw: calls.append(1) or
+                        {"verdict": "Псиллиум 1 ч. л. в 12:00.", "short_actions": ["Псиллиум 1 ч. л."]})
+    assert cs.ensure_verdict(rid) == "Псиллиум 1 ч. л. в 12:00."
+    assert cs.ensure_verdict(rid) == "Псиллиум 1 ч. л. в 12:00." and len(calls) == 1  # второй раз LLM не зовём
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql.SQL("SELECT actions FROM {t} WHERE id = %s").format(t=sql.Identifier(schema(), "consilium_report")), (rid,))
+        assert cur.fetchone()[0][0]["short"] == "Псиллиум 1 ч. л."

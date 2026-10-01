@@ -916,7 +916,9 @@ def test_vita_questions_resolve_401_without_cookie():
     assert r.status_code == 401
 
 
-def test_vita_questions_resolve_disagreement_roundtrip():
+def test_vita_questions_resolve_disagreement_roundtrip(monkeypatch):
+    from app import checks as _checks
+    monkeypatch.setattr(_checks, "SHOW_DISAGREEMENT_QUESTIONS", True)  # прежнее поведение — за флагом
     import json as _json
     from ulid import ULID as _ULID
 
@@ -1594,3 +1596,34 @@ def test_vita_yesterday_404_when_no_history_row(monkeypatch):
     monkeypatch.setattr(vita, "read_day_snapshot", lambda cur, day: None)
     monkeypatch.setattr(vita, "build_day_snapshot", lambda cur, day: None)
     assert client.get("/vita/yesterday", cookies=_cookie()).status_code == 404
+
+
+# ─────── «Врач»: консилиум одним итогом ───────
+
+def _report(**kw):
+    base = {"id": "cs_1", "ts_recorded": "2026-09-30T10:00:00", "topic": "липиды", "question": None, "status": "completed",
+            "roles": ["кардиолог"], "actions": [{"imperative": "Удерживать насыщенные жиры ≤28 г/день с растворимой клетчаткой и пересдать липидограмму через 90 дней",
+                                                  "accepted": True, "short": "Жиры ≤ 28 г/день"}],
+            "emerging": [], "skeptic_notes": ["мало данных"], "verdict": "Жиры менее 28 г в день; кровь на холестерин через месяц."}
+    base.update(kw)
+    return base
+
+
+def test_shape_doctor_consilium_uses_verdict_and_short_actions():
+    c = vita.shape_doctor([_report()], [], [], {"panels": [], "conflicts": []})["consilium"]
+    assert c["verdict"].startswith("Жиры менее 28 г")
+    assert c["actions"][0]["text"] == "Жиры ≤ 28 г/день" and c["actions"][0]["full"].startswith("Удерживать")
+    assert c["skeptic"] == ["мало данных"]  # споры и замечания остаются в данных — UI прячет под «Как врачи пришли к решению»
+
+
+def test_shape_doctor_consilium_without_verdict_falls_back_to_short_actions():
+    r = _report(verdict=None, actions=[{"imperative": "Принимать псиллиум 1 ч. л. ежедневно", "accepted": True},
+                                        {"imperative": "Сдать кровь на холестерин через месяц", "accepted": True}])
+    c = vita.shape_doctor([r], [], [], {"panels": [], "conflicts": []})["consilium"]
+    assert "псиллиум" in c["verdict"] and "; " in c["verdict"] and c["verdict_generated"] is False
+
+
+def test_shape_doctor_fallback_verdict_caps_at_three_actions():
+    acts = [{"imperative": f"Действие номер {i}", "accepted": True} for i in range(5)]
+    c = vita.shape_doctor([_report(verdict=None, actions=acts)], [], [], {"panels": [], "conflicts": []})["consilium"]
+    assert c["verdict"].count(";") == 2 and c["verdict"].endswith("(и ещё 2)")
