@@ -969,8 +969,8 @@ svg{display:block}
 .goalW{border-top:1px solid var(--line-soft)}.goalW:first-child{border-top:0}
 .goalE{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s var(--ease)}.goalW.open .goalE{grid-template-rows:1fr}.goalE>div{overflow:hidden}
 .goalEi{padding:4px 14px 14px}
-.goalS{display:flex;align-items:center;justify-content:center;gap:18px;margin-top:6px}.goalS button{width:44px;height:44px;border-radius:50%;background:var(--line-soft);font-size:22px;color:var(--ink)}
-.goalS button:disabled{opacity:.35}.goalS b{min-width:110px;text-align:center;font-size:28px;font-weight:200;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.goalS b small{font-size:13px;color:var(--muted);margin-left:4px;letter-spacing:0}
+.goalS{display:flex;align-items:center;justify-content:center;gap:18px;margin-top:6px}.goalS button{flex:none;display:grid;place-items:center;padding:0;line-height:1;width:44px;height:44px;border-radius:50%;background:var(--line-soft);font-size:22px;color:var(--ink)}
+.goalS button:disabled{opacity:.35}.goalS b{min-width:110px;white-space:nowrap;text-align:center;font-size:28px;font-weight:200;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.goalS b small{font-size:13px;color:var(--muted);margin-left:4px;letter-spacing:0}
 .goalA{display:flex;gap:8px;justify-content:center;margin-top:12px}.goalA button{min-height:38px;padding:0 16px;border-radius:19px;font-size:13px;font-weight:600;background:var(--accent-soft);color:var(--accent-ink)}.goalA button.m{background:var(--line-soft);color:var(--ink2);font-weight:500}
 .goalF{font-size:12px;color:var(--warm-ink);text-align:center;margin-top:8px}
 .meTab{display:flex;gap:4px;padding:4px;border-radius:18px;background:var(--line-soft);margin-top:12px}.meTab button{flex:1;min-height:36px;border-radius:14px;font-size:13px;color:var(--ink2)}.meTab button.on{background:var(--card);color:var(--ink);font-weight:600;box-shadow:var(--card-sh)}
