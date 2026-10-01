@@ -1554,12 +1554,25 @@ const NAME_BY_SEGMENT={recovery:'Заряд',sleep:'Сон',move:'Движени
 /* «Всё хорошо»/«Можно улучшить»/«Нет данных»/«День закрыт» — сервер шлёт ФЛАГИ
    (state.no_watch/closed, ring.score), слово выбирает клиент — тот же принцип,
    что установил ещё Vita v1 (см. докстринг app/vita.py::build_state). */
+/* «Вчера» (макет v5): тот же главный экран в режиме прошлого дня — кольцо и круги за закрытые сутки, «Урок дня» вместо вердикта */
+let PASTV=null;
+function pastView(snap){const r=snap.ring||{};
+  return {...TODAY,date:snap.date,ring:{...r},chips:snap.chips||{},chip_status:r.chip_status||{},gate:TODAY.gate,/* щадящий режим — постоянное состояние, берём актуальное, не из снимка */
+    state:{...TODAY.state,closed:true,no_watch:false,no_food:false,sunday:false},nudge:null,week:null,streaks:[],inbox:[],travel:{active:false}}}
+const VW=()=>PASTV?pastView(PASTV):TODAY;
+function pastLesson(snap){const r=snap.ring||{},ch=snap.chips||{},cs=r.chip_status||{};
+  const seg={recovery:ch.energy??r.recovery_score,sleep:ch.sleep_quality??r.sleep_score,move:r.movement_score,food:r.nutrition_score};
+  const NM={recovery:'заряд',sleep:'сон',move:'движение',food:'питание'};
+  const bad=Object.keys(seg).filter(k=>seg[k]!=null&&(cs[k]==='warn'||seg[k]<70)).sort((a,b)=>seg[a]-seg[b]);
+  if(!bad.length)return 'Ровный день — повтори';
+  return `Слабее всего — ${NM[bad[0]]} ${Math.round(seg[bad[0]])}`}
 function verdictWord(){
+  if(PASTV)return {k:'closed',w:'Урок дня',t:pastLesson(PASTV)};
   /* Макет v7: слово-вердикт + ОДНО короткое действие со стрелкой к прогнозу
      («Творог или курица на ужин → 86»). «Всё хорошо» — только когда делать
      нечего (подсказки нет); есть подсказка — «Можно улучшить», каким бы ни
      был индекс. Полный текст подсказки — в шторке по тапу. */
-  const st=TODAY.state,score=TODAY.ring.score,ahead=TODAY.ring.ahead,n=TODAY.nudge,w=TODAY.week;
+  const T=VW(),st=T.state,score=T.ring.score,ahead=T.ring.ahead,n=T.nudge,w=T.week;
   const arrow=(ahead!=null&&score!=null&&ahead>score)?` → ${ahead}`:'';
   if(st.no_watch)return {k:'none',w:'Нет данных',t:'Надень часы'};
   if(st.closed)return {k:'closed',w:'День закрыт',t:score==null?'Сутки позади':score>80?'Главное сделано':`Закрыт на ${score}`};
@@ -1573,7 +1586,7 @@ function verdictWord(){
    без условия "день закрыт" (title у #crown и так всегда говорил "День
    выше 80", без оговорки про закрытые сутки — лишнее условие было моей
    же более ранней сверхинтерпретацией). */
-const crownOn=()=>!!(TODAY.ring.score>80);
+const crownOn=()=>!!(VW().ring.score>80);
 
 /* ================= ARC ================= */
 const ARC={cx:150,cy:207.76,R:183.76,half:43.29,d:'M24 74 A183.76 183.76 0 0 1 276 74'};
@@ -1596,14 +1609,14 @@ buildArc();
 
 /* ================= ГЛАВНАЯ «СЕГОДНЯ» ================= */
 function chipsFor(){
-  const cs=TODAY.chip_status,ch=TODAY.chips||{};
+  const T=VW(),cs=T.chip_status,ch=T.chips||{};
   /* Живая жалоба (2026-09-28): «сон 7:16 — это 100, а 8:00 будет 120?» —
      кругляши «Сон»/«Заряд» показывали судейский скор (100 при любом «не
      плохо»), не настоящее число. Теперь — реальные Body Battery/Оценка сна
      Гармина (совпадает с тем, чем красится chip_status на бэкенде), запасной
      путь — прежний судейский скор, если часы сегодня ничего не дали. */
-  const seg={recovery:ch.energy??TODAY.ring.recovery_score,sleep:ch.sleep_quality??TODAY.ring.sleep_score,
-             move:TODAY.ring.movement_score,food:TODAY.ring.nutrition_score};
+  const seg={recovery:ch.energy??T.ring.recovery_score,sleep:ch.sleep_quality??T.ring.sleep_score,
+             move:T.ring.movement_score,food:T.ring.nutrition_score};
   const out=[];
   for(const k of ['recovery','sleep','move','food']){
     const v=seg[k];if(v==null)continue;
@@ -1618,14 +1631,14 @@ const plural=(n,a,b,c)=>{const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&
 function renderToday(){
   applyBarColor();
   sToday.classList.remove('booting');const bs=$('#bootSkel');if(bs)bs.remove();const be=$('#bootErr');if(be)be.hidden=true;
-  const st=TODAY.state,v=verdictWord();
-  $('#tDate').innerHTML=dateFmt(TODAY.date);
-  $('#dBack').hidden=false;$('#dFwd').hidden=true;
-  const gate=TODAY.gate;
-  {const tr=TODAY.travel||{},el=$('#tTrip');el.hidden=!tr.active;if(tr.active)el.textContent='в поездке до '+tripUntil(tr.until)}
+  const T=VW(),st=T.state,v=verdictWord(),past=!!PASTV;
+  $('#tDate').innerHTML=past?`${dateFmt(T.date)}<span class="pastTag">вчера</span>`:dateFmt(T.date);
+  $('#dBack').hidden=past;$('#dFwd').hidden=!past;
+  const gate=T.gate;
+  {const tr=T.travel||{},el=$('#tTrip');el.hidden=!tr.active;if(tr.active)el.textContent='в поездке до '+tripUntil(tr.until)}
   $('#tStatus').innerHTML=`<i class="dot-live${st.no_watch?' gray':''}"></i>${gate.blocked?esc(gate.label):'Без ограничений'}`;
-  $('#dayLbl').textContent=st.closed?'Итог дня':TODAY.ring.score==null?'Не оценивается':'Прогноз дня';
-  $('#dayNum').textContent=TODAY.ring.score!=null?TODAY.ring.score:'—';
+  $('#dayLbl').textContent=st.closed?(past&&PASTV.provisional?'Итог дня · предварительно':'Итог дня'):T.ring.score==null?'Не оценивается':'Прогноз дня';
+  $('#dayNum').textContent=T.ring.score!=null?T.ring.score:'—';
   $('#vKick').className='vk '+v.k;$('#vKick').innerHTML=`<i></i>${v.w}`;$('#emo').textContent=v.t;
   $('#crown').classList.toggle('has',crownOn());
   const C=2*Math.PI*28;
@@ -1633,16 +1646,16 @@ function renderToday(){
   /* «Решить» (Vita v2, этап 2) — вердикт готов / открытие детектива, свежие
      TODAY.inbox с бэкенда (app/checks.py::home_inbox); тап по первой карточке
      открывает шторку «Решить» со всеми (B.inbox). Пусто = отсутствует. */
-  const inbox=TODAY.inbox||[];
+  const inbox=T.inbox||[];
   $('#needYou').innerHTML=inbox.length?row(svg(inbox[0].kind==='verdict'?'check':'spark'),
     inbox[0].tone==='green'?'ok':'amber',esc(inbox[0].title),esc(inbox[0].sub),
     inbox.length>1?`<span class="rN">+${inbox.length-1}</span>`:'','inbox'):'';
   $('#caseBadge').classList.toggle('on',(TODAY.pending_questions||0)>0);
   $('#planBadge').classList.toggle('on',!!TODAY.lab_draw_due);
   /* серии — пилюля в шапке */
-  const streaks=TODAY.streaks||[],pill=$('#streaks');
+  const streaks=T.streaks||[],pill=$('#streaks');
   const st2=streaks.map(s=>s.status==='paused'?'p':s.status==='at_risk'?'r':'');
-  pill.hidden=streaks.length===0;
+  pill.hidden=past||streaks.length===0;
   pill.classList.toggle('risk',st2.includes('r'));
   pill.setAttribute('aria-label',`Серии: ${st2.filter(x=>x!=='p').length} из ${streaks.length} живы`);
   pill.innerHTML=`${svg('flame')}<span class="sd">${st2.map((c,i)=>`<i class="${c}" style="--k:${i}"></i>`).join('')}</span>`;
@@ -1671,7 +1684,7 @@ function enterToday(){
   const svgEl=$('#arcSvg'),val=$('#arcVal'),glow=$('#arcGlow'),ahead=$('#arcAhead'),track=$('#arcTrack'),crown=$('#crown'),dotG=$('#arcDotG'),num=$('#dayNum');
   const L=track.getTotalLength(),at=v=>track.getPointAtLength(L*Math.max(.001,v)/100);
   svgEl.classList.remove('live');$$('.arcTick',svgEl).forEach(t=>t.classList.remove('in'));
-  const score=TODAY.ring.score;
+  const score=VW().ring.score;
   track.classList.toggle('empty',score==null);
   val.style.strokeDashoffset=100;glow.style.strokeDashoffset=100;ahead.setAttribute('stroke-dasharray','0 100');
   crown.classList.remove('show');dotG.classList.remove('on');
@@ -1684,8 +1697,8 @@ function enterToday(){
   tween(1600,p=>{if(g!==arcGen)return;const v=V*p,pt=at(v);val.style.strokeDashoffset=100-v;glow.style.strokeDashoffset=100-v;dotG.setAttribute('transform',`translate(${pt.x.toFixed(1)} ${pt.y.toFixed(1)})`);num.textContent=Math.round(v)},t=>1-Math.pow(1-t,3.2)).then(()=>{if(g!==arcGen)return;
     $$('.arcTick',svgEl).forEach(t=>t.classList.toggle('in',+t.dataset.f<=V/100));svgEl.classList.add('live');
     if(crownOn())crown.classList.add('show');
-    if(TODAY.state.closed){void $('#streaks').offsetWidth;$('#streaks').classList.add('plus')}
-    const ahead_v=TODAY.ring.ahead;
+    if(VW().state.closed&&!PASTV){void $('#streaks').offsetWidth;$('#streaks').classList.add('plus')}
+    const ahead_v=VW().ring.ahead;
     if(ahead_v!=null&&ahead_v>V){const A=ahead_v-V;ahead.setAttribute('stroke-dashoffset',-V);tween(1000,p=>ahead.setAttribute('stroke-dasharray',`${A*p} 100`))}
   });
 }
@@ -1932,10 +1945,10 @@ const B={
     <div class="ov-hero rise" style="--i:1"><div class="lbl">Тело · по системам</div></div>
     <div class="rise" style="--i:2;margin-top:14px">${sy.length?sy.map(group).join('')+medsG:'<p class="empty">Пока нет результатов анализов.</p>'}</div>`}},
   yesterday(snap){if(!snap)return {html:`${top('Вчера')}<p class="empty rise" style="--i:1" style="margin-top:20px">Снимок вчерашнего дня ещё не записан.</p>`};
-    const r=snap.ring||{};
+    const r=snap.ring||{},ch=snap.chips||{},SV={recovery:ch.energy??r.recovery_score,sleep:ch.sleep_quality??r.sleep_score,move:r.movement_score,food:r.nutrition_score};
     return {html:`${top('Вчера')}
     <div class="ov-hero rise" style="--i:1"><div class="lbl">${dateFmt(snap.date)}</div><div class="big">${r.score!=null?r.score:'—'}<small>из 100</small></div>${snap.provisional?'<p class="ov-sub">Предварительно — итог дня закрепится вечером.</p>':''}</div>
-    <div class="rise" style="--i:2;margin-top:14px">${['recovery','sleep','move','food'].map(k=>{const v={recovery:r.recovery_score,sleep:r.sleep_score,move:r.movement_score,food:r.nutrition_score}[k];if(v==null)return'';
+    <div class="rise" style="--i:2;margin-top:14px">${['recovery','sleep','move','food'].map(k=>{const v=SV[k]==null?null:Math.round(SV[k]);if(v==null)return'';
       return row(svg(ICON_BY_SEGMENT[k]),(r.chip_status||{})[k]==='warn'?'amber':'teal',NAME_BY_SEGMENT[k],k==='food'?'приёмы пищи за вчера':'',`<span class="rV">${v}</span>`,k==='food'?'foodyest':'')}).join('')}</div>`}},
 };
 
@@ -2143,7 +2156,8 @@ function applyBarColor(){const hex=bg=>{const m=bg.match(/\d+(\.\d+)?/g);return 
 function setTheme(mode){document.documentElement.dataset.theme=mode;requestAnimationFrame(applyBarColor);setTimeout(applyBarColor,700);const l=$('#themeLabel');l&&(l.textContent=mode==='dark'?'Тема: тёмная':'Тема: светлая');try{localStorage.setItem('vita-theme',mode)}catch(e){}}
 
 /* ================= ДЕЙСТВИЯ ================= */
-document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t)return;const a=t.dataset.a,k=t.dataset.k;
+document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t)return;let a=t.dataset.a;const k=t.dataset.k;
+  if(PASTV&&['chip','verdict','index','recovery'].includes(a)){a=(a==='chip'&&k==='food')?'foodyest':'pastsheet'}
   if(t.tagName==='A'&&a)e.preventDefault();
   switch(a){
     case'chip':haptic();fetchJSON('/vita/topic/'+k).then(detail=>openSheet('segment',{k,detail},t));break;
@@ -2161,7 +2175,9 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'tripgo':haptic();tripSet(+k,'Режим поездки включён: питание на паузе, сон и шаги как обычно');break;
     case'tripend':haptic();tripSet(null,'Режим поездки выключен');break;
     case'recovery':fetchJSON('/vita/topic/recovery').then(detail=>openSheet('segment',{k:'recovery',detail},t));break;
-    case'dayback':haptic();loadYesterday().then(snap=>{openSheet('yesterday',snap,t)});break;
+    case'dayback':haptic();yestLoaded=false;loadYesterday().then(snap=>{if(!snap){toast('Данных за вчера пока нет');return}PASTV=snap;renderToday();sToday.scrollTo({top:0});enterToday()}).catch(()=>toast('Не удалось загрузить вчера'));break;
+    case'pastsheet':haptic();openSheet('yesterday',PASTV,t);break;
+    case'dayfwd':haptic();PASTV=null;renderToday();sToday.scrollTo({top:0});enterToday();break;
     case'close':closeSheet();break;
     case'toast':haptic();toast(t.dataset.msg);break;
     case'theme':haptic();setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');if(typeof ME!=='undefined'&&ME)renderMe();break;
