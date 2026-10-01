@@ -1,7 +1,6 @@
 """Follow-up по открытым сессиям красных флагов: чистые тесты run_once.
-Фиктивная отправка (monkeypatch _deliver_emergency); синтетические id rfs_TEST…;
+Мок _deliver_emergency через monkeypatch; синтетические id rfs_TEST…;
 боевые таблицы не пишутся по конструкции _isolate_real_schema_writes."""
-import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -11,22 +10,23 @@ from app import redflag_followup as rf
 
 @pytest.fixture()
 def _fake_send(monkeypatch):
-    """Заменяет _deliver_emergency на счётчик."""
+    """Заменяет _get_deliver на счётчик. Возвращает список вызовов."""
     calls = []
 
-    def fake(chat_id, message_id, text):
-        calls.append({"chat_id": chat_id, "text": text})
-        return True
+    def fake_deliver():
+        def do(chat_id, message_id, text):
+            calls.append({"chat_id": chat_id, "text": text})
+            return True
+        return do
 
-    monkeypatch.setattr(rf, "_get_deliver", lambda: fake)
+    monkeypatch.setattr(rf, "_get_deliver", fake_deliver)
     return calls
 
 
 @pytest.fixture()
 def _failing_send(monkeypatch):
-    """Заменяет _deliver_emergency на всегда падающую."""
+    """_get_deliver всегда возвращает функцию, которая возвращает False."""
     monkeypatch.setattr(rf, "_get_deliver", lambda: lambda *a, **kw: False)
-    return None
 
 
 @pytest.fixture()
@@ -40,7 +40,7 @@ def _since_empty(monkeypatch):
 
 
 NOW = datetime(2026, 9, 30, 12, 0, 0, tzinfo=timezone.utc)
-BASE = datetime(2026, 9, 28, 10, 0, 0, tzinfo=timezone.utc)  # 50 часов назад от NOW
+BASE = datetime(2026, 9, 28, 10, 0, 0, tzinfo=timezone.utc)  # 50 часов назад
 
 
 def _insert_session(cur, sid, category="severe_pain", level="L2",
@@ -60,13 +60,11 @@ def _insert_followup(cur, sid, attempts=1, sent_ts=None, last_error=None):
     )
 
 
-def _session(cur, sid):
-    cur.execute("SELECT 1 FROM card_test.rf_session WHERE id = %s", (sid,))
-    return cur.fetchone() is not None
-
-
 def _followup(cur, sid):
-    cur.execute("SELECT sent_ts, attempts, last_error FROM card_test.rf_followup WHERE session_id = %s", (sid,))
+    cur.execute(
+        "SELECT sent_ts, attempts, last_error FROM card_test.rf_followup WHERE session_id = %s",
+        (sid,),
+    )
     return cur.fetchone()
 
 
@@ -99,7 +97,6 @@ def test_session_younger_than_48h_not_sent():
 @pytest.mark.usefixtures("_isolate_real_schema_writes", "_since_set", "_fake_send")
 def test_session_older_than_since_not_sent():
     from app.db import get_conn
-    # opened_ts ДОЖЕ since → не трогаем (старая сессия от 15.09)
     old = datetime(2026, 8, 15, 10, 0, 0, tzinfo=timezone.utc)
     stale_la = NOW - timedelta(hours=72)
     with get_conn() as conn, conn.cursor() as cur:
@@ -144,7 +141,7 @@ def test_eligible_session_sent_once(_fake_send):
     assert result["sent"] == 1
     assert len(_fake_send) == 1
     assert "сильная боль" in _fake_send[0]["text"]
-    # второй run_once → не шлёт (идемпотентность)
+    # второй run_once → не шлёт (sent_ts IS NOT NULL)
     result2 = rf.run_once(now=NOW)
     assert result2["sent"] == 0
     assert len(_fake_send) == 1  # всё ещё одна отправка
@@ -175,24 +172,58 @@ def test_unknown_category_fallback_text(_fake_send):
     assert "weird_new_cat" not in _fake_send[0]["text"]
 
 
-# ── попытки отправки ─────────────────────────────────────────────────────────
+# ── текст ────────────────────────────────────────────────────────────────────
 
-@pytest.mark.usefixtures("_isolate_real_schema_writes", "_since_set", "_failing_send")
-def test_failed_send_increments_attempts_no_sent_ts():
+@pytest.mark.usefixtures("_isolate_real_schema_writes", "_since_set", "_fake_send")
+def test_text_starts_with_recently_not_two_days(_fake_send):
+    """Текст начинается с «Недавно ты писал», не «Два дня назад» (сессия может
+    быть старше 48ч, если сервис не работал)."""
     from app.db import get_conn
     stale = NOW - timedelta(hours=72)
     with get_conn() as conn, conn.cursor() as cur:
-        _insert_session(cur, "rfs_TEST_fail")
+        _insert_session(cur, "rfs_TEST_text", last_activity=stale)
         conn.commit()
     rf.run_once(now=NOW)
-    fu = _followup(cur := get_conn().cursor() if False else get_conn().cursor(), "rfs_TEST_fail")
-    # Используем отдельное соединение для проверки
+    assert len(_fake_send) == 1
+    assert _fake_send[0]["text"].startswith("Недавно ты писал")
+
+
+# ── повтор после сбоя доставки (КЛЮЧЕВОЙ баг round 2) ────────────────────────
+
+@pytest.mark.usefixtures("_isolate_real_schema_writes", "_since_set", "_failing_send")
+def test_retry_after_failed_delivery():
+    """Красный на старом коде: NOT EXISTS исключал ЛЮБУЮ сессию со строкой
+    в rf_followup — в т.ч. после неудачной отправки (attempts=1, sent_ts NULL).
+    Значит retry никогда не происходил и вопрос терялся навсегда.
+    Фикс: исключаем только sent_ts IS NOT NULL ИЛИ attempts >= MAX."""
+    from app.db import get_conn
+    stale = NOW - timedelta(hours=72)
     with get_conn() as conn, conn.cursor() as cur:
-        fu = _followup(cur, "rfs_TEST_fail")
+        _insert_session(cur, "rfs_TEST_retry", last_activity=stale)
+        conn.commit()
+
+    # Попытка 1 — неудача (_failing_send)
+    result = rf.run_once(now=NOW)
+    assert result["failed"] == 1
+    with get_conn() as conn, conn.cursor() as cur:
+        fu = _followup(cur, "rfs_TEST_retry")
     assert fu is not None
     assert fu[1] == 1  # attempts = 1
-    assert fu[0] is None  # sent_ts = None (не отправлено)
-    assert fu[2] is not None  # last_error не пустой
+    assert fu[0] is None  # sent_ts = NULL
+
+    # Попытка 2 — переключаем на успех
+    rf._get_deliver = lambda: lambda *a, **kw: True
+    result2 = rf.run_once(now=NOW)
+    assert result2["sent"] == 1
+    with get_conn() as conn, conn.cursor() as cur:
+        fu = _followup(cur, "rfs_TEST_retry")
+    assert fu is not None
+    assert fu[1] == 2  # attempts = 2
+    assert fu[0] is not None  # sent_ts = NOW (успешно)
+
+    # Попытка 3 — после успеха больше не шлёт (sent_ts IS NOT NULL)
+    result3 = rf.run_once(now=NOW)
+    assert result3["sent"] == 0
 
 
 @pytest.mark.usefixtures("_isolate_real_schema_writes", "_since_set", "_failing_send")
@@ -207,4 +238,20 @@ def test_after_3_failed_attempts_no_more_tries():
     assert result["sent"] == 0
     with get_conn() as conn, conn.cursor() as cur:
         fu = _followup(cur, "rfs_TEST_maxed")
+    assert fu is not None
     assert fu[1] == 3  # attempts не изменился (сессия отфильтрована запросом)
+
+
+# ── граница: naive datetime в RF_FOLLOWUP_SINCE ──────────────────────────────
+
+@pytest.mark.usefixtures("_isolate_real_schema_writes", "_fake_send")
+def test_naive_since_interpreted_as_utc(monkeypatch):
+    """RF_FOLLOWUP_SINCE без TZ → интерпретируется как UTC (не зависит от TZ сервера)."""
+    monkeypatch.setenv("RF_FOLLOWUP_SINCE", "2026-09-01T00:00:00")
+    from app.db import get_conn
+    stale = NOW - timedelta(hours=72)
+    with get_conn() as conn, conn.cursor() as cur:
+        _insert_session(cur, "rfs_TEST_naive", last_activity=stale)
+        conn.commit()
+    result = rf.run_once(now=NOW)
+    assert result["sent"] == 1

@@ -1,26 +1,26 @@
-# -*- coding: utf-8 -*-
 """Follow-up по открытым сессиям красных флагов L2/L3 (2026-09-30).
 
-Проблема (аудит логики 2026-09-30): красный флаг детектируется, rf_event
-записывается, rf_session открывается — и после этого система молчит.
-Пациент может забыть о симптоме или не понять его серьёзность.
+Проблема: красный флаг детектируется, rf_event записывается, rf_session
+открывается — и после этого система молчит. Пациент может забыть о симптоме
+или не понять его серьёзность.
 
 Решение: раз в час планировщик ищет открытые сессии L2/L3, у которых
 последняя активность >48 часов, и ОДИН раз спрашивает Влада «как сейчас?».
 
-Правила (задача 2026-09-30):
+Правила:
 - только сессии НОВЕЕ RF_FOLLOWUP_SINCE (env, ISO datetime; пусто/не задано =
-  фича выключена — никаких backfill на старых сессиях);
+  фича выключена — никаких backfill на старых сессиях); naive datetime
+  интерпретируется как UTC;
 - только worst_level L2/L3 (L1 — заметка на будущее, не разговор);
 - отправка через doctor/intake._deliver_emergency (3 попытки + фолбэк на
   сервисный бот — эту логику НЕ трогаем и НЕ дублируем);
-- идемпотентно через card.rf_followup (одна строка на сессию);
-- не чаще MAX_ATTEMPTS (3) попыток отправки на сессию (счётчик в той же записи);
-- закрытие сессий не меняется (redflag_union делает это по 48ч тишине / явному
-  урегулированию — follow-up не влияет на их жизненный цикл);
+- идемпотентно через card.rf_followup: одна строка на сессию; повторная
+  попытка = только если sent_ts IS NULL И attempts < MAX_ATTEMPTS (сбой
+  доставки не теряет вопрос — пробуем в следующий час);
+- закрытие сессий не меняется (redflag_union делает это по 48ч тишине);
 - ответ Влада идёт обычным путём доктор-бота — отдельный разбор ответа не нужен.
 
-Миграция: migrations/0006_rf_followup.sql (применяет Claude, не кодер)."""
+Миграция: migrations/0006_rf_followup.sql (применяет Claude)."""
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -33,17 +33,12 @@ from app.scheduler_alert import alert_on_failure
 
 logger = logging.getLogger(__name__)
 
-CHECK_INTERVAL_SECONDS = 3600  # раз в час
-STALE_HOURS = 48               # «ничего не произошло» = 48ч после last_activity
-MAX_ATTEMPTS = 3               # не чаще 3 попыток отправки на сессию
+CHECK_INTERVAL_SECONDS = 3600
+STALE_HOURS = 48
+MAX_ATTEMPTS = 3
 
-# Влад — единственный пользователь; личный чат совпадает для всех ботов
-# (intake.py:120 «независимая доставка в тот же чат»); то же значение, что
-# doctor/poller.py::OWNER_CHAT_ID.
 OWNER_CHAT_ID = "8956401"
 
-# Человекочитаемые названия категорий (redflag.py §2.1 + systemic_warning).
-# Неизвестная категория → общая формулировка, не сырой ключ.
 CATEGORY_RU = {
     "cardiac_acute": "сердце",
     "neuro_acute": "неврологические симптомы",
@@ -57,23 +52,24 @@ CATEGORY_RU = {
 }
 
 FOLLOWUP_TEMPLATE = (
-    "Два дня назад ты писал про {topic}. "
+    "Недавно ты писал про {topic}. "
     "Как сейчас? Ответь парой слов — если стало хуже или повторилось, напиши сразу."
 )
 FOLLOWUP_FALLBACK_TOPIC = "симптом из красного флага"
 
 
 def _since() -> datetime | None:
-    """RF_FOLLOWUP_SINCE (env, ISO datetime). Пусто/не задано/невалидно → None
-    (фича ничего не делает — никаких backfill на старых сессиях)."""
     raw = os.environ.get("RF_FOLLOWUP_SINCE", "").strip()
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw)
+        dt = datetime.fromisoformat(raw)
     except ValueError:
         logger.warning("redflag_followup: невалидный RF_FOLLOWUP_SINCE=%r — фича выключена", raw)
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _topic_ru(category: str) -> str:
@@ -86,9 +82,6 @@ def _get_deliver():
 
 
 def run_once(now: datetime | None = None) -> dict:
-    """Чистая функция: ищет подходящие сессии и отправляет follow-up.
-    `now` — для тестов (None = текущий момент UTC).
-    Возвращает {"sent": int, "failed": int, "skipped_no_since": bool}."""
     since = _since()
     if since is None:
         return {"sent": 0, "failed": 0, "skipped_no_since": True}
@@ -97,6 +90,7 @@ def run_once(now: datetime | None = None) -> dict:
     stale_cutoff = now - timedelta(hours=STALE_HOURS)
     sent = failed = 0
 
+    deliver = _get_deliver()
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -108,11 +102,9 @@ def run_once(now: datetime | None = None) -> dict:
                 "  AND s.opened_ts >= %s "
                 "  AND s.last_activity < %s "
                 "  AND NOT EXISTS ("
-                "      SELECT 1 FROM {rf_followup} f WHERE f.session_id = s.id"
-                "  ) "
-                "  AND NOT EXISTS ("
                 "      SELECT 1 FROM {rf_followup} f "
-                "      WHERE f.session_id = s.id AND f.attempts >= %s"
+                "      WHERE f.session_id = s.id "
+                "        AND (f.sent_ts IS NOT NULL OR f.attempts >= %s)"
                 "  ) "
                 "ORDER BY s.last_activity"
             ).format(
@@ -126,12 +118,9 @@ def run_once(now: datetime | None = None) -> dict:
     for session_id, category, last_activity in candidates:
         topic = _topic_ru(category)
         text = FOLLOWUP_TEMPLATE.format(topic=topic)
-        chat_id = OWNER_CHAT_ID
 
-        # Отправка ПЕРЕД записью — если упала, не записываем «отправлено»
-        delivered = _get_deliver()(chat_id, None, text)
+        delivered = deliver(OWNER_CHAT_ID, None, text)
 
-        # Идемпотентная запись: UPSERT с инкрементом попыток
         with get_conn() as conn, conn.cursor() as cur:
             if delivered:
                 cur.execute(
@@ -144,7 +133,8 @@ def run_once(now: datetime | None = None) -> dict:
                     (session_id,),
                 )
                 sent += 1
-                logger.info("redflag_followup: follow-up отправлен по сессии %s (%s)", session_id, category)
+                logger.info("redflag_followup: follow-up отправлен по сессии %s (%s)",
+                            session_id, category)
             else:
                 cur.execute(
                     sql.SQL(
@@ -156,7 +146,8 @@ def run_once(now: datetime | None = None) -> dict:
                     (session_id,),
                 )
                 failed += 1
-                logger.warning("redflag_followup: доставка не удалась по сессии %s — попытка записана", session_id)
+                logger.warning("redflag_followup: доставка не удалась по сессии %s",
+                               session_id)
             conn.commit()
 
     if sent or failed:
@@ -165,7 +156,6 @@ def run_once(now: datetime | None = None) -> dict:
 
 
 def run_scheduler() -> None:
-    """Раз в час: run_once() → run_log.mark_run(). Упал → alert_on_failure + повтор."""
     import time
     logger.info("redflag_followup scheduler: старт (раз в %dс)", CHECK_INTERVAL_SECONDS)
     while True:
@@ -173,6 +163,7 @@ def run_scheduler() -> None:
             run_once()
             run_log.mark_run("redflag_followup")
         except Exception as e:
-            logger.exception("redflag_followup run_once упал — повтор через %dс", CHECK_INTERVAL_SECONDS)
+            logger.exception("redflag_followup run_once упал — повтор через %dс",
+                             CHECK_INTERVAL_SECONDS)
             alert_on_failure("redflag_followup", e)
         time.sleep(CHECK_INTERVAL_SECONDS)
