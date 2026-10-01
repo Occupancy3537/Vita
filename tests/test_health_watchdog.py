@@ -3,9 +3,13 @@
 же принцип, что test_doctor_context.py); state-таблицы (watchdog_nudged/
 watchdog_state) реальные — сбрасываем тестовые ключи до/после."""
 import pytest
+from datetime import datetime, timedelta
 
 from app import health_watchdog as hw
 from app.db import get_conn
+
+# «свежий» визит — относительная дата: фиксированная дата ломала тест через 30 дней (2026-10-01)
+RECENT_VISIT = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
 
 pytestmark = pytest.mark.usefixtures("_isolate_real_schema_writes")
 
@@ -113,7 +117,7 @@ class FakeCursorWithState(FakeCursor):
 
 
 def test_detect_fires_on_new_visit_with_two_markers():
-    visits = [{"Visit_ID": "V1", "Date": "2026-09-01"}]
+    visits = [{"Visit_ID": "V1", "Date": RECENT_VISIT}]
     results = [
         {"Visit_ID": "V1", "Marker_ID": "M1", "Value": "10", "Lab_Min": "4", "Lab_Max": "6", "Original_Unit": ""},
         {"Visit_ID": "V1", "Marker_ID": "M2", "Value": "5", "Lab_Min": "1", "Lab_Max": "9", "Original_Unit": ""},
@@ -128,7 +132,7 @@ def test_detect_fires_on_new_visit_with_two_markers():
 
 
 def test_detect_flags_out_of_range_marker():
-    visits = [{"Visit_ID": "V1", "Date": "2026-09-01"}]
+    visits = [{"Visit_ID": "V1", "Date": RECENT_VISIT}]
     results = [
         {"Visit_ID": "V1", "Marker_ID": "M1", "Value": "10", "Lab_Min": "4", "Lab_Max": "6", "Original_Unit": ""},
         {"Visit_ID": "V1", "Marker_ID": "M2", "Value": "5", "Lab_Min": "1", "Lab_Max": "9", "Original_Unit": ""},
@@ -141,7 +145,7 @@ def test_detect_flags_out_of_range_marker():
 
 
 def test_detect_no_fire_when_already_reviewed():
-    visits = [{"Visit_ID": "V1", "Date": "2026-09-01"}]
+    visits = [{"Visit_ID": "V1", "Date": RECENT_VISIT}]
     results = [
         {"Visit_ID": "V1", "Marker_ID": "M1", "Value": "5", "Lab_Min": "4", "Lab_Max": "6", "Original_Unit": ""},
         {"Visit_ID": "V1", "Marker_ID": "M2", "Value": "5", "Lab_Min": "1", "Lab_Max": "9", "Original_Unit": ""},
