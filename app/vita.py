@@ -20,7 +20,9 @@ from typing import Optional
 
 from psycopg import sql
 
-from app import checks, timeutil
+from app import checks, steps_sampler, timeutil
+from app.goals import STEPS_TARGET_DAILY
+from app.steps_pace import closed_day_score, expected_steps, pace as steps_pace
 from app.lab_systems import system_of, system_rank
 from app.dashboard import (
     _SLEEP_MAX_OK,
@@ -461,29 +463,57 @@ def _todays_workouts(cur) -> list[dict]:
     return out
 
 
+def _own_day_steps(rows: list[tuple]) -> dict:
+    """{дата дня: шаги дня}. В строке даты D лежит «Шаги_за_вчера» = шаги дня D−1 (проверено по живому счётчику)."""
+    out = {}
+    for d, steps in rows:
+        if steps is not None:
+            out[(d - timedelta(days=1)).isoformat()] = int(steps)
+    return out
+
+
 def build_move_detail(cur, today: dict, steps: dict, gate: dict) -> dict:
-    """Живая жалоба Влада (2026-09-28): «вкладка движение открывает только
-    шаги, в макете по-другому было» — добавлены нагрузка (ACWR, была видна
-    только в «Заряде», хотя backend с самого начала относит её к сегменту
-    move, см. _collect_judgments) и тренировки дня (были не показаны нигде
-    в Vita вообще)."""
-    # "Шаги_за_вчера" — единственная посуточная история шагов в системе
-    # (см. докстринг секции выше: часовой разбивки нет вообще).
-    history = [{"date": r["date"], "steps": int(r["Шаги_за_вчера"])}
-               for r in _recent_daily_values(cur, ["Шаги_за_вчера"], 7) if r["Шаги_за_вчера"] is not None]
-    coach = ("Цель снижена на время щадящего режима: ходьба и плавание, без бега и прыжков."
-             if gate.get("blocked") else "Ограничений по нагрузке нет — держи темп.")
+    """Экран «Движение» (2026-10-01): темп дня, ход дня по замерам, неделя шагов, цели недели (плавание, перерывы),
+    нагрузка графиком. Всё из того, что уже есть: живой счётчик intervals.icu, замеры card.steps_sample,
+    daily_trends (шаги, перерывы, плавание, Garmin-нагрузка)."""
+    today_d = timeutil.today()
+    now_hour = steps.get("now_hour") or 0
+    target = steps.get("target") or STEPS_TARGET_DAILY
+    cur.execute(
+        'SELECT "Дата", "Шаги_за_вчера", "Плавание_было", "Training_Acute_Load", "Training_Chronic_Load" '
+        'FROM health.daily_trends WHERE "Дата" >= %s ORDER BY "Дата"', (today_d - timedelta(days=45),))
+    rows = cur.fetchall()
+    by_day = _own_day_steps([(r[0], _num(r[1])) for r in rows])
+    week_days = [today_d - timedelta(days=i) for i in range(6, -1, -1)]
+    week = []
+    for d in week_days:
+        iso = d.isoformat()
+        st = steps.get("now_steps") if d == today_d else by_day.get(iso)
+        week.append({"date": iso, "steps": st, "today": d == today_d})
+    closed = [w for w in week if not w["today"] and w["steps"] is not None]
+    best = max(closed, key=lambda w: w["steps"]) if closed else None
+    avg7 = round(statistics.mean(w["steps"] for w in closed)) if closed else None
+
+    swims = [(r[0] - timedelta(days=1)) for r in rows if r[2] == "Да"]   # «Плавание_было» в строке D — про день D−1
+    rx = {i["k"]: i for i in build_rx_week(cur, today_d.isoformat(), steps.get("now_steps"), target)["items"]}
+    acute = [{"date": r[0].isoformat(), "acute": _num(r[3]), "chronic": _num(r[4])} for r in rows[-28:]
+             if _num(r[3]) is not None or _num(r[4]) is not None]
+    chronic = next((a["chronic"] for a in reversed(acute) if a["chronic"] is not None), None)
+    decision = today.get("decision") or {}
     return {
         "segment": "move",
-        "steps_now": steps.get("now_steps"), "steps_target": steps.get("target"),
+        "steps_now": steps.get("now_steps"), "steps_target": target, "now_hour": now_hour,
         "status_word": steps.get("status_word"), "behind_pace": steps.get("behind_pace"),
-        # acwr/acwr_status — внутри today["decision"], см. докстринг живого
-        # бага в build_recovery_detail выше.
-        "acwr": (today.get("decision") or {}).get("acwr"),
-        "acwr_status": (today.get("decision") or {}).get("acwr_status"),
+        "pace": steps.get("pace"),
+        "day": {"samples": [{"h": h, "steps": st} for h, st in steps_sampler.day_samples(cur, today_d)],
+                "expected": [{"h": h, "steps": expected_steps(h, target)} for h in (7.0, 22.0)]},
+        "week": week, "best_day": best, "avg7": avg7,
+        "swim": {"week_n": (rx.get("swim") or {}).get("n", 0), "need": 2,
+                 "last": swims[-1].isoformat() if swims else None},
+        "stand": {"week_n": (rx.get("move") or {}).get("n", 0), "need": 5},
+        "load": {"acwr": decision.get("acwr"), "status": decision.get("acwr_status"), "history": acute,
+                 "low": round(chronic * 0.8) if chronic else None, "high": round(chronic * 1.3) if chronic else None},
         "workouts": _todays_workouts(cur),
-        "history_daily": history,
-        "coach": coach,
         "publications": _topic_publications(cur, "move"),
     }
 
@@ -848,6 +878,7 @@ STREAK_STRIP_DAYS = 14  # полоса дней в шторке «Серии» (
 
 _STREAK_CRITERIA = [
     {"key": "sleep_zone", "label": "Сон в зоне 7–9 ч"},
+    {"key": "steps", "label": f"Шаги ≥ {STEPS_TARGET_DAILY // 1000} 000"},
     {"key": "Натрий", "label": "Соль в норме"},
     {"key": "Добавленный сахар", "label": "Сахар в норме"},
     {"key": "Насыщенные жиры", "label": "Жиры в норме"},
@@ -974,6 +1005,10 @@ def build_day_snapshot(cur, day) -> Optional[dict]:
         "energy": (metric_by_key.get("body_battery") or {}).get("value"),
     }
 
+    own_steps = _num(rows_tuple[idx + 1][1].get("Шаги_за_вчера")) if idx + 1 < len(rows_tuple) else None
+    day_score = closed_day_score(int(own_steps) if own_steps is not None else None)
+    if day_score is not None:
+        scores["movement_score"] = day_score   # закрытые сутки: процент цели по шагам
     day_index = _day_index(scores, chips)
     return {"date": day_iso,
             "ring": {**scores, "score": day_index, "chip_status": chip_status(scores, chip_norm, chips)},
@@ -1089,7 +1124,7 @@ def build_rx_week(cur, today_iso: str, steps_now, steps_target: int) -> dict:
     cur.execute(
         'SELECT "Дата", "Плавание_было", "Провал_без_движения_мин", "Шаги_за_вчера" '
         'FROM health.daily_trends WHERE "Дата" >= %s AND "Дата" <= %s',
-        (week[0] + timedelta(days=1), week[-1] + timedelta(days=1)),
+        (week[0], week[-1] + timedelta(days=1)),
     )
     by_row_date = {r[0].isoformat(): r for r in cur.fetchall() if r[0]}
     cur.execute(
@@ -1110,16 +1145,20 @@ def build_rx_week(cur, today_iso: str, steps_now, steps_target: int) -> dict:
                 code = "y m"
             elif d == today:
                 code = "y" if (k == "walk" and steps_now is not None and steps_now >= steps_target) else "t"
+                own_today = by_row_date.get(iso)
+                if k == "move" and own_today and (_num(own_today[2]) or 0) > _MOVE_GAP_OK_MIN:
+                    code = ""   # перерыв дольше 40 мин уже случился — день по этому пункту не выполнен
             elif mark is False:
                 code = ""
             else:
                 r = by_row_date.get((d + timedelta(days=1)).isoformat())
-                if r is None:
+                if r is None and k != "move":
                     code = "q"
                 elif k == "swim":
                     code = "y" if r[1] == "Да" else ("" if r[1] == "Нет" else "q")
                 elif k == "move":
-                    g = _num(r[2])
+                    own = by_row_date.get(iso)   # перерыв — показатель самого дня (строка своей даты), не следующего
+                    g = _num(own[2]) if own else None
                     code = "q" if g is None else ("y" if g <= _MOVE_GAP_OK_MIN else "")
                 else:
                     st = _num(r[3])
@@ -1224,14 +1263,34 @@ def _fetch_streak_inputs(cur):
     return rows, meals, targets
 
 
+def _steps_day_status(day_iso: str, today_iso: str, steps_by_day: dict, steps_today, now_hour):
+    """(met, at_risk, has_data) для серии «Шаги ≥ цели». Закрытый день — по шагам дня; сегодня: цель взята — выполнено,
+    иначе день ещё идёт (met=None), «под угрозой» — после 15:00, если темп ниже 85%."""
+    if day_iso == today_iso:
+        if steps_today is None:
+            return None, False, False
+        if steps_today >= STEPS_TARGET_DAILY:
+            return True, False, True
+        p = steps_pace(steps_today, now_hour if now_hour is not None else 0.0)
+        return None, bool(now_hour is not None and now_hour >= 15 and p["behind"]), True
+    st = steps_by_day.get(day_iso)
+    return (None, False, False) if st is None else (st >= STEPS_TARGET_DAILY, False, True)
+
+
 def build_streaks(rows: list[dict], meals: list[dict], targets: list[dict], today_iso: str,
-                  travel_days: Optional[set] = None) -> list[dict]:
+                  travel_days: Optional[set] = None, steps_today: Optional[int] = None,
+                  now_hour: Optional[float] = None) -> list[dict]:
     """travel_days — ISO-даты режима поездки: серии ПИТАНИЯ на эти дни на паузе
     (нет дневника — не провал и не выполнение, заморозку не тратят); сон и шаги
     идут как обычно (часы с собой)."""
     travel_days = travel_days or set()
     days = sorted(r["Дата"] for r in rows if r.get("Дата") and r["Дата"] <= today_iso)
     rows_by_date = {r["Дата"]: r for r in rows}
+    steps_by_day = {}
+    for r in rows:   # в строке даты D «Шаги_за_вчера» = шаги дня D−1
+        v = _num(r.get("Шаги_за_вчера"))
+        if r.get("Дата") and v is not None:
+            steps_by_day[(date.fromisoformat(r["Дата"]) - timedelta(days=1)).isoformat()] = int(v)
 
     # Собираем пропуски (met is False, не None) по ВСЕМ критериям вместе,
     # отсортированные по дате УБЫВАЮЩЕ — свежие пропуски получают заморозку
@@ -1241,7 +1300,9 @@ def build_streaks(rows: list[dict], meals: list[dict], targets: list[dict], toda
     for crit in _STREAK_CRITERIA:
         series = []
         for d in days:
-            if d in travel_days and crit["key"] != "sleep_zone":
+            if crit["key"] == "steps":
+                met, at_risk, has_data = _steps_day_status(d, today_iso, steps_by_day, steps_today, now_hour)
+            elif d in travel_days and crit["key"] != "sleep_zone":
                 met, at_risk, has_data = None, False, False
             else:
                 met, at_risk, has_data = _day_met_and_at_risk(d, rows_by_date[d], meals, targets, crit["key"])
@@ -1309,10 +1370,9 @@ def build_streaks(rows: list[dict], meals: list[dict], targets: list[dict], toda
 # ускорением к вечеру, тот же профиль, что в макете), не измерение.
 # =====================================================================
 
-VITA_STEPS_TARGET_GATED = 8000  # при активном мед. гейте — минус ~20% от базовой цели, тот же порядок, что в макете (12000 при 14540)
-
-
 def build_steps(cur, gate: dict) -> dict:
+    """Шаги сегодня (живой счётчик intervals.icu) + темп дня. Цель одна на всё приложение (app/goals.py): щадящий
+    режим цель больше не снижает (решение Влада 2026-10-01 — цель 10 000)."""
     tz = timeutil.person_tz_name()
     cur.execute(
         "SELECT steps FROM health.live_steps_today WHERE date = (now() AT TIME ZONE %s)::date",
@@ -1320,20 +1380,16 @@ def build_steps(cur, gate: dict) -> dict:
     )
     row = cur.fetchone()
     steps_now = int(row[0]) if row and row[0] is not None else None
-    target = VITA_STEPS_TARGET_GATED if gate.get("blocked") else _STEPS_TARGET_DAILY
-
+    target = STEPS_TARGET_DAILY
     now_local = timeutil.now_local()
     now_hour = now_local.hour + now_local.minute / 60
-    behind_pace = False
-    if steps_now is not None and 6 <= now_hour <= 22:
-        expected = target * ((now_hour - 6) / 16) ** 0.7
-        behind_pace = steps_now < expected * 0.85
+    p = steps_pace(steps_now, now_hour, target)
     return {
         "target": target, "now_hour": round(now_hour, 2), "now_steps": steps_now,
-        "behind_pace": behind_pace,
+        "behind_pace": p["behind"], "pace": p,
         "status_word": (None if steps_now is None else
                         ("цель взята" if steps_now >= target else
-                         ("чуть ниже темпа" if behind_pace else "по темпу"))),
+                         ("ниже темпа" if p["behind"] else "по темпу"))),
     }
 
 
@@ -1352,6 +1408,8 @@ def build_today(cur) -> dict:
     protein = levers.get("protein") or {}
     nudge = build_nudge(state, steps, protein, timeutil.now_local())
     scores = _scores(today, health)
+    if (steps.get("pace") or {}).get("score") is not None:
+        scores["movement_score"] = steps["pace"]["score"]   # темп дня вместо вчерашних шагов (круг больше не вечная сотня)
     chips = build_chips(today, health, tn)
     day_index = _day_index(scores, chips)
     ahead = compute_ahead(today, health, state, steps, protein, chips)
@@ -1362,7 +1420,8 @@ def build_today(cur) -> dict:
     rows, meals, targets = _fetch_streak_inputs(cur)
     today_iso = today.get("date") or timeutil.now_local().date().isoformat()
     travel_days = read_travel_days(cur)
-    streak_data = build_streaks(rows, meals, targets, today_iso, travel_days)
+    streak_data = build_streaks(rows, meals, targets, today_iso, travel_days,
+                                steps_today=steps.get("now_steps"), now_hour=steps.get("now_hour"))
 
     return {
         "date": today.get("date"),
@@ -1387,7 +1446,7 @@ def build_today(cur) -> dict:
         "freezes_available": streak_data["freezes_available"],
         "travel": travel_state(travel_days, today_iso),
         "assignments": build_assignments(cur, today, state),
-        "rx": build_rx_week(cur, today_iso, steps.get("now_steps"), steps.get("target") or _STEPS_TARGET_DAILY),
+        "rx": build_rx_week(cur, today_iso, steps.get("now_steps"), steps.get("target") or STEPS_TARGET_DAILY),
         # «Проверки», этап 2 (2026-09-28): слот «Решить» (этап 1 оставил его
         # пустым — см. app/static/vita.html до этого коммита) + строка
         # «N проверок идут · ближайший вердикт» (Часть 3 тикета).

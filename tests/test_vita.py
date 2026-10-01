@@ -2,7 +2,7 @@
 чипы, нудж) + FakeCursor для _dish_sources/build_levers (health.* без тестовой
 схемы, тот же принцип, что test_doctor_context.py) + TestClient для 401/200 на
 эндпоинтах. Часть 3 тикета: все 4 обязательных состояния — API-уровнем."""
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -200,16 +200,40 @@ def test_build_sleep_detail_no_history_is_honest_not_fake():
     assert out["sleep_score"] is None
 
 
-def test_build_move_detail_uses_gate_for_coach(monkeypatch):
-    monkeypatch.setattr(vita, "_recent_daily_values", lambda cur, cols, days: [])
+class _RowsCur:
+    """Курсор-заглушка: execute запоминает запрос, fetchall отдаёт заданные строки."""
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, *a, **k):
+        pass
+
+    def fetchall(self):
+        return self._rows
+
+
+def test_build_move_detail_pace_week_and_load(monkeypatch):
+    from app.steps_pace import pace as _pace
+    monkeypatch.setattr(vita.timeutil, "today", lambda *a, **k: date(2026, 10, 1))
+    monkeypatch.setattr(vita.steps_sampler, "day_samples", lambda cur, d: [(16.33, 5768)])
+    monkeypatch.setattr(vita, "build_rx_week", lambda cur, t, s, tg: {"items": [
+        {"k": "swim", "n": 0}, {"k": "move", "n": 5}, {"k": "walk", "n": 4}]})
+    monkeypatch.setattr(vita, "_todays_workouts", lambda cur: [])
     monkeypatch.setattr(vita, "_topic_publications", lambda cur, seg, limit=5: [])
-    steps = {"now_steps": 4200, "target": 12000, "status_word": "в темпе", "behind_pace": False}
-    today = {"decision": {"acwr": 0.9, "acwr_status": "LOW"}}
-    out = vita.build_move_detail(_FC(), today, steps, {"blocked": True, "label": "щадящий режим"})
-    assert out["steps_now"] == 4200 and out["steps_target"] == 12000
-    assert out["acwr"] == 0.9 and out["acwr_status"] == "LOW"
-    assert out["workouts"] == []  # живая жалоба: раньше тренировки вообще не показывались нигде
-    assert "щадящего режима" in out["coach"]
+    # (Дата, Шаги_за_вчера, Плавание_было, острая, хроническая): в строке D шаги дня D−1
+    rows = [(date(2026, 9, 14) + timedelta(days=i), str(10000 + i * 100), "Да" if i == 0 else "Нет", str(60 - i), "176") for i in range(18)]
+    steps = {"now_steps": 5768, "target": 10000, "now_hour": 16.5, "status_word": "по темпу",
+             "behind_pace": False, "pace": _pace(5768, 16.5, 10000)}
+    out = vita.build_move_detail(_RowsCur(rows), {"decision": {"acwr": 0.0, "acwr_status": "LOW"}}, steps, {"blocked": True})
+    assert out["steps_now"] == 5768 and out["steps_target"] == 10000
+    assert out["pace"]["expected"] == 6333 and out["pace"]["delta"] == -565
+    assert out["day"]["samples"] == [{"h": 16.33, "steps": 5768}] and len(out["day"]["expected"]) == 2
+    assert [w["today"] for w in out["week"]].count(True) == 1 and out["week"][-1]["steps"] == 5768
+    assert out["swim"] == {"week_n": 0, "need": 2, "last": "2026-09-13"}   # «Да» в строке 14.09 = плавание 13.09
+    assert out["stand"] == {"week_n": 5, "need": 5}
+    assert out["load"]["acwr"] == 0.0 and out["load"]["low"] == 141 and out["load"]["high"] == 229
+    assert out["best_day"]["steps"] >= out["avg7"]
+    assert out["workouts"] == []
 
 
 def test_todays_workouts_skips_empty_slots(monkeypatch):
@@ -1165,8 +1189,8 @@ def test_vita_topic_move_200_has_expected_keys():
     r = client.get("/vita/topic/move", cookies=_cookie())
     assert r.status_code == 200
     body = r.json()
-    for key in ("steps_now", "steps_target", "acwr", "acwr_status", "workouts", "history_daily",
-                "coach", "publications"):
+    for key in ("steps_now", "steps_target", "pace", "day", "week", "swim", "stand", "load", "workouts",
+                "publications"):
         assert key in body
 
 
@@ -1484,7 +1508,8 @@ def test_rx_week_reads_previous_day_from_next_row_and_marks_future():
     rows = [(date(2026, 9, 29), "Да", 30, 9000), (date(2026, 9, 30), "Нет", 90, 5000)]
     cells, out = _rx("2026-09-30", rows, [])
     assert cells["swim"][:3] == ["y", "", "t"] and cells["swim"][3:] == ["f"] * 4
-    assert cells["move"][:2] == ["y", ""]
+    # перерыв — показатель самого дня (строка своей даты): пн нет строки → нет данных, вт 30 мин ок, сегодня 90 мин → провал
+    assert cells["move"][:3] == ["q", "y", ""]
     assert cells["walk"][:2] == ["y", ""]
     assert next(i for i in out["items"] if i["k"] == "swim")["n"] == 1
 
