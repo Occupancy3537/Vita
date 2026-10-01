@@ -1681,3 +1681,27 @@ def test_shape_sleep_nights_keeps_last_seven_and_skips_incomplete_rows():
 def test_shape_sleep_nights_empty_is_honest():
     out = vita.shape_sleep_nights([])
     assert out == {"nights": [], "avg_net_min": None, "avg_bed": None, "avg_wake": None}
+
+
+# ─────── «Микро · неделя»: все нутриенты и задачи здоровья (2026-10-01) ───────
+
+def test_shape_food_topic_micro_normal_and_groups():
+    weekly = {"days": ["2026-09-29", "2026-09-30"],
+              "heatmap": [{"label": "Витамин D", "avgPct": 31, "level": 2, "unit": "мкг", "values": [53, 7],
+                           "note": None, "upperBoundPct": 667}],
+              "normal": [{"label": "Магний", "avg": 106, "values": [110, 102], "unit": "мг"},
+                         {"label": "Кальций", "avg": 87, "values": [70, 104], "unit": "мг"}],
+              "scores": [{"label": "Энергия", "pct": 100, "nutrients": [{"label": "Магний", "pct": 106}]},
+                         {"label": "Здоровье костей", "pct": 80, "nutrients": [{"label": "Кальций", "pct": 87}, {"label": "Витамин D", "pct": 31}]}],
+              "sources": {}}
+    out = vita.shape_food_topic(weekly, {"meals": []}, [])
+    assert [m["label"] for m in out["micro_normal"]] == ["Кальций", "Магний"]          # по возрастанию среднего
+    assert out["micro_normal"][0]["days_pct"] == [70, 104]
+    assert [g["label"] for g in out["micro_groups"]] == ["Кости", "Энергия"]            # короткие названия, слабые первыми
+    assert out["micro_groups"][0]["nutrients"] == ["Кальций", "Витамин D"] and out["micro_groups"][0]["pct"] == 80
+    assert out["micro_heatmap"][0]["label"] == "Витамин D"                              # прежнее поле не сломано
+
+
+def test_shape_food_topic_micro_missing_inputs_is_empty_not_error():
+    out = vita.shape_food_topic({}, {"meals": []}, [])
+    assert out["micro_normal"] == [] and out["micro_groups"] == []

@@ -1906,7 +1906,7 @@ def get_weekly_nutrition(cur) -> dict:
             }
         elif not is_limit_type:
             normal_metrics.append({
-                "label": t.get("Нутриент"), "avg": avg_pct, "unit": t.get("Единица") or "",
+                "label": t.get("Нутриент"), "avg": avg_pct, "values": daily_pct, "unit": t.get("Единица") or "",
                 "avgAbs": avg_abs, "rda": rda, "ul": ul_effective, "ulRatio": ul_ratio_r,
                 "ulNote": ul_note, "level": level,
             })

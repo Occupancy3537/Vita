@@ -558,10 +558,24 @@ def shape_food_topic(weekly: dict, yesterday: dict, publications: list[dict]) ->
     dq = weekly.get("diet_quality") or {}
     ahei = dq.get("ahei") or {}
     plants = dq.get("plants") or {}
+    # все нутриенты «в норме» тоже с днями (экран «Микро · неделя»: «В норме» раскрывается в полную сетку)
+    micro_normal = sorted(
+        [{"label": m["label"], "avg_pct": m.get("avg"), "days_pct": m.get("values") or [], "unit": m.get("unit")}
+         for m in (weekly.get("normal") or []) if m.get("label")],
+        key=lambda m: (m["avg_pct"] is None, m["avg_pct"]))
+    # задачи здоровья из справочника норм (nutrient_targets.Категория): процент группы — среднее доли нормы (выше 100 = 100)
+    short_group = {"Здоровье костей": "Кости", "Здоровье волос и кожи": "Волосы и кожа"}
+    micro_groups = sorted(
+        [{"label": short_group.get(g.get("label"), g.get("label")), "pct": g.get("pct"),
+          "nutrients": [n.get("label") for n in (g.get("nutrients") or []) if n.get("label")]}
+         for g in (weekly.get("scores") or []) if g.get("label")],
+        key=lambda g: (g["pct"] is None, g["pct"]))
     return {
         "segment": "food",
         "days": weekly.get("days") or [],
         "micro_heatmap": heatmap,
+        "micro_normal": micro_normal,
+        "micro_groups": micro_groups,
         "normal": [m["label"] for m in (weekly.get("normal") or []) if m.get("label")],
         "diet_quality": None if dq.get("error") or not ahei else {
             "ahei_week": ahei.get("week_avg"), "ahei_target": ahei.get("target"), "ahei_max": ahei.get("max"),

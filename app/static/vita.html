@@ -1204,6 +1204,12 @@ svg{display:block}
 .lever .bb{margin:14px 0 2px}
 .lever.nodata .bb{background:none;border-top:1.5px dashed var(--faint);height:0;margin-top:16px}
 .hm{padding:6px 14px 10px;border-radius:24px;background:var(--card);box-shadow:var(--card-sh)}
+.nuC{padding:12px 0;border-top:1px solid var(--line-soft)}.nuC:first-child{border-top:0;padding-top:4px}
+.nuH{width:100%;display:flex;justify-content:space-between;align-items:baseline;text-align:left}.nuH b{font-size:15px;font-weight:600}.nuH span{font-size:22px;font-weight:200;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.nuG{display:grid;gap:4px;margin-top:6px;text-align:center;font-size:10.5px;color:var(--muted)}.nuG i{width:min(20px,100%);aspect-ratio:1;border-radius:50%;justify-self:center;background:transparent;box-shadow:inset 0 0 0 1.2px var(--faint)}
+.nuG i.g1{background:color-mix(in srgb,var(--accent) 24%,transparent);box-shadow:none}.nuG i.g2{background:color-mix(in srgb,var(--accent) 46%,transparent);box-shadow:none}.nuG i.g3{background:color-mix(in srgb,var(--accent) 72%,transparent);box-shadow:none}.nuG i.g4{background:var(--accent);box-shadow:none}.nuG i.hot{background:var(--warm);box-shadow:none}.nuG i.today{outline:1.6px solid var(--ink);outline-offset:0}
+.nuS{font-size:12px;line-height:1.45;color:var(--muted);margin-top:8px}
+.mgR{display:flex;align-items:center;gap:12px;width:100%;padding:11px 0;text-align:left}.mgR b{flex:1;font-size:14.5px;font-weight:500}.mgR span{font-size:20px;font-weight:200;font-variant-numeric:tabular-nums}.mgR svg{flex:none;width:34px;height:34px}
 .hmH,.hmR{display:grid;grid-template-columns:84px repeat(7,minmax(0,1fr)) 40px;align-items:center;column-gap:4px}
 .hmH{padding:8px 0 4px;font-size:11px;color:var(--muted);text-align:center}
 .hmH span:first-child{text-align:left}
@@ -1961,15 +1967,31 @@ const B={
     const otherLimits=own.filter(r=>!leverLabels.includes(r.label)&&!['Насыщенные жиры','Натрий','Добавленный сахар'].includes(r.label));
     /* микро — строка = нутриент, клетки = дни недели, в конце — среднее; тап — откуда брался и справка */
     const WD=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'],days=T.days||[];
-    const cell=(v,up)=>v==null?'':(up!=null&&v>up)?'hot':v>=75?'g4':v>=50?'g3':v>=25?'g2':'g1';
-    const hm=T.micro_heatmap||[],nd=hm.reduce((a,m)=>Math.max(a,(m.days_pct||[]).length),0);
+    /* цвет кружка — доля дневной нормы: <40, 40–70, 70–100, ≥100 (выше — как 100); терракота — только опасный перебор */
+    const cell=(v,up)=>v==null?'':(up!=null&&v>up)?'hot':v>=100?'g4':v>=70?'g3':v>=40?'g2':'g1';
+    const hm=T.micro_heatmap||[],mn=T.micro_normal||[],nd=[...hm,...mn].reduce((a,m)=>Math.max(a,(m.days_pct||[]).length),0);
     const dl=Array.from({length:nd},(_,i)=>{const d=days[days.length-nd+i];return d?WD[new Date(d+'T00:00:00').getDay()]:''}),tdi=(days.length&&days[days.length-1]===TODAY.date)?nd-1:-1;
-    const gcol=`grid-template-columns:84px repeat(${nd},minmax(0,1fr)) 40px`;
-    const micro=hm.length?`<div class="hm"><div class="hmH" style="${gcol}"><span></span>${dl.map((x,i)=>`<span${i===tdi?' class="td"':''}>${x}</span>`).join('')}<span>сред.</span></div>`
-      +hm.map(m=>{const why=[(m.top_sources||[]).length?`За неделю больше всего дали: <b>${m.top_sources.join(', ')}</b>.`:'В записях еды за неделю его почти не было.',m.note?`Справка: ${m.note}`:''].filter(Boolean).join(' ');
-        return `<div class="hmW"><button class="hmR" style="${gcol}" data-a="micro"><span>${m.label}<small>${(m.upper_pct!=null&&(m.days_pct||[]).some(v=>v!=null&&v>m.upper_pct))?'перебор':'недобор недели'}</small></span>${(m.days_pct||[]).map((v,i)=>`<i class="${cell(v,m.upper_pct)}${i===tdi?' today':''}" title="${v==null?'нет данных':Math.round(v)+'% нормы'}"></i>`).join('')}<em>${Math.round(m.avg_pct)}%</em></button><div class="hmA"><div><p>${why}</p></div></div></div>`}).join('')
-      +((T.normal||[]).length?`<div class="hmOk">${svg('check')}В норме за неделю: ${T.normal.slice(0,8).join(', ')}</div>`:'')+`<p class="gvNote" style="margin:8px 0 0">Цвет — доля от дневной нормы: чем насыщеннее, тем ближе к норме. Красный — только опасный перебор. Пустой кружок — нет данных.${tdi>=0?' Обведён сегодняшний день, он ещё не закончен.':''}</p></div>`
-      :`<p class="quietRow">${svg('check')}За неделю микронутриенты в норме${(T.normal||[]).length?': '+T.normal.slice(0,6).join(', '):''}.</p>`;
+    const dlow=i=>{const d=days[days.length-nd+i];return d?SLEEP_WD[new Date(d+'T12:00:00').getDay()]:''};
+    const gc=`grid-template-columns:repeat(${nd},minmax(0,1fr))`,gcol=`grid-template-columns:96px repeat(${nd},minmax(0,1fr)) 40px`;
+    const dots=m=>(m.days_pct||[]).map((v,i)=>`<i class="${cell(v,m.upper_pct)}${i===tdi?' today':''}" title="${v==null?'нет данных':Math.round(v)+'% нормы'}"></i>`).join('');
+    const hdr=`<div class="nuG" style="${gc}">${dl.map((x,i)=>`<span${i===tdi?' style="color:var(--ink);font-weight:700"':''}>${x}</span>`).join('')}</div>`;
+    const srcShort=x=>String(x||'').split(/[,(]/)[0].trim();
+    const ringSvg=p=>{const R=15,C=2*Math.PI*R;return `<svg viewBox="0 0 38 38"><circle cx="19" cy="19" r="${R}" fill="none" stroke="var(--bg)" stroke-width="5"/><circle cx="19" cy="19" r="${R}" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" stroke-dasharray="${(C*Math.min(100,p)/100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 19 19)" opacity="${p<85?.5:1}"/></svg>`};
+    const rowG=m=>`<div class="hmR" style="${gcol}"><span style="font-size:13.5px">${esc(m.label.replace(' (EPA/DHA)',''))}</span>${(m.days_pct||[]).map((v,i)=>`<i class="${cell(v,m.upper_pct)}${i===tdi?' today':''}"></i>`).join('')}<em>${Math.round(m.avg_pct)}%</em></div>`;
+    const accM=(id,t,m,body)=>`<div class="accS" data-s="${id}"><button class="accH" data-a="acc" data-k="${id}" aria-expanded="false"><span class="accT"><b>${t}</b><small>${m}</small></span>${svg('chev','ic chev')}</button><div class="accB"><div>${body}</div></div></div>`;
+    const all=Object.fromEntries([...hm,...mn].map(m=>[m.label,m]));
+    /* B: только то, что ниже нормы, — карточками; «В норме» и «По задачам» — свёрнуты */
+    const att=hm.map(m=>{const vals=m.days_pct||[],mx=Math.max(...vals.map(v=>v==null?-1:v)),bi=vals.indexOf(mx),over=m.upper_pct!=null&&vals.some(v=>v!=null&&v>m.upper_pct);
+      return `<div class="hmW nuC"><button class="nuH" data-a="micro"><b>${esc(m.label)}</b><span>${Math.round(m.avg_pct)}%</span></button>${hdr}<div class="nuG" style="${gc}">${dots(m)}</div>
+        <p class="nuS">${over?'есть дни с опасным перебором · ':''}${mx>=0?`лучший день — ${dlow(bi)} ${Math.round(mx)}%`:'данных за неделю нет'}${(m.top_sources||[]).length?` · основной источник: ${esc(srcShort(m.top_sources[0]))}`:''}</p>
+        ${m.note?`<div class="hmA"><div><p>Справка: ${esc(m.note)}</p></div></div>`:''}</div>`}).join('');
+    const okNames=mn.map(m=>m.label.replace(' (EPA/DHA)','')).join(', ');
+    const okAcc=mn.length?accM('mok','В норме',`${mn.length} из ${mn.length+hm.length}: ${esc(okNames)}`,`<div class="hmH" style="${gcol}"><span></span>${dl.map((x,i)=>`<span${i===tdi?' class="td"':''}>${x}</span>`).join('')}<span>сред.</span></div>${mn.map(rowG).join('')}`):'';
+    const grp=(T.micro_groups||[]);
+    const grpAcc=grp.length?accM('mgrp','По задачам',grp.map(g=>`${esc(g.label.toLowerCase())} ${g.pct}%`).join(' · '),
+      grp.map((g,k)=>`<div class="accS" data-s="mg${k}"><button class="accH mgR" data-a="acc" data-k="mg${k}" aria-expanded="false">${ringSvg(g.pct)}<b>${esc(g.label)}</b><span>${g.pct}%</span>${svg('chev','ic chev')}</button><div class="accB"><div><div class="hmH" style="${gcol}"><span></span>${dl.map((x,i)=>`<span${i===tdi?' class="td"':''}>${x}</span>`).join('')}<span>сред.</span></div>${g.nutrients.map(n=>all[n]?rowG(all[n]):'').join('')}</div></div></div>`).join('')):'';
+    const micro=(hm.length||mn.length)?`<div class="mvCard" style="margin-top:0;padding-top:8px">${att||`<p class="quietRow" style="padding:8px 0">${svg('check')}Ниже нормы за неделю ничего нет</p>`}</div>${okAcc||grpAcc?`<div class="rise" style="margin-top:6px">${okAcc}${grpAcc}</div>`:''}<p class="mvCap" style="margin-top:8px">Темнее кружок — ближе к дневной норме; пустой — нет данных${tdi>=0?'; обведён сегодняшний день, он ещё не закончен':''}.</p>`
+      :`<p class="quietRow">${svg('check')}За неделю микронутриентов нет в записях еды.</p>`;
     return {html:`${top('Питание сегодня')}
     <div class="sectionHead rise" style="--i:1;margin-top:18px"><span class="lbl">За день</span><button class="linkline" data-a="foodyest">Вчера${svg('right')}</button></div>
     <div class="macros rise" style="--i:1">${macros}</div>${prSrc}
