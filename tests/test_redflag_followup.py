@@ -255,3 +255,18 @@ def test_naive_since_interpreted_as_utc(monkeypatch):
         conn.commit()
     result = rf.run_once(now=NOW)
     assert result["sent"] == 1
+
+
+def test_every_startup_task_name_resolves_in_main():
+    """Живой случай 2026-10-01: планировщик добавили в _STARTUP_TASKS, а модуль не
+    импортировали — NameError всплыл только в проде при старте потока. Каждое
+    глобальное имя в лямбдах _STARTUP_TASKS обязано существовать в app.main."""
+    import builtins
+    import dis
+    from app import main
+    missing = []
+    for flag, fn, _name in main._STARTUP_TASKS:
+        for ins in dis.get_instructions(fn):
+            if ins.opname == "LOAD_GLOBAL" and not hasattr(main, ins.argval) and not hasattr(builtins, ins.argval):
+                missing.append((flag, ins.argval))
+    assert not missing, missing

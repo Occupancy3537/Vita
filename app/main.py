@@ -117,6 +117,7 @@ import app.outcomes_report as outcomes_report
 import app.err_dedup as err_dedup
 import app.lab_optimizer as lab_optimizer
 import app.lab_reminder as lab_reminder
+import app.redflag_followup as redflag_followup
 from app.biohacking_ingest import BiohackingPayload, process_ingest
 from app.write_path import process as process_source
 from app.vita import router as vita_router
