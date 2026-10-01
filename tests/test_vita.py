@@ -1627,3 +1627,32 @@ def test_shape_doctor_fallback_verdict_caps_at_three_actions():
     acts = [{"imperative": f"Действие номер {i}", "accepted": True} for i in range(5)]
     c = vita.shape_doctor([_report(verdict=None, actions=acts)], [], [], {"panels": [], "conflicts": []})["consilium"]
     assert c["verdict"].count(";") == 2 and c["verdict"].endswith("(и ещё 2)")
+
+
+# ─────── «Сон»: недельная диаграмма «когда спал» (вариант C, 2026-10-01) ───────
+
+def _night(d, bed, wake, net=440, deep=100, light=230, rem=110, awake=10):
+    from datetime import datetime as _dt
+    return (date.fromisoformat(d), _dt.fromisoformat(bed), _dt.fromisoformat(wake), net, deep, light, rem, awake)
+
+
+def test_shape_sleep_nights_offsets_cross_midnight_without_wrapping():
+    out = vita.shape_sleep_nights([_night("2026-09-27", "2026-09-27 00:39:00", "2026-09-27 06:45:00"),
+                                   _night("2026-09-30", "2026-09-29 22:51:00", "2026-09-30 06:59:00")])
+    a, b = out["nights"]
+    assert (a["bed"], a["wake"], a["bed_off"], a["wake_off"]) == ("00:39", "06:45", 399, 765)  # от 18:00 пред. дня
+    assert (b["bed_off"], b["wake_off"]) == (291, 779) and b["bed_off"] < a["bed_off"]
+    assert out["avg_bed"] == "23:45" and out["avg_wake"] == "06:52"
+
+
+def test_shape_sleep_nights_keeps_last_seven_and_skips_incomplete_rows():
+    rows = [_night(f"2026-09-{d:02d}", f"2026-09-{d-1:02d} 23:00:00", f"2026-09-{d:02d} 07:00:00") for d in range(10, 20)]
+    rows.insert(3, (date(2026, 9, 14), None, None, 400, 90, 200, 100, 10))   # нет отбоя — не ночь
+    out = vita.shape_sleep_nights(rows)
+    assert len(out["nights"]) == vita.SLEEP_NIGHTS_N == 7 and out["nights"][-1]["date"] == "2026-09-19"
+    assert out["avg_net_min"] == 440
+
+
+def test_shape_sleep_nights_empty_is_honest():
+    out = vita.shape_sleep_nights([])
+    assert out == {"nights": [], "avg_net_min": None, "avg_bed": None, "avg_wake": None}

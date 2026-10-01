@@ -57,6 +57,7 @@
   --font:"Manrope",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --serif:"Spectral","Iowan Old Style",Georgia,serif;
   --surface:#EFEDE8; --surface-hi:#FBFAF8;
+  --ph-deep:#1E6C66; --ph-rem:#2C8981; --ph-light:#A8D0CB; --ph-awake:#D9D5CC; --zone:rgba(44,137,129,.10); --grid:rgba(29,27,24,.10);
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
 }
@@ -64,6 +65,7 @@
   color-scheme:dark;
   --bg:#0F1214;
   --surface:#181C1F; --surface-hi:#20252A;
+  --ph-deep:#2E7D77; --ph-rem:#6CC6BE; --ph-light:#3F6F6B; --ph-awake:#4A4642; --zone:rgba(108,198,190,.10); --grid:rgba(241,238,231,.10);
   --ink:#F1EEE7; --ink2:#B3ADA3; --muted:#8F897F; --faint:#3C3936;
   --line:rgba(241,238,231,.10); --line-soft:rgba(241,238,231,.05);
   --accent:#6CC6BE; --accent-ink:#8FD8D0; --accent-soft:rgba(108,198,190,.14); --accent-glow:rgba(108,198,190,.45);
@@ -957,6 +959,17 @@ svg{display:block}
 .cline .mini{flex:none;display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 11px;font-size:11.5px;white-space:nowrap;border-radius:13px;color:var(--accent-ink);border:1px solid var(--line)}
 .cline .mini svg{width:12px;height:12px;flex:none;stroke-width:2}
 .cline .mini.ok{color:var(--green);border-color:transparent;padding:0 2px}
+.slpAvg{display:flex;gap:18px;margin-top:6px;font-size:12.5px;color:var(--muted)}.slpAvg b{color:var(--ink);font-weight:600}
+.slpBig{font-size:54px;font-weight:200;letter-spacing:-.03em;line-height:1;margin-top:8px}.slpBig small{font-size:16px;font-weight:400;color:var(--muted);margin-left:5px;letter-spacing:0}
+.slpCard{background:var(--card);border-radius:24px;padding:14px 16px;margin-top:14px;box-shadow:var(--card-sh)}
+.slpCard h4{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px;font-weight:600;color:var(--ink2);margin-bottom:6px}
+.slpCard h4 em{font-style:normal;font-weight:400;font-size:12px;color:var(--muted)}
+.slpRow{display:flex;align-items:center;gap:16px}.slpRow>svg{flex:none;width:120px}
+.slpRow b{display:block;font-size:34px;font-weight:200;letter-spacing:-.02em;line-height:1.1}.slpRow small{font-size:12.5px;color:var(--accent-ink)}
+.slpPh{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:12px}
+.slpPh div{min-width:0;display:flex;flex-direction:column;gap:3px;background:var(--bg);border-radius:14px;padding:8px 9px}
+.slpPh span{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);white-space:nowrap}.slpPh i{width:8px;height:8px;border-radius:50%;flex:none}
+.slpPh b{font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
 .stgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px}
 .stile{padding:14px 12px 13px;border-radius:14px;border:1px solid var(--line);display:flex;flex-direction:column;align-items:flex-start;gap:8px;transition:border-color .3s ease,scale .35s var(--ease)}
 .stile.cur{border-color:var(--accent)}
@@ -1376,6 +1389,26 @@ function actSplit(t){t=(t||'').trim();const seps=[': ',' — ','; ',' (','. '];l
   for(const sp of seps){const i=t.indexOf(sp);if(i>=14&&i<=110&&(pos<0||i<pos)){pos=i;len=sp.length}}
   if(pos<0){if(t.length<=110)return[t,''];const cut=t.slice(0,100).replace(/\s+\S*$/,'');return[cut+'…',t.slice(cut.length).trim()]}
   const lead=t.slice(0,pos).trim(),rest=t.slice(pos+len).trim();return[lead.charAt(0).toUpperCase()+lead.slice(1),rest.charAt(0).toUpperCase()+rest.slice(1)]}
+/* ===== «Сон» (вариант C, 2026-10-01): неделя «когда спал» + полудуга фаз за ночь ===== */
+const PH_KEYS=[['deep','Глубокий','deep_min'],['rem','REM','rem_min'],['light','Лёгкий','light_min'],['awake','Бодрств.','awake_min']];
+const clockOff=o=>{const m=(18*60+o)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')};
+const phShares=n=>{const t=PH_KEYS.reduce((a,k)=>a+(n[k[2]]||0),0)||1;return PH_KEYS.map(k=>[k[0],(n[k[2]]||0)/t])};
+function sleepWeek(nights){
+  const w=330,h=200,top=12,bot=22,lo=Math.min(240,Math.floor(Math.min(...nights.map(n=>n.bed_off))/60)*60),hi=Math.max(900,Math.ceil(Math.max(...nights.map(n=>n.wake_off))/60)*60);
+  const ph=h-top-bot,sc=ph/(hi-lo),cw=24,x0=40,gap=(w-x0-8-nights.length*cw)/Math.max(1,nights.length-1),Y=o=>top+(o-lo)*sc;let g='',b='';
+  for(let o=lo;o<=hi;o+=120){g+=`<line x1="${x0-6}" x2="${w}" y1="${Y(o).toFixed(1)}" y2="${Y(o).toFixed(1)}" stroke="var(--grid)" stroke-dasharray="2 4"/><text class="xl" x="0" y="${(Y(o)+3).toFixed(1)}">${clockOff(o)}</text>`}
+  nights.forEach((n,i)=>{const x=x0+i*(cw+gap),y0=Y(n.bed_off),hh=Y(n.wake_off)-y0,last=i===nights.length-1,id='sw'+i;let yy=y0;
+    b+=`<clipPath id="${id}"><rect x="${x.toFixed(1)}" y="${y0.toFixed(1)}" width="${cw}" height="${hh.toFixed(1)}" rx="9"/></clipPath><g clip-path="url(#${id})">`;
+    phShares(n).forEach(([k,f])=>{const sh=hh*f;b+=`<rect x="${x.toFixed(1)}" y="${yy.toFixed(1)}" width="${cw}" height="${(sh+.5).toFixed(1)}" fill="var(--ph-${k})"/>`;yy+=sh});b+='</g>';
+    if(last)b+=`<rect x="${(x-2.5).toFixed(1)}" y="${(y0-2.5).toFixed(1)}" width="${cw+5}" height="${(hh+5).toFixed(1)}" rx="11" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity=".6"/>`;
+    b+=`<text class="xl" x="${(x+cw/2).toFixed(1)}" y="${h-4}" text-anchor="middle" style="${last?'fill:var(--ink);font-weight:600':''}">${SLEEP_WD[new Date(n.date+'T12:00:00').getDay()]}</text>`});
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" aria-label="Когда спал: отбой и подъём по ночам">${g}${b}</svg>`}
+const SLEEP_WD=['вс','пн','вт','ср','чт','пт','сб'];
+function sleepArc(n){const cx=150,cy=150,R=126,gap=1.1;let pos=0,o='';
+  phShares(n).forEach(([k,f])=>{const a=pos+gap/2,e=pos+f*100-gap/2;pos+=f*100;if(e<=a)return;
+    const A=(180+a*1.8)*Math.PI/180,B=(180+e*1.8)*Math.PI/180;
+    o+=`<path d="M${(cx+R*Math.cos(A)).toFixed(1)} ${(cy+R*Math.sin(A)).toFixed(1)} A${R} ${R} 0 0 1 ${(cx+R*Math.cos(B)).toFixed(1)} ${(cy+R*Math.sin(B)).toFixed(1)}" fill="none" stroke="var(--ph-${k})" stroke-width="22" stroke-linecap="round"/>`});
+  return `<svg viewBox="0 0 300 168" aria-hidden="true">${o}</svg>`}
 function lineChart({data,w=320,h=140,color=ACCENT,min,max,base=null,labels=null,marks=[],xt=null,lastText=null,baseText=null,straight=false,padT=14,padB=(labels||xt)?20:6}){
   if(!data||data.length<2)return '<p class="empty">Пока мало данных для графика.</p>';
   const id='g'+(gid++);min=min??Math.min(...data)-.5;max=max??Math.max(...data)+.5;
@@ -1823,13 +1856,14 @@ const B={
          что теперь красит кругляш «Сон», см. chipsFor) — в подстроке, не
          "Качество" (Эффективность_сна_ часто пусто — было видно "—" на
          скриншоте). */
+      const N=T.nights||[],ln=N.length?N[N.length-1]:null,tiles=n=>`<div class="slpPh">${PH_KEYS.map(k=>`<div><span><i style="background:var(--ph-${k[0]})"></i>${k[1]}</span><b>${hrs(n[k[2]])}</b></div>`).join('')}</div>`;
+      const dl=T.delta_min==null?(T.sleep_score!=null?`оценка сна ${Math.round(T.sleep_score)}`:''):`${T.delta_min>=0?'+':'−'}${Math.abs(T.delta_min)} мин к среднему${T.sleep_score!=null?`<br>оценка сна ${Math.round(T.sleep_score)}`:''}`;
       return {html:`${top('Сон')}
-      <div class="ov-hero rise" style="--i:1"><div class="lbl">Прошлая ночь</div><div class="big">${hrs(T.last_night_min)}</div>
-        <p class="ov-sub" style="color:var(--accent-ink)">${T.avg14_min==null?'Пока мало ночей для среднего':T.delta_min>=0?`+${T.delta_min} мин к среднему за 14 ночей`:`${T.delta_min} мин к среднему за 14 ночей`}${T.sleep_score!=null?` · оценка сна ${Math.round(T.sleep_score)}`:''}</p></div>
-      <div class="ov-chart rise" style="--i:2" id="ovChart"><div class="lbl" style="margin-bottom:4px">Часы сна · 14 ночей</div>${lineChart({data:T.history.map(x=>x.hours),w:320,h:140,base:T.avg14_min!=null?T.avg14_min/60:null,baseText:T.avg14_min!=null?'среднее '+hrs(T.avg14_min):null,lastText:hrs(Math.round(T.history[T.history.length-1].hours*60)),xt:chartDates(T.history)})}</div>
-      <div class="stats g4 rise" style="--i:3">${[['Лёгкий',hrs(T.light_min)],['Глубокий',hrs(T.deep_min)],['Быстрый (РЕМ)',hrs(T.rem_min)],['Бодрствование',T.awake_min!=null?T.awake_min+' мин':'—']].map(s=>`<div class="stat"><div class="lbl">${s[0]}</div><div class="v">${s[1]}</div></div>`).join('')}</div>
-      <p class="ov-coach rise" style="--i:4">${esc(T.coach)}</p>${pubList(T.publications,'Свежее по теме',5)}`,
-      after(){replay($('#ovChart'))}}
+      ${N.length?`<div class="rise" style="--i:1"><div class="lbl" style="margin-top:14px;font-size:13px;color:var(--muted)">Среднее за ${N.length} ${plural(N.length,'ночь','ночи','ночей')}</div><div class="slpBig">${hrs(T.avg_net_min)}<small>ч</small></div><div class="slpAvg"><span>Ср. отбой <b>${T.avg_bed}</b></span><span>Ср. подъём <b>${T.avg_wake}</b></span></div></div>
+      <div class="slpCard rise" style="--i:2"><h4>Когда спал<em>отбой → подъём</em></h4>${sleepWeek(N)}</div>
+      <div class="slpCard rise" style="--i:3"><h4>Прошлая ночь<em>${ln.bed} → ${ln.wake}</em></h4><div class="slpRow">${sleepArc(ln)}<div><b>${hrs(T.last_night_min!=null?T.last_night_min:ln.net_min)}</b><small>${dl}</small></div></div>${tiles(ln)}</div>`
+      :`<div class="ov-hero rise" style="--i:1"><div class="lbl">Прошлая ночь</div><div class="big">${hrs(T.last_night_min)}</div><p class="ov-sub" style="color:var(--accent-ink)">${dl||'Пока мало ночей для среднего'}</p></div>`}
+      <p class="ov-coach rise" style="--i:4">${esc(T.coach)}</p>${pubList(T.publications,'Свежее по теме',5)}`}
     }
     if(k==='move'){
       const st=(RHYTHM&&RHYTHM.steps)||{};

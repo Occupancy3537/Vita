@@ -15,7 +15,7 @@ import json
 import logging
 import re
 import statistics
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from psycopg import sql
@@ -355,6 +355,52 @@ def build_recovery_detail(cur, today: dict, gate: dict) -> dict:
     }
 
 
+SLEEP_NIGHTS_N = 7
+
+
+def shape_sleep_nights(rows) -> dict:
+    """7 последних ночей с данными для недельной диаграммы «когда спал».
+    rows: (Дата, отбой, подъём, чистый сон, глубокий, лёгкий, REM, бодрствование) по возрастанию даты.
+    Минуты отбоя/подъёма — от 18:00 предыдущего дня, чтобы ночь через полночь не «заворачивалась»
+    (22:59 → 299, 06:31 → 751). Порядка фаз внутри ночи Garmin не отдаёт: UI рисует доли."""
+    nights = []
+    for d, bed, wake, net, deep, light, rem, awake in rows:
+        if bed is None or wake is None or net is None:
+            continue
+        b = datetime.fromisoformat(str(bed)) if not isinstance(bed, datetime) else bed
+        w = datetime.fromisoformat(str(wake)) if not isinstance(wake, datetime) else wake
+        base = datetime.combine(w.date() - timedelta(days=1), datetime.min.time()).replace(hour=18)
+        b_off, w_off = int((b - base).total_seconds() // 60), int((w - base).total_seconds() // 60)
+        if not (0 <= b_off < w_off <= 1800):
+            continue  # дневной сон/мусор — не рисуем как ночь
+        nights.append({
+            "date": d.isoformat() if hasattr(d, "isoformat") else str(d),
+            "bed": b.strftime("%H:%M"), "wake": w.strftime("%H:%M"), "bed_off": b_off, "wake_off": w_off,
+            "net_min": int(net), "deep_min": int(deep or 0), "light_min": int(light or 0),
+            "rem_min": int(rem or 0), "awake_min": int(awake or 0),
+        })
+    nights = nights[-SLEEP_NIGHTS_N:]
+    avg = lambda k: round(statistics.mean(n[k] for n in nights)) if nights else None
+    def clock(off):
+        m = (18 * 60 + off) % 1440
+        return f"{m // 60:02d}:{m % 60:02d}"
+    return {"nights": nights, "avg_net_min": avg("net_min"),
+            "avg_bed": clock(avg("bed_off")) if nights else None, "avg_wake": clock(avg("wake_off")) if nights else None}
+
+
+def _sleep_nights(cur) -> dict:
+    try:
+        cur.execute(
+            'SELECT "Дата", "Время_отбоя", "Время_подъема", "Чистый_сон_мин", "Глубокий_сон_мин", "Легкий_сон_мин", '
+            '"REM_сон_мин", "Бодрствование_мин" FROM health.daily_trends WHERE "Чистый_сон_мин" IS NOT NULL '
+            'AND "Время_отбоя" IS NOT NULL ORDER BY "Дата" DESC LIMIT %s', (SLEEP_NIGHTS_N + 3,))
+        rows = [tuple(_num(x) if i >= 3 else x for i, x in enumerate(r)) for r in cur.fetchall()][::-1]
+        return shape_sleep_nights(rows)
+    except Exception:
+        logger.exception("vita: ночи для недельной диаграммы сна не получены — экран без неё")
+        return {"nights": [], "avg_net_min": None, "avg_bed": None, "avg_wake": None}
+
+
 def build_sleep_detail(cur, sleep_min_today: Optional[int], sleep_quality_today: Optional[float]) -> dict:
     """Живая поправка Влада (2026-09-28): «должен быть быстрый глубокий и
     РЕМ в сумме с пробуждениями это весь сон» — проверено на реальных
@@ -390,6 +436,7 @@ def build_sleep_detail(cur, sleep_min_today: Optional[int], sleep_quality_today:
         "light_min": last.get("Легкий_сон_мин"), "deep_min": last.get("Глубокий_сон_мин"),
         "rem_min": last.get("REM_сон_мин"), "awake_min": last.get("Бодрствование_мин"),
         "coach": coach,
+        **_sleep_nights(cur),
         "publications": _topic_publications(cur, "sleep"),
     }
 
