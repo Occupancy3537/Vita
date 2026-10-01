@@ -27,6 +27,7 @@ from app.lab_systems import system_of, system_rank
 from app.dashboard import (
     _SLEEP_MAX_OK,
     _SLEEP_MIN_OK,
+    _ALCOHOL_TRACE_THRESHOLD_G,
     _STEPS_TARGET_DAILY,
     _baseline,
     _baseline_metrics_for_index,
@@ -899,6 +900,7 @@ STREAK_STRIP_DAYS = 14  # полоса дней в шторке «Серии» (
 _STREAK_CRITERIA = [
     {"key": "sleep_zone", "label": "Сон в зоне 7–9 ч"},
     {"key": "steps", "label": f"Шаги ≥ {STEPS_TARGET_DAILY // 1000} 000"},
+    {"key": "alcohol", "label": "Без алкоголя"},
     {"key": "Натрий", "label": "Соль в норме"},
     {"key": "Добавленный сахар", "label": "Сахар в норме"},
     {"key": "Насыщенные жиры", "label": "Жиры в норме"},
@@ -1283,6 +1285,17 @@ def _fetch_streak_inputs(cur):
     return rows, meals, targets
 
 
+def _alcohol_day_status(day_iso: str, meals: list[dict]):
+    """(met, at_risk, has_data) для серии «Без алкоголя» (2026-10-01, просьба Влада: «иногда пью, серия мотивирует не пить»).
+    Алкоголь — колонка «Алкоголь» (г) в записях еды ЭТОГО дня; следы до _ALCOHOL_TRACE_THRESHOLD_G (кефир и т.п.) не в счёт.
+    День без единой записи еды — нет данных (серия на паузе, не сгорает и не растёт): серия честна, только если выпитое записывают."""
+    day_meals = [m for m in meals if str(m.get("Date") or "")[:10] == day_iso]
+    if not day_meals:
+        return None, False, False
+    total = sum((_num(m.get("Алкоголь")) or 0) for m in day_meals)
+    return total <= _ALCOHOL_TRACE_THRESHOLD_G, False, True
+
+
 def _steps_day_status(day_iso: str, today_iso: str, steps_by_day: dict, steps_today, now_hour):
     """(met, at_risk, has_data) для серии «Шаги ≥ цели». Закрытый день — по шагам дня; сегодня: цель взята — выполнено,
     иначе день ещё идёт (met=None), «под угрозой» — после 15:00, если темп ниже 85%."""
@@ -1322,6 +1335,8 @@ def build_streaks(rows: list[dict], meals: list[dict], targets: list[dict], toda
         for d in days:
             if crit["key"] == "steps":
                 met, at_risk, has_data = _steps_day_status(d, today_iso, steps_by_day, steps_today, now_hour)
+            elif crit["key"] == "alcohol" and d not in travel_days:
+                met, at_risk, has_data = _alcohol_day_status(d, meals)
             elif d in travel_days and crit["key"] != "sleep_zone":
                 met, at_risk, has_data = None, False, False
             else:

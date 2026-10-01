@@ -1802,7 +1802,7 @@ const MARK={y:()=>svg('check'),w:()=>'<b style="color:#fff;font-size:12px">!</b>
 const rowMark={good:'y',neutral:'y',warn:'w',bad:'n'};
 let FOODT=null;
 const srcRows=(ss,u)=>{const mx=Math.max(...ss.map(x=>x.value),1);return ss.slice(0,4).map(x=>`<div class="src">${svg('dots')}<span style="width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.name)}</span><span class="sb"><i style="width:${x.value/mx*100}%"></i></span><span class="g">${fmt(x.value,u==='г'&&x.value<10?1:0)} ${u}</span></div>`).join('')};
-const STREAK_IC={sleep_zone:'moon',steps:'steps','Натрий':'salt','Добавленный сахар':'cube','Насыщенные жиры':'fat'};
+const STREAK_IC={sleep_zone:'moon',steps:'steps',alcohol:'drop','Натрий':'salt','Добавленный сахар':'cube','Насыщенные жиры':'fat'};
 const B={
   today(){const n=TODAY.nudge,lv=(RHYTHM&&RHYTHM.levers)||{},stp=(RHYTHM&&RHYTHM.steps)||{},score=TODAY.ring.score,ahead=TODAY.ring.ahead;
     /* макет v7: главная цифра действия, полоса, откуда, что даст, ещё можно (≤2), в норме — одной строкой */

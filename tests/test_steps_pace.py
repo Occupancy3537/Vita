@@ -120,3 +120,62 @@ def test_steps_streak_not_paused_by_travel():
     rows = [_row("2026-09-29", 12000), _row("2026-09-30", 12000)]
     res = vita.build_streaks(rows, [], [], "2026-09-30", travel_days={"2026-09-29", "2026-09-30"}, steps_today=None, now_hour=None)
     assert _steps_streak(res)["count"] >= 1               # часы с собой — шаги считаются как обычно
+
+
+# ─────── серия «Без алкоголя» (2026-10-01) ───────
+
+def _meal(day, alc=None, t="19:00"):
+    m = {"Date": f"{day}T{t}"}
+    if alc is not None:
+        m["Алкоголь"] = alc
+    return m
+
+
+def _alc(result):
+    return next((s for s in result["streaks"] if s["key"] == "alcohol"), None)
+
+
+def _days(n, start=20):
+    return [f"2026-09-{d:02d}" for d in range(start, start + n)]
+
+
+def test_alcohol_streak_counts_dry_days_with_logged_meals():
+    ds = _days(5)
+    rows = [_row(d, 12000) for d in ds]
+    meals = [_meal(d, "0") for d in ds]
+    s = _alc(vita.build_streaks(rows, meals, [], ds[-1]))
+    assert s["count"] == 5 and s["label"] == "Без алкоголя" and s["status"] == "alive"
+
+
+def test_alcohol_streak_broken_by_a_drinking_day(monkeypatch):
+    monkeypatch.setattr(vita, "STREAK_FREEZE_POOL", 0)
+    ds = _days(5)
+    rows = [_row(d, 12000) for d in ds]
+    meals = [_meal(d, "0") for d in ds]
+    meals[1] = _meal(ds[1], "14.5")                      # бокал вина 21 сентября
+    s = _alc(vita.build_streaks(rows, meals, [], ds[-1]))
+    assert s["count"] == 3 and s["record"] == 3          # после срыва — 3 дня подряд
+    assert s["days"][1]["c"] == "x"
+
+
+def test_alcohol_trace_amount_is_not_a_drink():
+    ds = _days(3)
+    rows = [_row(d, 12000) for d in ds]
+    meals = [_meal(ds[0], "0.3"), _meal(ds[1], "1.0"), _meal(ds[2], "0")]      # кефир и т.п. — следы ≤ 1 г
+    assert _alc(vita.build_streaks(rows, meals, [], ds[-1]))["count"] == 3
+
+
+def test_alcohol_day_without_any_meal_is_paused_not_a_break_and_not_growth():
+    ds = _days(4)
+    rows = [_row(d, 12000) for d in ds]
+    meals = [_meal(ds[0], "0"), _meal(ds[1], "0"), _meal(ds[3], "0")]           # 22-го еда не записана
+    s = _alc(vita.build_streaks(rows, meals, [], ds[-1]))
+    assert s["count"] == 3 and s["days"][2]["c"] == "p"
+
+
+def test_alcohol_streak_paused_by_travel_mode():
+    ds = _days(3)
+    rows = [_row(d, 12000) for d in ds]
+    meals = [_meal(d, "30") for d in ds]                 # в поездке выпитое не записывают/не считаем
+    s = _alc(vita.build_streaks(rows, meals, [], ds[-1], travel_days=set(ds)))
+    assert s is None or s["count"] == 0 or all(x["c"] in ("p", "t") for x in s["days"])
