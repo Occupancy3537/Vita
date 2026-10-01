@@ -1934,9 +1934,9 @@ const B={
   yesterday(snap){if(!snap)return {html:`${top('Вчера')}<p class="empty rise" style="--i:1" style="margin-top:20px">Снимок вчерашнего дня ещё не записан.</p>`};
     const r=snap.ring||{};
     return {html:`${top('Вчера')}
-    <div class="ov-hero rise" style="--i:1"><div class="lbl">${dateFmt(snap.date)}</div><div class="big">${r.score!=null?r.score:'—'}<small>из 100</small></div></div>
+    <div class="ov-hero rise" style="--i:1"><div class="lbl">${dateFmt(snap.date)}</div><div class="big">${r.score!=null?r.score:'—'}<small>из 100</small></div>${snap.provisional?'<p class="ov-sub">Предварительно — итог дня закрепится вечером.</p>':''}</div>
     <div class="rise" style="--i:2;margin-top:14px">${['recovery','sleep','move','food'].map(k=>{const v={recovery:r.recovery_score,sleep:r.sleep_score,move:r.movement_score,food:r.nutrition_score}[k];if(v==null)return'';
-      return row(svg(ICON_BY_SEGMENT[k]),(r.chip_status||{})[k]==='warn'?'amber':'teal',NAME_BY_SEGMENT[k],'',`<span class="rV">${v}</span>`)}).join('')}</div>`}},
+      return row(svg(ICON_BY_SEGMENT[k]),(r.chip_status||{})[k]==='warn'?'amber':'teal',NAME_BY_SEGMENT[k],k==='food'?'приёмы пищи за вчера':'',`<span class="rV">${v}</span>`,k==='food'?'foodyest':'')}).join('')}</div>`}},
 };
 
 const ov=$('#ov'),ovS=$('#ovScreen'),stage=$('#stage'),appEl=$('#app');let fromEl=null,fromKey=null,sheetKey=null,ovAnims=[];
@@ -2170,7 +2170,7 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'macsrc':{haptic();const ps=$('#protSrc');if(ps){ps.hidden=!ps.hidden;t.classList.toggle('on',!ps.hidden)}break}
     case'lever':{haptic();const lv=t.closest('.lever'),on=!lv.classList.contains('open');$$('.lever',ovS).forEach(x=>{x.classList.remove('open');const b=$('.lever-h',x);b&&b.setAttribute('aria-expanded','false')});if(on){lv.classList.add('open');t.setAttribute('aria-expanded','true')}break}
     case'micro':{haptic();const w=t.closest('.hmW'),on=!w.classList.contains('open');$$('.hmW',ovS).forEach(x=>x.classList.remove('open'));w.classList.toggle('open',on);break}
-    case'foodyest':haptic();openSheet('foodYest',null,t);break;
+    case'foodyest':haptic();(FOODT?Promise.resolve():fetchJSON('/vita/topic/food').then(d=>{FOODT=d})).then(()=>openSheet('foodYest',null,t)).catch(()=>toast('Не удалось загрузить питание за вчера'));break;
     case'medpass':haptic();loadMedp().then(mp=>openSheet('medpass',mp,t)).catch(()=>toast('Не удалось загрузить медпаспорт'));break;
     case'pubtoggle':{haptic();const sec=t.closest('.accS'),on=!sec.classList.contains('open');sec.classList.toggle('open',on);t.setAttribute('aria-expanded',on);break}
     case'acc':{haptic();const sec=t.closest('.accS'),on=!sec.classList.contains('open');sec.classList.toggle('open',on);t.setAttribute('aria-expanded',on);drawAcc=on?t.dataset.k:null;break}

@@ -904,14 +904,15 @@ def _historical_day_dicts(rows_tuple: list, rows_flat: list[dict], idx: int,
 # chip_status, ключевые значения чипов (сон/ВСР/энергия), вердикт/гейт.
 # =====================================================================
 
-def write_day_snapshot(cur, day) -> bool:
-    """True — снимок записан, False — на этот день нет строки в
-    health.daily_trends (нечего снимать, например самый первый день истории)."""
+def build_day_snapshot(cur, day) -> Optional[dict]:
+    """Снимок дня {date, ring, chips, gate} из истории health.* — без записи.
+    None — на этот день нет строки в health.daily_trends. Общий расчёт для ночной
+    записи (write_day_snapshot) и для «Вчера» до того, как ночное задание отработало."""
     day_iso = day.isoformat() if hasattr(day, "isoformat") else str(day)
     rows_tuple, rows_flat, meals, targets = _fetch_history(cur)
     idx = next((i for i, (d, _r) in enumerate(rows_tuple) if d.isoformat() == day_iso), None)
     if idx is None:
-        return False
+        return None
 
     today_d, health_d = _historical_day_dicts(rows_tuple, rows_flat, idx, meals, targets)
     scores = _scores(today_d, health_d)
@@ -927,15 +928,25 @@ def write_day_snapshot(cur, day) -> bool:
     }
 
     day_index = _day_index(scores, chips)
+    return {"date": day_iso,
+            "ring": {**scores, "score": day_index, "chip_status": chip_status(scores, chip_norm, chips)},
+            "chips": chips, "gate": gate}
+
+
+def write_day_snapshot(cur, day) -> bool:
+    """True — снимок записан, False — на этот день нет строки в
+    health.daily_trends (нечего снимать, например самый первый день истории)."""
+    snap = build_day_snapshot(cur, day)
+    if snap is None:
+        return False
     cur.execute(
         sql.SQL(
             "INSERT INTO {t} (date, ring, chips, gate, streaks) VALUES (%s, %s, %s, %s, %s) "
             "ON CONFLICT (date) DO UPDATE SET ring = EXCLUDED.ring, chips = EXCLUDED.chips, "
             "gate = EXCLUDED.gate, streaks = EXCLUDED.streaks, ts_recorded = now()"
         ).format(t=sql.Identifier(schema(), "vita_day_snapshot")),
-        (day_iso, json.dumps({**scores, "score": day_index, "chip_status": chip_status(scores, chip_norm, chips)},
-                              ensure_ascii=False),
-         json.dumps(chips, ensure_ascii=False), json.dumps(gate, ensure_ascii=False), None),
+        (snap["date"], json.dumps(snap["ring"], ensure_ascii=False),
+         json.dumps(snap["chips"], ensure_ascii=False), json.dumps(snap["gate"], ensure_ascii=False), None),
     )
     return True
 
@@ -1757,6 +1768,12 @@ def vita_yesterday_endpoint(_: None = Depends(require_session)) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             snap = read_day_snapshot(cur, yesterday)
+            if snap is None:
+                # ночное задание (finalize_yesterday, 21:45) пишет снимок только вечером следующего
+                # дня — до этого считаем тем же расчётом на лету, без записи, с пометкой «предварительно»
+                snap = build_day_snapshot(cur, yesterday)
+                if snap is not None:
+                    snap["provisional"] = True
     if snap is None:
         raise HTTPException(status_code=404, detail="снимок вчерашнего дня не найден")
     return snap

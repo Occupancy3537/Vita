@@ -822,12 +822,6 @@ def test_vita_yesterday_401_without_cookie():
     assert r.status_code == 401
 
 
-def test_vita_yesterday_404_when_no_snapshot(monkeypatch):
-    monkeypatch.setattr(vita, "read_day_snapshot", lambda cur, day: None)
-    r = client.get("/vita/yesterday", cookies=_cookie())
-    assert r.status_code == 404
-
-
 def test_vita_yesterday_200_when_snapshot_exists(monkeypatch):
     monkeypatch.setattr(vita, "read_day_snapshot", lambda cur, day: {"date": str(day), "ring": {}, "chips": {}, "gate": {}})
     r = client.get("/vita/yesterday", cookies=_cookie())
@@ -1576,3 +1570,27 @@ def test_shape_me_uses_the_same_systems_as_medpass():
     assert [s["name"] for s in me["systems"]] == ["Обмен веществ"]          # не «Витамины»
     assert me["systems"][0]["status"] == "watch" and me["systems"][0]["flagged"] == ["Витамин B12"]
     assert [g["name"] for g in labs] == ["Обмен веществ"]
+
+
+# ─────── «Вчера» до ночного снимка (2026-10-01): считаем на лету, 404 только если нет строки в истории ───────
+
+def test_vita_yesterday_falls_back_to_live_snapshot(monkeypatch):
+    live = {"date": "2026-09-30", "ring": {"score": 88}, "chips": {}, "gate": {}}
+    monkeypatch.setattr(vita, "read_day_snapshot", lambda cur, day: None)
+    monkeypatch.setattr(vita, "build_day_snapshot", lambda cur, day: dict(live))
+    r = client.get("/vita/yesterday", cookies=_cookie())
+    assert r.status_code == 200
+    assert r.json()["provisional"] is True and r.json()["ring"]["score"] == 88
+
+
+def test_vita_yesterday_stored_snapshot_is_not_marked_provisional(monkeypatch):
+    stored = {"date": "2026-09-30", "ring": {"score": 80}, "chips": {}, "gate": {}}
+    monkeypatch.setattr(vita, "read_day_snapshot", lambda cur, day: dict(stored))
+    r = client.get("/vita/yesterday", cookies=_cookie())
+    assert r.status_code == 200 and "provisional" not in r.json()
+
+
+def test_vita_yesterday_404_when_no_history_row(monkeypatch):
+    monkeypatch.setattr(vita, "read_day_snapshot", lambda cur, day: None)
+    monkeypatch.setattr(vita, "build_day_snapshot", lambda cur, day: None)
+    assert client.get("/vita/yesterday", cookies=_cookie()).status_code == 404
