@@ -188,6 +188,10 @@ _STARTUP_TASKS: list[tuple[str, Callable[[], None], str]] = [
     # проверка «панель созревает через 3 дня», одна строка в дайджест на
     # панель (не на каждый маркер), молчит, если ничего не подходит под окно.
     ("LAB_REMINDER_ENABLED", lambda: lab_reminder.run_scheduler(), "lab-reminder-scheduler"),
+    # Follow-up по открытым сессиям красных флагов L2/L3 (2026-09-30):
+    # раз в час, один вопрос Владу через 48ч тишины, идемпотентно.
+    # ВЫКЛЮЧЕН по умолчанию — включит Claude после применения миграции 0006.
+    ("RF_FOLLOWUP_ENABLED", lambda: redflag_followup.run_scheduler(), "redflag-followup-scheduler"),
     # «Научный контур» (2026-09-25): единственная цель VISION со статусом «ноль».
     ("RESEARCH_SCAN_ENABLED", lambda: research_scan.run_scheduler(), "research-scan-scheduler"),
     # 2026-09-21: Food diary_v5 — свой бот (vlad_health), свой polling-цикл,
