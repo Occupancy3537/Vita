@@ -75,7 +75,7 @@ def _recent_labs(cur, limit: int = 100) -> list[dict]:
         out_of_range = (lo_f is not None and val_f < lo_f) or (hi_f is not None and val_f > hi_f)
         prev_value: Optional[float] = float(entries[1][1]) if len(entries) > 1 else None
         out.append({
-            "marker": label or key, "value": val_f, "unit": unit,
+            "key": key, "marker": label or key, "value": val_f, "unit": unit,
             "ref_min": lo_f, "ref_max": hi_f, "date": str(ts)[:10],
             "out_of_range": out_of_range, "prev_value": prev_value,
         })

@@ -21,6 +21,7 @@ from typing import Optional
 from psycopg import sql
 
 from app import checks, timeutil
+from app.lab_systems import system_of, system_rank
 from app.dashboard import (
     _SLEEP_MAX_OK,
     _SLEEP_MIN_OK,
@@ -1591,7 +1592,7 @@ def build_doctor(cur, lab=None, panel: int = 0) -> dict:
 # факторам не хранится (ПЛАН СБОРКИ п.17, «НОВОЕ») — есть только сегодняшний.
 # =====================================================================
 
-def shape_me(bio: dict) -> dict:
+def shape_me(bio: dict, labs_systems: Optional[list] = None) -> dict:
     pa = bio.get("phenoage") or {}
     drivers = [d for d in (bio.get("drivers") or []) if d.get("type") != "total" and d.get("years") is not None]
     drivers.sort(key=lambda d: -abs(d["years"]))
@@ -1599,7 +1600,8 @@ def shape_me(bio: dict) -> dict:
     for m in bio.get("biomarkers") or []:
         if m.get("value") is None:
             continue
-        g = groups.setdefault(m.get("group") or "Прочее", {"name": m.get("group") or "Прочее", "n": 0, "out": [], "watch": []})
+        sysname = system_of(m.get("marker_id"))
+        g = groups.setdefault(sysname, {"name": sysname, "n": 0, "out": [], "watch": []})
         g["n"] += 1
         if m.get("in_lab_range") is False:
             g["out"].append(m["label"])
@@ -1609,7 +1611,14 @@ def shape_me(bio: dict) -> dict:
     for g in groups.values():
         status = "out" if g["out"] else ("watch" if g["watch"] else "ok")
         systems.append({"name": g["name"], "n": g["n"], "status": status, "flagged": g["out"] or g["watch"]})
-    systems.sort(key=lambda g: ({"out": 0, "watch": 1, "ok": 2}[g["status"]], g["name"]))
+    systems.sort(key=lambda g: ({"out": 0, "watch": 1, "ok": 2}[g["status"]], system_rank(g["name"])))
+    if labs_systems is not None:
+        # те же группы и те же счётчики, что в Медпаспорте (один источник на оба экрана)
+        systems = [{"name": g["name"], "n": g["n"],
+                    "status": "out" if g["worst"] == "out" else ("watch" if g["worst"] == "watch" else "ok"),
+                    "flagged": [x["marker"] for x in g["items"] if x["grade"] in ("out", "watch")]}
+                   for g in labs_systems]
+        systems.sort(key=lambda g: ({"out": 0, "watch": 1, "ok": 2}[g["status"]], system_rank(g["name"])))
     return {
         "phenoage": {"value": pa.get("value"), "chrono_age": pa.get("chrono_age"), "delta": pa.get("delta"),
                      "date": pa.get("date"), "note": pa.get("note")},
@@ -1623,8 +1632,10 @@ def shape_me(bio: dict) -> dict:
 
 
 def build_me(cur) -> dict:
+    from app import medpassport
     from app.dashboard import get_bioage_dashboard
-    return shape_me(get_bioage_dashboard(cur))
+    bio = get_bioage_dashboard(cur)
+    return shape_me(bio, shape_labs_by_system(bio.get("biomarkers"), medpassport._recent_labs(cur, limit=200), {}))
 
 
 def build_rhythm(cur) -> dict:
@@ -1938,13 +1949,13 @@ def shape_labs_by_system(biomarkers: list[dict], recent_labs: list[dict], recent
 
     for m in biomarkers or []:
         v = _fnum(m.get("value"))
-        add(m.get("group") or "Прочее", m["label"], v, m.get("unit"), m.get("measured_date"),
+        add(system_of(m.get("marker_id")), m["label"], v, m.get("unit"), m.get("measured_date"),
             _fnum(m.get("lab_min")), _fnum(m.get("lab_max")), _fnum(m.get("opt_min")), _fnum(m.get("opt_max")))
     # маркеры без записи в biomarkers (нет каталожного оптимума) — «Прочее»
     for l in recent_labs or []:
         if l["marker"] in seen_labels:
             continue
-        add("Прочее", l["marker"], l["value"], l.get("unit"), l.get("date"),
+        add(system_of(l.get("key")), l["marker"], l["value"], l.get("unit"), l.get("date"),
             l.get("ref_min"), l.get("ref_max"), None, None)
     out = []
     for name, items in groups.items():
@@ -1953,7 +1964,7 @@ def shape_labs_by_system(biomarkers: list[dict], recent_labs: list[dict], recent
         out.append({"name": name, "n": len(items),
                     "ok": sum(1 for x in items if x["grade"] in ("normal", "exc")),
                     "worst": worst, "items": items})
-    out.sort(key=lambda g: (g["name"] == "Прочее", _GRADE_RANK[g["worst"]], g["name"]))
+    out.sort(key=lambda g: (system_rank(g["name"]), g["name"]))
     return out
 
 

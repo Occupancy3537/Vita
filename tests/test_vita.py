@@ -1256,16 +1256,17 @@ def test_shape_me_drivers_sorted_and_systems_grouped():
                     {"label": "Альбумин", "years": -2.1, "type": "neg"}, {"label": "PhenoAge", "years": 32.4, "type": "total"}],
         "history": [{"date": "2026-02-01", "phenoage": 34.0}, {"date": "2026-08-01", "phenoage": 32.4}],
         "biomarkers": [
-            {"label": "АСТ", "group": "Печень", "value": 41, "in_lab_range": False, "in_opt_range": False},
-            {"label": "АЛТ", "group": "Печень", "value": 38, "in_lab_range": True, "in_opt_range": True},
-            {"label": "СРБ", "group": "Воспаление", "value": 2.6, "in_lab_range": True, "in_opt_range": False},
-            {"label": "Глюкоза", "group": "Метаболизм", "value": 4.8, "in_lab_range": True, "in_opt_range": True},
-            {"label": "Пусто", "group": "Метаболизм", "value": None},
+            {"marker_id": "M016", "label": "АСТ", "value": 41, "in_lab_range": False, "in_opt_range": False},
+            {"marker_id": "M015", "label": "АЛТ", "value": 38, "in_lab_range": True, "in_opt_range": True},
+            {"marker_id": "M024", "label": "СРБ", "value": 2.6, "in_lab_range": True, "in_opt_range": False},
+            {"marker_id": "M003", "label": "Глюкоза", "value": 4.8, "in_lab_range": True, "in_opt_range": True},
+            {"marker_id": "M031", "label": "Пусто", "value": None},
         ],
     }
     me = vita.shape_me(bio)
     assert [d["label"] for d in me["drivers"]] == ["Альбумин", "СРБ"]
-    assert [(s["name"], s["status"]) for s in me["systems"]] == [("Печень", "out"), ("Воспаление", "watch"), ("Метаболизм", "ok")]
+    assert [(s["name"], s["status"]) for s in me["systems"]] == [
+        ("Печень и пищеварение", "out"), ("Иммунитет и воспаление", "watch"), ("Обмен веществ", "ok")]
     assert me["systems"][0]["flagged"] == ["АСТ"] and me["systems"][2]["n"] == 1
     assert me["phenoage"]["delta"] == -8.6 and len(me["history"]) == 2
 
@@ -1533,14 +1534,14 @@ def test_lab_grade_one_sided_reference():
 
 def test_shape_labs_groups_sorted_and_zero_lower_bound_is_one_sided():
     bm = [
-        {"label": "Холестерин не-ЛПВП", "group": "Липидный профиль", "value": 3.9, "unit": "ммоль/л",
+        {"marker_id": "M014", "label": "Холестерин не-ЛПВП", "group": "Липидный профиль", "value": 3.9, "unit": "ммоль/л",
          "measured_date": "2026-08-14", "lab_min": 0.0, "lab_max": 3.8, "opt_min": 0.0, "opt_max": 3.4},
-        {"label": "Глюкоза", "group": "Углеводный обмен", "value": 5.0, "unit": "ммоль/л",
+        {"marker_id": "M003", "label": "Глюкоза", "group": "Углеводный обмен", "value": 5.0, "unit": "ммоль/л",
          "measured_date": "2026-08-06", "lab_min": 3.9, "lab_max": 6.0, "opt_min": 4.2, "opt_max": 5.0},
     ]
-    other = [{"marker": "АЧТВ", "value": 32.0, "unit": "сек", "ref_min": None, "ref_max": None, "date": "2026-08-06"}]
+    other = [{"key": "M999", "marker": "Новый маркер", "value": 32.0, "unit": "сек", "ref_min": None, "ref_max": None, "date": "2026-08-06"}]
     out = vita.shape_labs_by_system(bm, other, {})
-    assert [g["name"] for g in out] == ["Липидный профиль", "Углеводный обмен", "Прочее"]  # худшая группа первой, «Прочее» в конце
+    assert [g["name"] for g in out] == ["Сердце и сосуды", "Обмен веществ", "Прочее"]  # порядок систем, «Прочее» в конце
     lip = out[0]
     assert lip["worst"] == "out" and lip["ok"] == 0
     assert "реф. < 3.8" in lip["items"][0]["text"] and "цель < 3.4" in lip["items"][0]["text"]  # 0–X → «< X»
@@ -1555,3 +1556,23 @@ def test_shape_labs_skips_markers_already_in_biomarkers_and_dash_unit():
     out = vita.shape_labs_by_system(bm, dup, {})
     assert len(out) == 1 and out[0]["n"] == 1
     assert out[0]["items"][0]["text"] == "1.1 · реф. < 1.3"
+
+
+# ─────── системы организма: одна карта на Медпаспорт и «Я» (2026-10-01) ───────
+
+def test_every_catalog_marker_has_an_organ_system():
+    from app.lab_catalog import LAB_CATALOG
+    from app.lab_systems import OTHER, SYSTEMS, system_of
+    assert [c for c in LAB_CATALOG if system_of(c) == OTHER] == []
+    assert "ОАК" not in SYSTEMS and "Витамины" not in SYSTEMS  # ОАК/витамины — не системы
+
+
+def test_shape_me_uses_the_same_systems_as_medpass():
+    bm = [{"marker_id": "M034", "label": "Витамин B12", "group": "Витамины", "value": 293.0, "unit": "пмоль/л",
+           "measured_date": "2026-06-18", "lab_min": 177.0, "lab_max": 664.0, "opt_min": 300.0, "opt_max": 650.0,
+           "in_lab_range": True, "in_opt_range": False}]
+    labs = vita.shape_labs_by_system(bm, [], {})
+    me = vita.shape_me({"phenoage": {}, "biomarkers": bm}, labs)
+    assert [s["name"] for s in me["systems"]] == ["Обмен веществ"]          # не «Витамины»
+    assert me["systems"][0]["status"] == "watch" and me["systems"][0]["flagged"] == ["Витамин B12"]
+    assert [g["name"] for g in labs] == ["Обмен веществ"]
