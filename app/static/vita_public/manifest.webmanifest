@@ -4,8 +4,8 @@
   "lang": "ru",
   "display": "fullscreen",
   "display_override": ["fullscreen", "standalone"],
-  "background_color": "#0a1c33",
-  "theme_color": "#0a1c33",
+  "background_color": "#042f55",
+  "theme_color": "#042f55",
   "start_url": "/vita",
   "scope": "/vita",
   "icons": [

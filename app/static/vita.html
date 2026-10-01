@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0a1c33">
+<meta name="theme-color" content="#042f55">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -1545,7 +1545,7 @@ function renderMe(){if(!ME)return;const pa=ME.phenoage||{},h=ME.history||[],dr=M
     html+=`<div class="secH rise" style="--i:4;margin-top:28px"><span class="lbl">Системы</span><span>${okn.length} из ${sy.length} в норме</span></div>`;
     if(bad.length)html+=`<div class="sysGrid rise" style="--i:4">${bad.map(g=>{const out=g.status==='out',k=out?(g.n_out??g.flagged.length):(g.n_watch??g.flagged.length);return `<button class="sysC press" data-a="medpass"><span class="rIc ${out?'warm':'amber'}">${svg(SYS_IC[g.name]||'lab')}</span><b>${esc(SYS_SHORT[g.name]||g.name)}</b><small><i class="${out?'o':'w'}"></i>${k} ${out?'вне референса':'на контроле'}</small></button>`}).join('')}</div>`;
     if(okn.length)html+=`<button class="sysOk press rise" style="--i:5" data-a="medpass"><i></i><span>В норме: ${okn.map(g=>esc((SYS_SHORT[g.name]||g.name).toLowerCase())).join(', ')}</span></button>`}
-  html+=`<div class="rows rise" style="--i:5;margin-top:22px">${row(svg('flame'),'','Серии','рекорды, заморозки, 14 дней','','streaks')}${row(svg('medpass'),'','Медпаспорт','все маркеры и динамика','','medpass')}${row(svg('sun'),'','Тема',document.documentElement.dataset.theme==='dark'?'тёмная':'светлая','','theme')}${row(svg('expand'),'','Полный экран',!fsSupported()?'недоступен на этом устройстве':fsPref()?'включён · системные панели скрыты':'выключен','','fs')}</div>`;
+  html+=`<div class="rows rise" style="--i:5;margin-top:22px">${row(svg('flame'),'','Серии','рекорды, заморозки, 14 дней','','streaks')}${row(svg('medpass'),'','Медпаспорт','все маркеры и динамика','','medpass')}${row(svg('sun'),'','Тема',document.documentElement.dataset.theme==='dark'?'тёмная':'светлая','','theme')}${row(svg('expand'),'','Полный экран',!fsSupported()?'недоступен на этом устройстве':fsActive()?'включён · системные панели скрыты':fsPref()?'включится при касании':'выключен','','fs')}</div>`;
   $('#meBody').innerHTML=html;$$('.rise',$('#s-me')).forEach(e=>e.classList.add('in'));replay($('#bioCard'));
 }
 const ICON_BY_SEGMENT={recovery:'charge',sleep:'moon',move:'steps',food:'bowl'};
@@ -2117,19 +2117,29 @@ function toast(msg,undo){clearTimeout(tt);$('#toastT').textContent=msg;undoFn=un
 tB.addEventListener('click',()=>{haptic();const f=undoFn;tEl.classList.remove('show');f&&f()});
 /* полный экран средствами браузера (Fullscreen API) — запасной путь, если телефон не применил manifest display=fullscreen.
    Включается первым касанием за запуск (браузер требует жест пользователя). По умолчанию — в установленном приложении на телефоне. */
-const FS_KEY='vita-fs';let fsTried=false;
+const FS_KEY='vita-fs';let fsSuppress=false,fsVisAt=0;
 const fsSupported=()=>!!(document.fullscreenEnabled&&document.documentElement.requestFullscreen);
+const fsActive=()=>!!document.fullscreenElement;
 function fsPref(){try{const v=localStorage.getItem(FS_KEY);if(v!==null)return v==='1'}catch(e){}
   return (matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches)&&matchMedia('(pointer: coarse)').matches}
-function fsEnter(){if(!fsSupported()||document.fullscreenElement)return;try{const r=document.documentElement.requestFullscreen({navigationUI:'hide'});r&&r.catch&&r.catch(()=>{})}catch(e){}}
-document.addEventListener('pointerdown',()=>{if(!fsTried&&fsPref()){fsTried=true;fsEnter()}},true);
+function fsEnter(){if(!fsSupported()||fsActive())return;try{const r=document.documentElement.requestFullscreen({navigationUI:'hide'});r&&r.catch&&r.catch(()=>{})}catch(e){}}
+/* Для касаний жестом пользователя считаются pointerup/touchend/click, но не pointerdown. Выпавший полный экран возвращаем следующим касанием. */
+function fsMaybe(){if(fsPref()&&!fsActive()&&!fsSuppress)fsEnter()}
+['pointerup','touchend','click'].forEach(ev=>document.addEventListener(ev,fsMaybe,true));
+/* свернул/развернул — браузер сам выходит из полного экрана; это не «выключил»: после возврата следующее касание включит снова */
+document.addEventListener('visibilitychange',()=>{fsVisAt=Date.now();if(!document.hidden)fsSuppress=false});
+/* вышел сам (жест «назад») при открытом приложении — уважаем, не включаем снова до сворачивания/перезапуска */
+document.addEventListener('fullscreenchange',()=>{
+  if(!fsActive()&&!document.hidden&&Date.now()-fsVisAt>2000)fsSuppress=true;
+  if(fsActive())fsSuppress=false;
+  if(typeof ME!=='undefined'&&ME&&curTab==='me')renderMe()});
 /* цвет системной полосы (статус-бар Android) = цвет верха экрана: на «Сегодня» — тёмно-синее фото, на остальных вкладках — фон приложения; следует за темой */
-function applyBarColor(){let c;
-  if(curTab==='today'&&todayTab.classList.contains('photo'))c='#0a1c33';
-  else{const bg=getComputedStyle(document.body).backgroundColor,m=bg.match(/\d+(\.\d+)?/g);
-    c=m&&m.length>=3?'#'+m.slice(0,3).map(v=>(+v|0).toString(16).padStart(2,'0')).join(''):'#F7F6F3'}
+function applyBarColor(){const hex=bg=>{const m=bg.match(/\d+(\.\d+)?/g);return m&&m.length>=3?'#'+m.slice(0,3).map(v=>(+v|0).toString(16).padStart(2,'0')).join(''):'#F7F6F3'};
+  const bodyBg=hex(getComputedStyle(document.body).backgroundColor),photo=curTab==='today'&&todayTab.classList.contains('photo'),c=photo?'#042f55':bodyBg;
   let el=document.querySelector('meta[name="theme-color"]');if(!el){el=document.createElement('meta');el.name='theme-color';document.head.appendChild(el)}
-  if(el.content!==c)el.content=c}
+  if(el.content!==c)el.content=c;
+  /* зона выреза камеры сверху в полном экране закрашена цветом фото, снизу — цветом фона страницы */
+  document.documentElement.style.background=photo?`linear-gradient(to bottom,${c} 0,${c} 50%,${bodyBg} 50%)`:c}
 function setTheme(mode){document.documentElement.dataset.theme=mode;requestAnimationFrame(applyBarColor);setTimeout(applyBarColor,700);const l=$('#themeLabel');l&&(l.textContent=mode==='dark'?'Тема: тёмная':'Тема: светлая');try{localStorage.setItem('vita-theme',mode)}catch(e){}}
 
 /* ================= ДЕЙСТВИЯ ================= */
@@ -2141,9 +2151,9 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t
     case'index':openSheet('index',null,t);break;
     case'streaks':TRIP_PICK=false;openSheet('streaks',null,t);break;
     case'fs':{haptic();if(!fsSupported()){toast('Этот браузер не умеет полный экран');break}
-      const on=!fsPref();try{localStorage.setItem(FS_KEY,on?'1':'0')}catch(e){}
-      if(on)fsEnter();else if(document.fullscreenElement)document.exitFullscreen();
-      if(typeof ME!=='undefined'&&ME)renderMe();toast(on?'Полный экран включён':'Полный экран выключен');break}
+      if(fsActive()){try{localStorage.setItem(FS_KEY,'0')}catch(e){}document.exitFullscreen();toast('Полный экран выключен')}
+      else{try{localStorage.setItem(FS_KEY,'1')}catch(e){}fsSuppress=false;fsEnter();toast('Полный экран включён')}
+      if(typeof ME!=='undefined'&&ME)setTimeout(()=>{curTab==='me'&&renderMe()},250);break}
     case'labgroup':haptic();openLabGroup(t.dataset.g);break;
     case'drvall':haptic();ME_ALL=!ME_ALL;renderMe();break;
     case'rxmark':haptic();postJSON('/vita/manual-mark',{date:t.dataset.d,field_key:k,value:true}).then(()=>loadToday()).then(()=>{renderChecksTab&&renderChecksTab()}).catch(()=>toast('Не получилось — попробуй ещё раз'));break;
