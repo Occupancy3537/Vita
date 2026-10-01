@@ -3,8 +3,8 @@
   "short_name": "Vita",
   "lang": "ru",
   "display": "standalone",
-  "background_color": "#F5F4F1",
-  "theme_color": "#F5F4F1",
+  "background_color": "#0a1c33",
+  "theme_color": "#0a1c33",
   "start_url": "/vita",
   "scope": "/vita",
   "icons": [

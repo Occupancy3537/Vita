@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#F5F4F1">
+<meta name="theme-color" content="#0a1c33">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -1614,6 +1614,7 @@ const shortDate=iso=>{if(!iso)return'';const d=new Date(iso+'T00:00:00');return 
 const plural=(n,a,b,c)=>{const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&&(h<12||h>14)?b:c};
 
 function renderToday(){
+  applyBarColor();
   sToday.classList.remove('booting');const bs=$('#bootSkel');if(bs)bs.remove();const be=$('#bootErr');if(be)be.hidden=true;
   const st=TODAY.state,v=verdictWord();
   $('#tDate').innerHTML=dateFmt(TODAY.date);
@@ -2096,7 +2097,7 @@ attachPullToRefresh($('#s-me'),()=>loadMe(true).then(renderMe));
 /* ================= ВКЛАДКИ ================= */
 const order=['today','cases','plan','me'];let curTab='today';
 function goTab(k,force){if(k===curTab&&!force)return;haptic();
-  $('#stage').style.setProperty('--dir',order.indexOf(k)>=order.indexOf(curTab)?1:-1);curTab=k;
+  $('#stage').style.setProperty('--dir',order.indexOf(k)>=order.indexOf(curTab)?1:-1);curTab=k;applyBarColor();
   const nt=$(`.tab[data-tab="${k}"]`);nt.classList.add('from');void nt.offsetWidth;nt.classList.remove('from');
   $$('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===k));
   $('#tbPill').style.transform=`translateX(${order.indexOf(k)*100}%)`;
@@ -2112,7 +2113,14 @@ $('#tabbar').addEventListener('keydown',e=>{if(e.key!=='ArrowLeft'&&e.key!=='Arr
 let tt,undoFn=null;const tEl=$('#toast'),tB=$('#toastB');
 function toast(msg,undo){clearTimeout(tt);$('#toastT').textContent=msg;undoFn=undo||null;tB.style.display=undo?'':'none';tEl.classList.add('show');tt=setTimeout(()=>tEl.classList.remove('show'),3600)}
 tB.addEventListener('click',()=>{haptic();const f=undoFn;tEl.classList.remove('show');f&&f()});
-function setTheme(mode){document.documentElement.dataset.theme=mode;const l=$('#themeLabel');l&&(l.textContent=mode==='dark'?'Тема: тёмная':'Тема: светлая');try{localStorage.setItem('vita-theme',mode)}catch(e){}}
+/* цвет системной полосы (статус-бар Android) = цвет верха экрана: на «Сегодня» — тёмно-синее фото, на остальных вкладках — фон приложения; следует за темой */
+function applyBarColor(){let c;
+  if(curTab==='today'&&todayTab.classList.contains('photo'))c='#0a1c33';
+  else{const bg=getComputedStyle(document.body).backgroundColor,m=bg.match(/\d+(\.\d+)?/g);
+    c=m&&m.length>=3?'#'+m.slice(0,3).map(v=>(+v|0).toString(16).padStart(2,'0')).join(''):'#F7F6F3'}
+  let el=document.querySelector('meta[name="theme-color"]');if(!el){el=document.createElement('meta');el.name='theme-color';document.head.appendChild(el)}
+  if(el.content!==c)el.content=c}
+function setTheme(mode){document.documentElement.dataset.theme=mode;requestAnimationFrame(applyBarColor);setTimeout(applyBarColor,700);const l=$('#themeLabel');l&&(l.textContent=mode==='dark'?'Тема: тёмная':'Тема: светлая');try{localStorage.setItem('vita-theme',mode)}catch(e){}}
 
 /* ================= ДЕЙСТВИЯ ================= */
 document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(!t)return;const a=t.dataset.a,k=t.dataset.k;
